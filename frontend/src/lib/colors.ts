@@ -35,6 +35,11 @@ export const STAGE_LABELS: Record<string, string> = {
   speaker: "Speaker attribution",
 };
 
+/** Model series on charts (live evaluation), in fixed order. Validated for the dark panel surface
+ * (lightness band, chroma, CVD and contrast; dataviz validate_palette.js). Never cycled: a fifth
+ * model is listed in the table only. */
+export const MODEL_SERIES = ["#0891B2", "#EA580C", "#6366F1", "#B98004"];
+
 /** Stable colour per speaker name within one view: index in the sorted name list. */
 export function speakerColors(names: string[]): Record<string, string> {
   const sorted = [...new Set(names)].sort();

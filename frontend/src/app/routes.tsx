@@ -14,6 +14,11 @@ import { AddModel } from "../features/models/AddModel";
 import { ContractPage } from "../features/models/ContractPage";
 import { ModelsPage } from "../features/models/ModelsPage";
 import { JobsPage } from "../features/jobs/JobsPage";
+import { AnnotatePage, OpenFile } from "../features/label/Annotate";
+import { LiveEvalPage } from "../features/label/LiveEval";
+import { PseudoLabelPage } from "../features/label/PseudoLabel";
+import { ReviewConsole } from "../features/label/ReviewConsole";
+import { SyncPage } from "../features/label/SyncPage";
 import { useFeature } from "../lib/config";
 
 // Improve (Phase 3) is a separate chunk; a lite build (VITE_FEATURE_IMPROVE=0) never references it.
@@ -63,6 +68,15 @@ export const router = createBrowserRouter([
       { path: "errors/asr/:runId", element: <AsrErrors /> },
       { path: "errors/diar/:runId", element: <DiarErrors /> },
       { path: "errors/pipeline/:runId", element: <PipelineErrors /> },
+      { path: "label", element: <ReviewConsole /> },
+      { path: "label/pseudo", element: <PseudoLabelPage /> },
+      { path: "label/pseudo/:datasetId", element: <PseudoLabelPage /> },
+      { path: "label/annotate", element: <AnnotatePage /> },
+      { path: "label/annotate/:datasetId", element: <AnnotatePage /> },
+      { path: "label/file/:fileId", element: <OpenFile /> },
+      { path: "label/live", element: <LiveEvalPage /> },
+      { path: "label/live/:datasetId", element: <LiveEvalPage /> },
+      { path: "label/sync", element: <SyncPage /> },
       { path: "datasets", element: <DatasetsPage /> },
       { path: "datasets/upload", element: <UploadDataset /> },
       { path: "datasets/:id", element: <DatasetDetail /> },

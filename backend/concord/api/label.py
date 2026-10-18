@@ -122,10 +122,12 @@ def label_results(dataset_id: int, session: Session = Depends(get_session)) -> d
         job = session.scalar(select(Job).where(Job.type == "label").where(Job.payload["run_id"].as_integer() == run.id)
                              .order_by(Job.id.desc()))
     names = {m.registry_name: m.display_name for m in session.scalars(select(Model))}
+    seg = session.get(Model, run.params.get("seg_model_id") or -1) if run else None
     prog = console.progress(session, [ds])[ds.id]
     return {"dataset": dataset_json(session, ds), "run": run_json(run) if run else None,
             "job": job_brief(job) if job else None,
             "summary": (run.outputs or {}).get("summary") if run else None, "model_names": names,
+            "segmenter": seg.display_name if seg else None,
             "progress": prog, "next": console.next_action(ds, prog), "queue": _queue(session, ds.id)}
 
 

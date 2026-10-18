@@ -385,3 +385,208 @@ export interface Peaks {
   min: number[];
   max: number[];
 }
+
+// ---------------------------------------------------------------- Label (Phase 2)
+
+export type SegStatus = "pseudo" | "auto" | "confirmed" | "rejected";
+export type BarKey = "confirmed" | "auto" | "review" | "rejected" | "running" | "unlabelled";
+
+export interface LabelProgress {
+  bar: Record<BarKey, number>;
+  seconds: number;
+  segments: Record<"confirmed" | "auto" | "review" | "rejected", number>;
+  files: { labelled: number; unlabelled: number };
+  sources: string[];
+  tasks: string[];
+  flagged: number;
+  running: boolean;
+}
+
+export interface NextAction {
+  kind: "running" | "pseudo" | "review" | "live";
+  label: string;
+  status?: SegStatus;
+}
+
+export interface ConsoleRow {
+  id: number;
+  name: string;
+  tags: string[];
+  language: string | null;
+  mode: string;
+  label_types: string[];
+  label_source: string;
+  tasks: string[];
+  hours: number | null;
+  progress: LabelProgress;
+  next: NextAction;
+  label_run: { id: number; status: string } | null;
+  created_at: string;
+}
+
+export interface PreviewMember {
+  model_id: number;
+  name: string;
+  service: string;
+  timing_level: string | null;
+  cached_cuts: number;
+  known_cuts: number;
+  files_without_segments: number;
+  state: "saved" | "partial" | "new";
+}
+
+export interface LabelPreview {
+  files: number;
+  seg: { model_id: number; name: string; service: string; cached_files: number; state: "saved" | "partial" | "new" };
+  members: PreviewMember[];
+  saved_members: number;
+  new_members: number;
+}
+
+export interface Segment {
+  id: number;
+  uid: string;
+  file_id: number;
+  start: number;
+  end: number;
+  speaker: string | null;
+  text: string | null;
+  status: SegStatus;
+  confidence: number | null;
+  source_run_id: number | null;
+  flagged: boolean;
+  flag_note: string | null;
+  reviewed: boolean;
+  edited_at: string | null;
+  updated_at: string | null;
+  chosen: string | null;
+  agreement: Record<string, number> | null;
+  words: { w: string; start: number; end: number }[] | null;
+  alternatives?: { service: string; model: string; text: string }[];
+  file?: string;
+}
+
+export interface LabelSummary {
+  segments: number;
+  files: number;
+  triage: Partial<Record<SegStatus, number>>;
+  kept_reviewed: number;
+  replaced: number;
+  agreement: { members: string[]; cells: { ref: string; hyp: string; wer: number | null; n: number }[] };
+  chosen: { member: string; n: number; share: number | null }[];
+  strategy_applied: Record<string, number>;
+  thresholds: { high: number; low: number };
+}
+
+export interface LabelResults {
+  dataset: Dataset;
+  run: Run | null;
+  job: Job | null;
+  summary: LabelSummary | null;
+  model_names: Record<string, string>;
+  segmenter: string | null;
+  progress: LabelProgress;
+  next: NextAction;
+  queue: Segment[];
+}
+
+export interface LabelFile {
+  id: number;
+  path: string;
+  stem: string;
+  duration: number | null;
+  status: string;
+  usable: boolean;
+  counts: { confirmed: number; auto: number; review: number; rejected: number; flagged: number };
+}
+
+export interface AnnotateView {
+  file: { id: number; path: string; stem: string; duration: number; status: string; dataset_id: number; meta: Record<string, unknown> };
+  dataset: { id: number; name: string; language: string | null };
+  segments: Segment[];
+  speakers: string[];
+  keywords: unknown[];
+  thresholds: { high: number; low: number };
+  prev_file_id: number | null;
+  next_file_id: number | null;
+  position: { index: number; of: number };
+}
+
+export interface LiveModel {
+  model_id: number;
+  name: string;
+  service: string;
+  coverage: number;
+  words: number;
+  wer: number | null;
+  ci: [number, number] | null;
+  curve: { confirmed: number; wer: number | null }[];
+  locked: { wer: number | null; dataset_id: number; run_id: number; normaliser: string; promoted: boolean } | null;
+  rank: number | null;
+}
+
+export interface LiveEval {
+  dataset: { id: number; name: string };
+  asr: { normaliser: string; confirmed: number; min_rank: number; ranked: boolean; models: LiveModel[] };
+  der: { files: number; of: number; collar: number; models: { model_id: number; name: string; der: number | null; jer: number | null; files: number }[] };
+  kws: { available: boolean };
+  feed: { id: number; file_id: number; file: string; start: number; end: number; speaker: string | null; text: string | null; confirmed_at: string }[];
+}
+
+export interface SyncPackage {
+  id: number;
+  direction: "export" | "import";
+  status: "built" | "staged" | "applied" | "undone";
+  dataset_id: number | null;
+  dataset_name: string | null;
+  scope: Record<string, unknown>;
+  counts: Record<string, unknown> & { files?: number; segments?: number; by_status?: Record<string, number>; outcome?: Record<string, number> };
+  include: { pseudo_labels: boolean; model_outputs: boolean; audio: boolean } | null;
+  source_install: string | null;
+  created_at: string;
+  applied_at: string | null;
+  undone_at: string | null;
+  conflicts_open: number;
+  conflicts: number;
+  file: string | null;
+}
+
+export interface PkgSegment {
+  uid?: string;
+  file_sha256: string;
+  start: number;
+  end: number;
+  speaker: string | null;
+  text: string | null;
+  status: string;
+  confidence: number | null;
+  source: string;
+  reviewed?: boolean;
+  updated_at: string | null;
+}
+
+export interface Conflict {
+  key: string;
+  file_sha256: string;
+  local: PkgSegment & { id: number };
+  incoming: PkgSegment;
+  resolution: "incoming" | "local" | null;
+}
+
+export interface ImportStaged extends SyncPackage {
+  manifest: Record<string, unknown> & { dataset?: { name: string; language: string | null; tags: string[] }; created_at?: string; install_id?: string };
+  suggestions?: { dataset_id: number; name: string; matched_files: number; package_files: number; same_name: boolean }[];
+  conflict_list?: Conflict[];
+  rules?: { outcome: string; rule: string }[];
+}
+
+export interface ImportPlan {
+  target: { id: number; name: string } | null;
+  files: { path: string; sha256: string; duration: number | null; sample_rate: number | null; outcome: string }[];
+  file_counts: Record<string, number>;
+  counts: Record<string, number>;
+  rows: { outcome: string; reason?: string; incoming: PkgSegment; local?: PkgSegment & { id: number } }[];
+  truncated: boolean;
+  conflicts: Conflict[];
+  rules: { outcome: string; rule: string }[];
+}

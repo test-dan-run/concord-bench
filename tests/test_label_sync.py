@@ -147,6 +147,15 @@ def test_fresh_install_from_package_with_audio(labelled, client, tmp_path, monke
     assert _ok(client.get(f"/api/label/datasets/{d['id']}/files")) == []
 
 
+def test_upload_without_zip_extension(labelled, client, tmp_path):
+    """Browsers can hand over a download under another name; the package is found by its content."""
+    _, blob = export(client, labelled["unlabelled"])
+    uid = client.post("/api/uploads").json()["upload_id"]
+    _ok(client.post(f"/api/uploads/{uid}/files", files=[("files", ("3f2a9c-download", blob))]))
+    staged = _ok(client.post("/api/sync/imports", json={"upload_id": uid}), 201)
+    assert staged["counts"]["segments"] == labelled["results"]["summary"]["segments"]
+
+
 @pytest.mark.parametrize("payload", [b"not a zip", None])
 def test_bad_packages(client, tmp_path, payload):
     if payload is None:

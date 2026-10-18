@@ -12,7 +12,7 @@ import { ExpandCell, SortableTable } from "../../components/SortableTable";
 import { ErrorLegend, Timeline, type LaneGroup } from "../../components/Timeline";
 import { lanesBySpeaker } from "../../components/timelineMath";
 import * as I from "../../components/icons";
-import { Bar, Button, Chip, ErrorNote, PageHeader, Panel, Select, Spinner } from "../../components/ui";
+import { Bar, Chip, ErrorNote, LinkButton, PageHeader, Panel, Select, Spinner } from "../../components/ui";
 import { Crumbs, latestRuns, RunPickers, Switcher, useDoneRuns, useSwitchLinks } from "./common";
 
 interface Summary {
@@ -274,9 +274,11 @@ function FileDetailView({ id, modelName }: { id: number; modelName: string }) {
       <div className="flex flex-col gap-3 bg-panel border border-track rounded-md p-3 min-w-0">
         <AudioPlayer ctl={ctl} start={0} end={f.duration} errorSpans={f.largest.map((e) => [e.start, e.end])} label="Play file" />
         <Timeline fileId={f.file_id} t0={0} t1={f.duration} groups={groups} errors={f.errors} overlaps={f.overlaps} time={ctl.time} onSeek={(t) => ctl.play(t)} />
-        <Button size="sm" disabled title="The annotator arrives in Phase 2" className="self-start">
-          <I.Pen size={13} /> Open in annotator
-        </Button>
+        <span className="self-start">
+          <LinkButton to={`/label/file/${f.file_id}`}>
+            <I.Pen size={13} /> Open in annotator
+          </LinkButton>
+        </span>
       </div>
       <div className="flex flex-col gap-4">
         {Object.keys(f.mapping).length > 0 && (

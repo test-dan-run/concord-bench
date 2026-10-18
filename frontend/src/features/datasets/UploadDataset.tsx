@@ -101,7 +101,7 @@ export function UploadDataset() {
         {(
           [
             ["annotated", "Audio + annotations", "Transcripts and/or speaker labels: becomes a benchmark dataset."],
-            ["audio_only", "Audio only", "Stored now. Pseudo-labelling and review arrive in Phase 2."],
+            ["audio_only", "Audio only", "Stored now, then pseudo-labelled with model ensembles and reviewed in Label."],
           ] as const
         ).map(([m, title, body]) => (
           <button
@@ -220,7 +220,7 @@ export function UploadDataset() {
             </Panel>
           ) : (
             <Panel title="After upload">
-              <span className="text-[13px] text-muted">Unlabelled audio can't be benchmarked until it has reference labels. Pseudo-labelling with model ensembles and review arrive in Phase 2; the dataset is stored now.</span>
+              <span className="text-[13px] text-muted">Unlabelled audio can't be benchmarked until it has reference labels. After upload, pseudo-label it with a model ensemble, review the result, then promote the confirmed segments to a benchmark dataset.</span>
             </Panel>
           )}
         </div>

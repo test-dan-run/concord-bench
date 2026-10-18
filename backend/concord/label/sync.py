@@ -246,7 +246,8 @@ def stage(session: Session, source: Path) -> SyncPackage:
     dest.mkdir(parents=True)
     try:
         if source.is_dir():
-            zips = sorted(source.glob("*.zip"))
+            # an upload folder holding the package: recognised by content (browsers may drop the .zip name)
+            zips = sorted(p for p in source.iterdir() if p.is_file() and zipfile.is_zipfile(p))
             if zips and not (source / "manifest.json").exists():
                 _extract(zips[0], dest)
             else:

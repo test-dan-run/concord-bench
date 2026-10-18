@@ -4,7 +4,8 @@ For one segment, every ASR member gives a hypothesis. Comparison always happens 
 normaliser, so case and punctuation never count as disagreement; the text written to the segment is
 the raw text (what an annotator wants to start from).
 
-- best-aligned: the member hypothesis with the lowest summed WER to the other members.
+- best-aligned: the member hypothesis with the lowest summed WER to the other members (ties go to a
+  word-timed member).
 - ROVER: word-timed members only. Their words are aligned to a backbone (the best-aligned word-timed
   member) and each slot is decided by vote, ties going to the backbone. With fewer than two word-timed
   members the segment falls back to best-aligned.
@@ -63,7 +64,9 @@ def agreement(ref: str, hyp: str) -> float:
 
 
 def best_aligned(hyps: list[Hyp]) -> int:
-    """Index of the hypothesis with the lowest summed WER to the others (first one on ties)."""
+    """Index of the hypothesis with the lowest summed WER to the others. Ties (common with two members of
+    the same length, whose costs are then symmetric) go to a word-timed member, whose times make splits
+    exact, then to the first one."""
     if len(hyps) == 1:
         return 0
     costs = []
@@ -74,7 +77,7 @@ def best_aligned(hyps: list[Hyp]) -> int:
                 e, n = errors(o.norm, h.norm)
                 c += e / n if n else float(e > 0)
         costs.append(c)
-    return min(range(len(hyps)), key=lambda i: (costs[i], i))
+    return min(range(len(hyps)), key=lambda i: (round(costs[i], 9), not hyps[i].words, i))
 
 
 # ---------------------------------------------------------------- ROVER

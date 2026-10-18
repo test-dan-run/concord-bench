@@ -4,7 +4,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { api, type Dataset, type Run } from "../../lib/api";
 import { ago, clock, hours, num } from "../../lib/format";
 import { TagInput } from "../../components/TagInput";
-import { Button, Chip, Empty, ErrorNote, Fact, JobPill, PageHeader, Panel, Spinner, StatusDot } from "../../components/ui";
+import { Button, Chip, Empty, ErrorNote, Fact, JobPill, LinkButton, PageHeader, Panel, Spinner, StatusDot } from "../../components/ui";
 import { PlanPanel, planCount, type PlanValue } from "../benchmarks/PlanPanel";
 
 interface FileRow {
@@ -57,9 +57,16 @@ export function DatasetDetail() {
         title={d.name}
         subtitle={d.description ?? undefined}
         actions={
-          <Button variant="danger" size="sm" onClick={() => confirm(`Delete dataset “${d.name}” and its runs? Original audio files stay on disk.`) && del.mutate()}>
-            Delete
-          </Button>
+          <>
+            {d.status === "ready" && (
+              <LinkButton to={d.mode === "audio_only" ? `/label/pseudo/${d.id}` : `/label/annotate/${d.id}`} variant={d.mode === "audio_only" ? "primary" : "outline"}>
+                {d.mode === "audio_only" ? "Pseudo-label" : "Open in annotator"}
+              </LinkButton>
+            )}
+            <Button variant="danger" size="sm" onClick={() => confirm(`Delete dataset “${d.name}” and its runs? Original audio files stay on disk.`) && del.mutate()}>
+              Delete
+            </Button>
+          </>
         }
       />
       {d.status === "ingesting" && job && (

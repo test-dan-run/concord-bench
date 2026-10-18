@@ -12,7 +12,7 @@ import { ExpandCell, SortableTable } from "../../components/SortableTable";
 import { Timeline } from "../../components/Timeline";
 import { viewAround } from "../../components/timelineMath";
 import * as I from "../../components/icons";
-import { Bar, Button, Chip, cx, Empty, ErrorNote, PageHeader, Panel, Select, Spinner } from "../../components/ui";
+import { Bar, Button, Chip, cx, Empty, ErrorNote, LinkButton, PageHeader, Panel, Select, Spinner } from "../../components/ui";
 import { Crumbs, latestRuns, RunPickers, Switcher, useDoneRuns, useSwitchLinks } from "./common";
 
 interface Summary {
@@ -322,14 +322,14 @@ function UtteranceDetailView({ id, timing }: { id: number; timing: string | null
           ))}
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button disabled title="The annotator arrives in Phase 2">
+          <LinkButton to={`/label/file/${u.file_id}${u.segment_id ? `?segment=${u.segment_id}` : ""}`}>
             <I.Pen size={14} /> Open in annotator
-          </Button>
+          </LinkButton>
           <Button variant={u.flagged ? "danger" : "outline"} disabled={!u.segment_id || flag.isPending} onClick={() => flag.mutate(!u.flagged)} aria-pressed={!!u.flagged}>
             <I.Flag size={14} /> {u.flagged ? "Reference flagged — unflag" : "Flag reference as wrong"}
           </Button>
         </div>
-        {u.flagged && <span className="text-xs text-warn">Flagged references are kept for review in Phase 2; scores still use them.</span>}
+        {u.flagged && <span className="text-xs text-warn">Flagged references show in the annotator's flags lane; scores still use them until you change them.</span>}
         {errs.length === 0 && u.others.length === 0 && <Empty>Nothing more to show.</Empty>}
       </div>
     </div>

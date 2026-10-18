@@ -269,9 +269,10 @@ Build the shared components first; Phase 2 reuses them.
 
 ---
 
-## 6. Phase 2 — Label (outline)
+## 6. Phase 2 — Label
 
-Builds on M4's output cache and M6's timeline/table components.
+Builds on M4's output cache and M6's timeline/table components. **Built on 2026-10-18** (branch
+`phase-2-label`); §6.6 records the decisions taken while building it.
 
 1. **Review console**: one dataset table with a stacked status bar from `segment.status` counts, next action, filters, search.
 2. **Ensemble pseudo-labelling**:
@@ -294,6 +295,23 @@ Builds on M4's output cache and M6's timeline/table components.
 **KWS in Phase 2**: the keyword lane, *Keywords* focus, keyword chips and KWS cards depend on the KWS decision. Revisit before Phase 2 starts. Until then, the package format keeps `keywords.jsonl` (empty) so packages stay forward-compatible.
 
 Rule kept from day one: confirmed and auto segments live in `segment` with `source_run_id`, so Improve can read them without Label importing Improve.
+
+### 6.6 Decisions taken while building (2026-10-18)
+
+| Topic | Decision |
+|---|---|
+| KWS in Phase 2 | Still hooks only (Q6 open): Keywords focus and task shown disabled, `keywords.jsonl` empty. |
+| Segment source for pseudo-labels | One VAD / diarisation model per run, cut with the pipeline's `prepare_cuts`, so saved pipeline outputs are cache hits. A speakers task needs a diariser. |
+| Pseudo-label runs | A `run` row with task `label` (the `PseudoLabelRun` of HANDOFF §6); `segment.source_run_id` points at it. Services are started only for members not fully in the cache. |
+| Segment times | Pseudo-label segments keep the seg model's unpadded turn times; the padded ASR span is in `segment.meta`. Benchmarking a promoted dataset therefore runs ASR on the new spans. |
+| Best-aligned ties | Go to a word-timed member (its word times make splits exact). |
+| Confidence | Mean agreement (1 − WER, clipped) of the starting hypothesis with the other members; none with a single member, which always goes to review. |
+| Reviewed work | Confirmed, or touched by a person (`segment.edited_at`). Re-running pseudo-labelling replaces only untouched machine segments and drops new ones that overlap reviewed work by more than half. |
+| Progress bar unit | Audio time; a file's duration is split across its segments' statuses. |
+| Live evaluation | Saved outputs only (exact span, else the member output stored on the segment); DER on fully reviewed files; the locked score is the latest on a promoted dataset, else on the dataset itself. |
+| Promotion | Scope "complete" (fully reviewed files, ASR + DER) by default, or "any" (ASR only). |
+| Package format | As HANDOFF §4, plus `uid` and `reviewed` per segment so the same segment is recognised across installs (matching falls back to IoU >= 0.5). Deletions are not carried. |
+| Merge of two unreviewed versions | Newer wins. Unresolved conflicts keep the local version and stay open in History. Undo is allowed on the latest applied import of a dataset. |
 
 ---
 

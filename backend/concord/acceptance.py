@@ -97,3 +97,26 @@ def run_flow(client, staging: Path, asr_models: list[str] | None = None, seg_mod
         cp = f"{c['cpwer']:.3f}" if c["cpwer"] is not None else "n/a"
         log(f"PIPE {c['label']}: cpWER {cp}  WER {c['wer']:.3f}  RTF {c['rtf']:.3f}")
     return out
+
+
+def run_label_flow(client, staging: Path, flow: dict[str, Any], log: Callable[[str], None] = print) -> dict[str, Any]:
+    """Phase 2 on top of `run_flow`: an audio-only copy of the fixture audio, pseudo-labelled by
+    pyannote -> both Whispers. The pipeline runs above saved every output it needs, so no inference."""
+    if staging.exists():
+        shutil.rmtree(staging)
+    shutil.copytree(FIXTURES / "dataset" / "audio", staging / "audio")
+    created = _ok(client.post("/api/datasets", json={"name": "Unlabelled calls", "language": "en",
+                                                     "tags": ["call-centre"], "local_path": str(staging)}), 201)
+    ds_id = created["dataset"]["id"]
+    jobs.run_pending()
+    ids = {n: m["id"] for n, m in flow["models"].items()}
+    started = _ok(client.post(f"/api/label/datasets/{ds_id}/runs", json={
+        "tasks": ["asr", "diar"], "seg_model_id": ids["pyannote-diarization"],
+        "asr_model_ids": [ids[n] for n in ASR_MODELS]}), 202)
+    jobs.run_pending()
+    job = _ok(client.get(f"/api/jobs/{started['job']['id']}"))
+    if job["status"] != "done":
+        raise AssertionError(f"label run {job['status']}: {job['error']}")
+    res = _ok(client.get(f"/api/label/datasets/{ds_id}/results"))
+    log(f"label dataset {ds_id}: {res['summary']['segments']} segments, triage {res['summary']['triage']}")
+    return {"dataset_id": ds_id, "results": res}

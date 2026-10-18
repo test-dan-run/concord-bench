@@ -20,6 +20,12 @@ def test_best_aligned_picks_the_consensus():
     assert set(f.agreement) == {"a", "b", "c"} - {f.chosen}
 
 
+def test_best_aligned_ties_prefer_word_times():
+    # two same-length members tie (symmetric costs): the word-timed one starts, whatever the order
+    assert best_aligned([Hyp("a", "call me back"), timed("b", "call me bach")]) == 1
+    assert best_aligned([timed("a", "call me back"), Hyp("b", "call me bach")]) == 0
+
+
 def test_case_and_punctuation_are_not_disagreement():
     f = fuse([Hyp("a", "Hello, Riverside dental."), Hyp("b", "hello riverside dental")])
     assert f.confidence == pytest.approx(1.0)

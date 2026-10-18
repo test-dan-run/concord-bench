@@ -1,8 +1,8 @@
 # Concord
 
-Evaluate speech models (ASR, VAD / speaker diarisation) served by the personal AI platform, on
-datasets you upload. Phase 1 (Evaluate + Bring your own) is built; Label (Phase 2) and Improve
-(Phase 3) are not. [HANDOFF.md](HANDOFF.md) says what to build, [PLAN.md](PLAN.md) how.
+Evaluate and label speech models (ASR, VAD / speaker diarisation) served by the personal AI platform,
+on datasets you upload. Phase 1 (Evaluate + Bring your own) and Phase 2 (Label) are built; Improve
+(Phase 3) is not. [HANDOFF.md](HANDOFF.md) says what to build, [PLAN.md](PLAN.md) how.
 
 Concord does not run models. It reads the platform's endpoint map through `aicore`, starts the
 services a job needs with the platform's own `tools/stack.py`, and calls them over their contracts.
@@ -36,6 +36,8 @@ backend/concord/
   runs/        job queue + worker, executor (ASR, seg, pipelines), output cache, scoring
   metrics/     normalisers, wer (jiwer), der/jer + vad (pyannote.metrics), cpwer (meeteval), rtf, attribution
   analysis/    top words, substitution pairs, slices, diarisation cards, tag-overlap suggestions
+  label/       Phase 2: ensemble fusion, pseudo-label runs, console, annotate edits, live evaluation,
+               promotion, label packages (import / export)
   api/         FastAPI routers
   migrations/  Alembic
 backend/concord_improve/   Phase 3 placeholder router; only in concord-full
@@ -67,6 +69,30 @@ tests/         pytest; `-m live` for tests against running services
 - **Metrics.** WER/CER via jiwer after a normaliser (`basic` default, `whisper_en`, `none`, or any
   platform `text.transform` service followed by `basic`). DER/JER/VAD via pyannote.metrics with a
   NIST-style collar (seconds each side, default 0.25 s). cpWER via meeteval.
+
+## Label (Phase 2)
+
+- **Review console** (`/label`): label progress per dataset in audio time (confirmed / auto-accepted /
+  needs review / rejected / running / not labelled) and the next action.
+- **Pseudo-label**: segments come from one VAD / diarisation model, cut exactly like a pipeline's, and
+  every ASR member transcribes each cut. Outputs saved by earlier runs (benchmarks, pipelines, other
+  label runs) are reused, so re-fusing needs no service at all. Fusion: best-aligned hypothesis
+  (default), ROVER over word-timed members, or one model. Confidence = member agreement; triage
+  >= 0.85 auto-accept, 0.50–0.84 review, below rejected. Pseudo-labels go into `segment` with the
+  label run as `source_run_id`.
+- **Annotate**: whole-file timeline (one lane per speaker, overlap hatch, flags lane), segment grid with
+  shift-click multi-select and a bulk bar, inline transcript editing with autosave, speaker pill
+  cycling, merge / split / add. Shortcuts: Space, Tab, 1–8, V, M, Enter. Any edit marks the segment
+  as touched by a person; pseudo-labelling never replaces it afterwards.
+- **Live evaluation**: WER of each model against confirmed segments (from saved outputs only),
+  "too few to rank" below 30, bootstrap 95% intervals, the locked benchmark score, DER on fully
+  reviewed files, the latest confirmations. **Promote** copies confirmed segments into a new,
+  benchmarkable dataset; auto-accepted labels never become references.
+- **Import / export**: label packages (`manifest.json`, `files.csv`, `segments.jsonl`,
+  `keywords.jsonl`, optional `runs/` and `audio/`). Import is staged and previewed; files match by
+  SHA-256, segments by `uid` or time overlap. Reviewed work is never overwritten by pseudo-labels,
+  reviewed-on-both-sides differences become conflicts to resolve, and a snapshot taken before the
+  merge makes it undoable.
 
 ## Settings
 
@@ -101,10 +127,14 @@ mounts. In development, run Concord on the host instead.
 
 ## Status
 
-Phase 1 milestones M0–M7 are implemented; see "Known limits" below and PLAN §10 for open questions.
+Phase 1 milestones M0–M7 and Phase 2 (PLAN §6) are implemented; see "Known limits" below and PLAN
+§10 for open questions.
 
 Known limits:
 - KWS is not built (Q6). Only its hooks exist: the enums, the `keyword_event` table, task-keyed
-  registries and a task-driven benchmark tab bar.
-- Phase 2 items are visible but disabled: Label nav entries, "Open in annotator".
+  registries, a task-driven benchmark tab bar, the disabled Keywords focus in Annotate and an empty
+  `keywords.jsonl` in label packages.
+- Label packages do not carry deletions: a segment deleted on one side comes back if the other side
+  still has it.
+- "Use for retraining" (full image only) is shown but disabled until Phase 3 is scoped (Q5).
 - The fixture set is synthesised speech (kokoro-tts): good for correctness, not realism.

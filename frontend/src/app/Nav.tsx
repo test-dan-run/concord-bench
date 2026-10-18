@@ -6,7 +6,7 @@ import { IfFeature, useConfig } from "../lib/config";
 import * as I from "../components/icons";
 import { cx } from "../components/ui";
 
-function Item({ to, icon, children, disabled, hint }: { to: string; icon: ReactNode; children: ReactNode; disabled?: boolean; hint?: string }) {
+function Item({ to, icon, children, disabled, hint, prefix }: { to: string; icon: ReactNode; children: ReactNode; disabled?: boolean; hint?: string; prefix?: boolean }) {
   if (disabled) {
     return (
       <span aria-disabled title={hint} className="flex items-center gap-2.5 px-2.5 min-h-10 rounded-md text-subtle cursor-not-allowed select-none whitespace-nowrap">
@@ -18,7 +18,7 @@ function Item({ to, icon, children, disabled, hint }: { to: string; icon: ReactN
   return (
     <NavLink
       to={to}
-      end
+      end={!prefix}
       className={({ isActive }) =>
         cx("flex items-center gap-2.5 px-2.5 min-h-10 rounded-md no-underline", isActive ? "bg-active !text-fg" : "!text-muted hover:!text-fg hover:bg-track")
       }
@@ -78,7 +78,7 @@ export function Nav() {
         </span>
         <div className="flex flex-col">
           <span className="font-semibold text-[15px] tracking-tight">Concord</span>
-          <span className="text-[11px] text-muted">Speech evaluation{cfg?.variant === "full" ? " · full" : ""}</span>
+          <span className="text-[11px] text-muted">Speech evaluation + labelling{cfg?.variant === "full" ? " · full" : ""}</span>
         </div>
         <button
           type="button"
@@ -95,11 +95,12 @@ export function Nav() {
         <Item to="/benchmarks" icon={<I.Chart />}>Benchmarks</Item>
         <Item to="/errors" icon={<I.Bug />}>Error analysis</Item>
       </Group>
-      <Group title="Label" note="Phase 2">
-        <Item to="/label" icon={<I.List />} disabled hint="Arrives in Phase 2">Review console</Item>
-        <Item to="/label" icon={<I.Wand />} disabled hint="Arrives in Phase 2">Pseudo-label</Item>
-        <Item to="/label" icon={<I.Pen />} disabled hint="Arrives in Phase 2">Annotate</Item>
-        <Item to="/label" icon={<I.Pulse />} disabled hint="Arrives in Phase 2">Live evaluation</Item>
+      <Group title="Label">
+        <Item to="/label" icon={<I.List />}>Review console</Item>
+        <Item to="/label/pseudo" icon={<I.Wand />} prefix>Pseudo-label</Item>
+        <Item to="/label/annotate" icon={<I.Pen />} prefix>Annotate</Item>
+        <Item to="/label/live" icon={<I.Pulse />} prefix>Live evaluation</Item>
+        <Item to="/label/sync" icon={<I.Refresh />}>Import / export</Item>
       </Group>
       <IfFeature name="improve">
         <Group title="Improve">

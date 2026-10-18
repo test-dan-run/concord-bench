@@ -1,5 +1,6 @@
 """Server for the Playwright smoke tests: a fresh data dir populated by replaying the acceptance flow
-on recorded responses, then the API + built frontend on --port. No GPU or platform needed.
+on recorded responses (plus a pseudo-labelled audio-only dataset for the Label screens), then the API +
+built frontend on --port. No GPU or platform needed.
 
     uv run python tests/e2e_server.py --port 8611
 """
@@ -10,6 +11,8 @@ import argparse
 import os
 import sys
 import tempfile
+import threading
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -28,12 +31,22 @@ def main() -> int:
     import uvicorn
     from fastapi.testclient import TestClient
 
-    from concord.acceptance import run_flow
+    from concord.acceptance import run_flow, run_label_flow
     from concord.api.app import create_app
 
     app = create_app()
     with TestClient(app) as client:
-        run_flow(client, work / "staging", log=lambda m: print(m, flush=True))
+        flow = run_flow(client, work / "staging", log=lambda m: print(m, flush=True))
+        run_label_flow(client, work / "staging-label", flow, log=lambda m: print(m, flush=True))
+    # Jobs started from the browser (e.g. re-fusing pseudo-labels) need a worker, as under `just dev`.
+    from concord.runs import jobs
+
+    def worker() -> None:
+        while True:
+            if jobs.run_pending(max_jobs=1) == 0:
+                time.sleep(0.5)
+
+    threading.Thread(target=worker, daemon=True).start()
     print(f"e2e data ready in {work}", flush=True)
     uvicorn.run(app, host=args.host, port=args.port, log_level="warning")
     return 0

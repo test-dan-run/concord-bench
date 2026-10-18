@@ -1,0 +1,20 @@
+[
+ {
+  "file": "d01.wav",
+  "start": 0.5,
+  "end": 5.55,
+  "speaker": "agent"
+ },
+ {
+  "file": "d01.wav",
+  "start": 5.9,
+  "end": 11.44,
+  "speaker": "customer"
+ },
+ {
+  "file": "d01.wav",
+  "start": 11.79,
+  "end": 16.19,
+  "speaker": "agent"
+ }
+]

@@ -1,0 +1,68 @@
+{
+ "file": "d02_8k.wav",
+ "segments": [
+  {
+   "file": "d02_8k.wav",
+   "start": 0.3,
+   "end": 3.04,
+   "speaker": "receptionist",
+   "text": "Hello, Riverside dental practice, Emma speaking."
+  },
+  {
+   "file": "d02_8k.wav",
+   "start": 3.39,
+   "end": 7.22,
+   "speaker": "patient",
+   "text": "Hi, I would like to book a check up please. I have not been in for about a year."
+  },
+  {
+   "file": "d02_8k.wav",
+   "start": 7.57,
+   "end": 10.96,
+   "speaker": "receptionist",
+   "text": "Of course. Could I take your date of birth and the first line of your address?"
+  },
+  {
+   "file": "d02_8k.wav",
+   "start": 11.31,
+   "end": 15.58,
+   "speaker": "patient",
+   "text": "Yes, it is the fourth of March, nineteen eighty six, and I live at twelve Mill Lane."
+  },
+  {
+   "file": "d02_8k.wav",
+   "start": 16.38,
+   "end": 22.31,
+   "speaker": "receptionist",
+   "text": "Thank you. I have found your record. We have an appointment on Tuesday at half past two, or Friday at ten in the morning."
+  },
+  {
+   "file": "d02_8k.wav",
+   "start": 22.66,
+   "end": 24.54,
+   "speaker": "patient",
+   "text": "Friday at ten would be better for me."
+  },
+  {
+   "file": "d02_8k.wav",
+   "start": 24.24,
+   "end": 25.76,
+   "speaker": "receptionist",
+   "text": "Lovely. That is booked for you."
+  },
+  {
+   "file": "d02_8k.wav",
+   "start": 26.16,
+   "end": 30.54,
+   "speaker": "receptionist",
+   "text": "We will send a reminder text the day before. Is there anything else I can help with?"
+  },
+  {
+   "file": "d02_8k.wav",
+   "start": 30.89,
+   "end": 32.87,
+   "speaker": "patient",
+   "text": "No, that is everything. Thanks, bye."
+  }
+ ]
+}

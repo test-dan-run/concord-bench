@@ -1,0 +1,56 @@
+{
+ "status": "success",
+ "session_id": "d05_clipped",
+ "transcription": "You are speaking to the card services team. Before we start, can you confirm your full name? It is Daniel Morgan. My card was declined this morning when I tried to pay for petrol. Thank you, Mr Morgan. I can see a temporary block was placed on the card because of an unusual payment overseas. That was not me. I have not been abroad this year. Understood. I will cancel that card now and send a replacement. It should arrive within five working days. Will I get the money back for the overseas payment? Yes, the payment will be refunded once our fraud team has reviewed it, usually within ten days. Okay, that is a relief.",
+ "speaker_count": 2,
+ "sentences": [
+  {
+   "speaker": "advisor",
+   "start_time": 0.5,
+   "end_time": 5.14,
+   "text": "You are speaking to the card services team. Before we start, can you confirm your full name?"
+  },
+  {
+   "speaker": "caller",
+   "start_time": 5.49,
+   "end_time": 10.9,
+   "text": "It is Daniel Morgan. My card was declined this morning when I tried to pay for petrol."
+  },
+  {
+   "speaker": "advisor",
+   "start_time": 11.25,
+   "end_time": 17.32,
+   "text": "Thank you, Mr Morgan. I can see a temporary block was placed on the card because of an unusual payment overseas."
+  },
+  {
+   "speaker": "caller",
+   "start_time": 17.67,
+   "end_time": 20.59,
+   "text": "That was not me. I have not been abroad this year."
+  },
+  {
+   "speaker": "advisor",
+   "start_time": 21.29,
+   "end_time": 27.02,
+   "text": "Understood. I will cancel that card now and send a replacement. It should arrive within five working days."
+  },
+  {
+   "speaker": "caller",
+   "start_time": 27.37,
+   "end_time": 29.91,
+   "text": "Will I get the money back for the overseas payment?"
+  },
+  {
+   "speaker": "advisor",
+   "start_time": 30.26,
+   "end_time": 35.51,
+   "text": "Yes, the payment will be refunded once our fraud team has reviewed it, usually within ten days."
+  },
+  {
+   "speaker": "caller",
+   "start_time": 35.01,
+   "end_time": 36.69,
+   "text": "Okay, that is a relief."
+  }
+ ]
+}

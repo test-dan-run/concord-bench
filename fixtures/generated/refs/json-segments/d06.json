@@ -1,0 +1,89 @@
+{
+ "file": "d06.flac",
+ "segments": [
+  {
+   "file": "d06.flac",
+   "start": 0.4,
+   "end": 5.97,
+   "speaker": "lead",
+   "text": "Morning everyone. Let us go round quickly. What did you work on yesterday and is anything blocking you?"
+  },
+  {
+   "file": "d06.flac",
+   "start": 6.32,
+   "end": 11.72,
+   "speaker": "designer",
+   "text": "I finished the new sign up screens and shared them in the design channel. I am waiting on feedback from marketing."
+  },
+  {
+   "file": "d06.flac",
+   "start": 11.22,
+   "end": 12.44,
+   "speaker": "lead",
+   "text": "I will chase them today."
+  },
+  {
+   "file": "d06.flac",
+   "start": 12.84,
+   "end": 18.52,
+   "speaker": "tester",
+   "text": "I tested the password reset flow. I found two bugs, one on mobile and one with expired links."
+  },
+  {
+   "file": "d06.flac",
+   "start": 18.87,
+   "end": 22.09,
+   "speaker": "designer",
+   "text": "Is the mobile one about the button being hidden behind the keyboard?"
+  },
+  {
+   "file": "d06.flac",
+   "start": 22.44,
+   "end": 25.51,
+   "speaker": "tester",
+   "text": "Yes, exactly. It only happens on smaller phones."
+  },
+  {
+   "file": "d06.flac",
+   "start": 26.11,
+   "end": 31.1,
+   "speaker": "lead",
+   "text": "Can you two pair on that this morning? I would like both bugs fixed before the demo on Wednesday."
+  },
+  {
+   "file": "d06.flac",
+   "start": 30.5,
+   "end": 31.57,
+   "speaker": "designer",
+   "text": "Sounds good to me."
+  },
+  {
+   "file": "d06.flac",
+   "start": 31.27,
+   "end": 31.84,
+   "speaker": "tester",
+   "text": "Sure."
+  },
+  {
+   "file": "d06.flac",
+   "start": 32.34,
+   "end": 38.15,
+   "speaker": "lead",
+   "text": "Great. Last thing, please update your tickets before lunch so the board is accurate for the planning meeting."
+  },
+  {
+   "file": "d06.flac",
+   "start": 38.5,
+   "end": 41.81,
+   "speaker": "tester",
+   "text": "Will do. I will also add the steps to reproduce both bugs."
+  },
+  {
+   "file": "d06.flac",
+   "start": 42.16,
+   "end": 45.06,
+   "speaker": "designer",
+   "text": "And I will attach the updated screens to the sign up ticket."
+  }
+ ]
+}

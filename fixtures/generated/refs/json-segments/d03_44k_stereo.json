@@ -1,0 +1,75 @@
+{
+ "file": "d03_44k_stereo.mp3",
+ "segments": [
+  {
+   "file": "d03_44k_stereo.mp3",
+   "start": 0.6,
+   "end": 6.5,
+   "speaker": "chair",
+   "text": "Right, let us get started. The main item today is the release plan for the new billing system."
+  },
+  {
+   "file": "d03_44k_stereo.mp3",
+   "start": 6.85,
+   "end": 12.08,
+   "speaker": "analyst",
+   "text": "I have the numbers from last week. Error rates dropped by almost half after the patch went out."
+  },
+  {
+   "file": "d03_44k_stereo.mp3",
+   "start": 11.38,
+   "end": 14.02,
+   "speaker": "engineer",
+   "text": "That matches what we saw in the logs as well."
+  },
+  {
+   "file": "d03_44k_stereo.mp3",
+   "start": 14.52,
+   "end": 18.51,
+   "speaker": "chair",
+   "text": "Good. So are we confident enough to move the launch forward by one week?"
+  },
+  {
+   "file": "d03_44k_stereo.mp3",
+   "start": 18.86,
+   "end": 23.96,
+   "speaker": "engineer",
+   "text": "I would rather keep the original date. We still need to finish the load tests on the payment service."
+  },
+  {
+   "file": "d03_44k_stereo.mp3",
+   "start": 24.31,
+   "end": 28.42,
+   "speaker": "analyst",
+   "text": "I agree. One more week of data would also make the report much stronger."
+  },
+  {
+   "file": "d03_44k_stereo.mp3",
+   "start": 28.02,
+   "end": 28.99,
+   "speaker": "chair",
+   "text": "Fair enough."
+  },
+  {
+   "file": "d03_44k_stereo.mp3",
+   "start": 29.29,
+   "end": 33.2,
+   "speaker": "chair",
+   "text": "We keep the date. Can you both send me a short summary by Friday?"
+  },
+  {
+   "file": "d03_44k_stereo.mp3",
+   "start": 33.55,
+   "end": 36.21,
+   "speaker": "analyst",
+   "text": "Yes, I will have it ready by Thursday afternoon."
+  },
+  {
+   "file": "d03_44k_stereo.mp3",
+   "start": 36.56,
+   "end": 40.17,
+   "speaker": "engineer",
+   "text": "Same here. I will include the load test results if they are finished."
+  }
+ ]
+}

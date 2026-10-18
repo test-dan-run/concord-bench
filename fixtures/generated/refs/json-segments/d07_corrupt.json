@@ -1,0 +1,12 @@
+{
+ "file": "d07_corrupt.wav",
+ "segments": [
+  {
+   "file": "d07_corrupt.wav",
+   "start": 0.0,
+   "end": 1.0,
+   "speaker": "agent",
+   "text": "unreadable"
+  }
+ ]
+}

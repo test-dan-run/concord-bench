@@ -1,0 +1,74 @@
+[
+ {
+  "file": "d06.flac",
+  "start": 0.4,
+  "end": 5.97,
+  "speaker": "lead"
+ },
+ {
+  "file": "d06.flac",
+  "start": 6.32,
+  "end": 11.72,
+  "speaker": "designer"
+ },
+ {
+  "file": "d06.flac",
+  "start": 11.22,
+  "end": 12.44,
+  "speaker": "lead"
+ },
+ {
+  "file": "d06.flac",
+  "start": 12.84,
+  "end": 18.52,
+  "speaker": "tester"
+ },
+ {
+  "file": "d06.flac",
+  "start": 18.87,
+  "end": 22.09,
+  "speaker": "designer"
+ },
+ {
+  "file": "d06.flac",
+  "start": 22.44,
+  "end": 25.51,
+  "speaker": "tester"
+ },
+ {
+  "file": "d06.flac",
+  "start": 26.11,
+  "end": 31.1,
+  "speaker": "lead"
+ },
+ {
+  "file": "d06.flac",
+  "start": 30.5,
+  "end": 31.57,
+  "speaker": "designer"
+ },
+ {
+  "file": "d06.flac",
+  "start": 31.27,
+  "end": 31.84,
+  "speaker": "tester"
+ },
+ {
+  "file": "d06.flac",
+  "start": 32.34,
+  "end": 38.15,
+  "speaker": "lead"
+ },
+ {
+  "file": "d06.flac",
+  "start": 38.5,
+  "end": 41.81,
+  "speaker": "tester"
+ },
+ {
+  "file": "d06.flac",
+  "start": 42.16,
+  "end": 45.06,
+  "speaker": "designer"
+ }
+]

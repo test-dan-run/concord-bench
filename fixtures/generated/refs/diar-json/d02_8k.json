@@ -1,0 +1,56 @@
+[
+ {
+  "file": "d02_8k.wav",
+  "start": 0.3,
+  "end": 3.04,
+  "speaker": "receptionist"
+ },
+ {
+  "file": "d02_8k.wav",
+  "start": 3.39,
+  "end": 7.22,
+  "speaker": "patient"
+ },
+ {
+  "file": "d02_8k.wav",
+  "start": 7.57,
+  "end": 10.96,
+  "speaker": "receptionist"
+ },
+ {
+  "file": "d02_8k.wav",
+  "start": 11.31,
+  "end": 15.58,
+  "speaker": "patient"
+ },
+ {
+  "file": "d02_8k.wav",
+  "start": 16.38,
+  "end": 22.31,
+  "speaker": "receptionist"
+ },
+ {
+  "file": "d02_8k.wav",
+  "start": 22.66,
+  "end": 24.54,
+  "speaker": "patient"
+ },
+ {
+  "file": "d02_8k.wav",
+  "start": 24.24,
+  "end": 25.76,
+  "speaker": "receptionist"
+ },
+ {
+  "file": "d02_8k.wav",
+  "start": 26.16,
+  "end": 30.54,
+  "speaker": "receptionist"
+ },
+ {
+  "file": "d02_8k.wav",
+  "start": 30.89,
+  "end": 32.87,
+  "speaker": "patient"
+ }
+]

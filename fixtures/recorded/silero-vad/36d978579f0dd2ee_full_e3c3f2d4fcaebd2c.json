@@ -1,0 +1,1 @@
+{"service": "silero-vad", "params": {"adapter": "OIPSegmenter"}, "audio": {"sha256": "36d978579f0dd2ee634aff2674938f2c40089bce9ce624eca26a9a30d1830eea", "start": 0.0, "end": -1.0}, "latency_s": 0.0793, "raw": {"SEGMENTS": [[0.418, 2.142], [2.338, 5.758], [5.922, 6.846], [7.106, 8.382], [8.578, 10.046]]}}

@@ -1,0 +1,61 @@
+{
+ "file": "d01.flac",
+ "segments": [
+  {
+   "file": "d01.flac",
+   "start": 0.5,
+   "end": 5.55,
+   "speaker": "agent",
+   "text": "Good morning, you are through to the broadband support team. My name is Sarah. How can I help?"
+  },
+  {
+   "file": "d01.flac",
+   "start": 5.9,
+   "end": 11.44,
+   "speaker": "customer",
+   "text": "Hi Sarah. My internet keeps dropping out every evening, usually around seven o'clock."
+  },
+  {
+   "file": "d01.flac",
+   "start": 11.79,
+   "end": 16.19,
+   "speaker": "agent",
+   "text": "I am sorry to hear that. Can you tell me which lights are showing on your router right now?"
+  },
+  {
+   "file": "d01.flac",
+   "start": 16.54,
+   "end": 20.66,
+   "speaker": "customer",
+   "text": "The power light is green, but the internet light is flashing orange."
+  },
+  {
+   "file": "d01.flac",
+   "start": 21.26,
+   "end": 25.88,
+   "speaker": "agent",
+   "text": "Thanks. That usually means the line is out of sync. I will run a quick test from our side."
+  },
+  {
+   "file": "d01.flac",
+   "start": 25.48,
+   "end": 26.72,
+   "speaker": "customer",
+   "text": "Okay, no problem."
+  },
+  {
+   "file": "d01.flac",
+   "start": 27.92,
+   "end": 33.63,
+   "speaker": "agent",
+   "text": "The test found some noise on the line. I can book an engineer for Thursday morning. Does that work for you?"
+  },
+  {
+   "file": "d01.flac",
+   "start": 33.98,
+   "end": 37.13,
+   "speaker": "customer",
+   "text": "Thursday morning is perfect. Thank you very much."
+  }
+ ]
+}

@@ -1,0 +1,62 @@
+{
+ "status": "success",
+ "session_id": "d02_8k",
+ "transcription": "Hello, Riverside dental practice, Emma speaking. Hi, I would like to book a check up please. I have not been in for about a year. Of course. Could I take your date of birth and the first line of your address? Yes, it is the fourth of March, nineteen eighty six, and I live at twelve Mill Lane. Thank you. I have found your record. We have an appointment on Tuesday at half past two, or Friday at ten in the morning. Friday at ten would be better for me. Lovely. That is booked for you. We will send a reminder text the day before. Is there anything else I can help with? No, that is everything. Thanks, bye.",
+ "speaker_count": 2,
+ "sentences": [
+  {
+   "speaker": "receptionist",
+   "start_time": 0.3,
+   "end_time": 3.04,
+   "text": "Hello, Riverside dental practice, Emma speaking."
+  },
+  {
+   "speaker": "patient",
+   "start_time": 3.39,
+   "end_time": 7.22,
+   "text": "Hi, I would like to book a check up please. I have not been in for about a year."
+  },
+  {
+   "speaker": "receptionist",
+   "start_time": 7.57,
+   "end_time": 10.96,
+   "text": "Of course. Could I take your date of birth and the first line of your address?"
+  },
+  {
+   "speaker": "patient",
+   "start_time": 11.31,
+   "end_time": 15.58,
+   "text": "Yes, it is the fourth of March, nineteen eighty six, and I live at twelve Mill Lane."
+  },
+  {
+   "speaker": "receptionist",
+   "start_time": 16.38,
+   "end_time": 22.31,
+   "text": "Thank you. I have found your record. We have an appointment on Tuesday at half past two, or Friday at ten in the morning."
+  },
+  {
+   "speaker": "patient",
+   "start_time": 22.66,
+   "end_time": 24.54,
+   "text": "Friday at ten would be better for me."
+  },
+  {
+   "speaker": "receptionist",
+   "start_time": 24.24,
+   "end_time": 25.76,
+   "text": "Lovely. That is booked for you."
+  },
+  {
+   "speaker": "receptionist",
+   "start_time": 26.16,
+   "end_time": 30.54,
+   "text": "We will send a reminder text the day before. Is there anything else I can help with?"
+  },
+  {
+   "speaker": "patient",
+   "start_time": 30.89,
+   "end_time": 32.87,
+   "text": "No, that is everything. Thanks, bye."
+  }
+ ]
+}

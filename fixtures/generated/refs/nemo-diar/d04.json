@@ -1,0 +1,44 @@
+{
+ "status": "success",
+ "session_id": "d04",
+ "transcription": "Thanks for calling Swift Deliveries. Can I have your tracking number please? Sure, it is A B seven three nine two. Thank you. I can see the parcel is at your local depot. It will be delivered tomorrow before noon. Great. Can the driver leave it with my neighbour if I am out? Yes, I have added that note to the delivery. Brilliant, thanks.",
+ "speaker_count": 2,
+ "sentences": [
+  {
+   "speaker": "agent",
+   "start_time": 0.4,
+   "end_time": 4.11,
+   "text": "Thanks for calling Swift Deliveries. Can I have your tracking number please?"
+  },
+  {
+   "speaker": "customer",
+   "start_time": 4.46,
+   "end_time": 7.32,
+   "text": "Sure, it is A B seven three nine two."
+  },
+  {
+   "speaker": "agent",
+   "start_time": 8.32,
+   "end_time": 13.47,
+   "text": "Thank you. I can see the parcel is at your local depot. It will be delivered tomorrow before noon."
+  },
+  {
+   "speaker": "customer",
+   "start_time": 13.82,
+   "end_time": 18.06,
+   "text": "Great. Can the driver leave it with my neighbour if I am out?"
+  },
+  {
+   "speaker": "agent",
+   "start_time": 18.41,
+   "end_time": 20.72,
+   "text": "Yes, I have added that note to the delivery."
+  },
+  {
+   "speaker": "customer",
+   "start_time": 20.42,
+   "end_time": 21.56,
+   "text": "Brilliant, thanks."
+  }
+ ]
+}

@@ -1,0 +1,135 @@
+;; synthesised fixture references
+d01 1 agent 0.500 5.550 <o,f0,clean> Good morning, you are through to the broadband support team. My name is Sarah. How can I help?
+d01 1 customer 5.900 11.440 <o,f0,clean> Hi Sarah. My internet keeps dropping out every evening, usually around seven o'clock.
+d01 1 agent 11.790 16.190 <o,f0,clean> I am sorry to hear that. Can you tell me which lights are showing on your router right now?
+d01 1 customer 16.540 20.660 <o,f0,clean> The power light is green, but the internet light is flashing orange.
+d01 1 agent 21.260 25.880 <o,f0,clean> Thanks. That usually means the line is out of sync. I will run a quick test from our side.
+d01 1 customer 25.480 26.720 <o,f0,clean> Okay, no problem.
+d01 1 agent 27.920 33.630 <o,f0,clean> The test found some noise on the line. I can book an engineer for Thursday morning. Does that work for you?
+d01 1 customer 33.980 37.130 <o,f0,clean> Thursday morning is perfect. Thank you very much.
+d02_8k 1 receptionist 0.300 3.040 <o,f0,telephony> Hello, Riverside dental practice, Emma speaking.
+d02_8k 1 patient 3.390 7.220 <o,f0,telephony> Hi, I would like to book a check up please. I have not been in for about a year.
+d02_8k 1 receptionist 7.570 10.960 <o,f0,telephony> Of course. Could I take your date of birth and the first line of your address?
+d02_8k 1 patient 11.310 15.580 <o,f0,telephony> Yes, it is the fourth of March, nineteen eighty six, and I live at twelve Mill Lane.
+d02_8k 1 receptionist 16.380 22.310 <o,f0,telephony> Thank you. I have found your record. We have an appointment on Tuesday at half past two, or Friday at ten in the morning.
+d02_8k 1 patient 22.660 24.540 <o,f0,telephony> Friday at ten would be better for me.
+d02_8k 1 receptionist 24.240 25.760 <o,f0,telephony> Lovely. That is booked for you.
+d02_8k 1 receptionist 26.160 30.540 <o,f0,telephony> We will send a reminder text the day before. Is there anything else I can help with?
+d02_8k 1 patient 30.890 32.870 <o,f0,telephony> No, that is everything. Thanks, bye.
+d03_44k_stereo 1 chair 0.600 6.500 <o,f0,meeting> Right, let us get started. The main item today is the release plan for the new billing system.
+d03_44k_stereo 1 analyst 6.850 12.080 <o,f0,meeting> I have the numbers from last week. Error rates dropped by almost half after the patch went out.
+d03_44k_stereo 1 engineer 11.380 14.020 <o,f0,meeting> That matches what we saw in the logs as well.
+d03_44k_stereo 1 chair 14.520 18.510 <o,f0,meeting> Good. So are we confident enough to move the launch forward by one week?
+d03_44k_stereo 1 engineer 18.860 23.960 <o,f0,meeting> I would rather keep the original date. We still need to finish the load tests on the payment service.
+d03_44k_stereo 1 analyst 24.310 28.420 <o,f0,meeting> I agree. One more week of data would also make the report much stronger.
+d03_44k_stereo 1 chair 28.020 28.990 <o,f0,meeting> Fair enough.
+d03_44k_stereo 1 chair 29.290 33.200 <o,f0,meeting> We keep the date. Can you both send me a short summary by Friday?
+d03_44k_stereo 1 analyst 33.550 36.210 <o,f0,meeting> Yes, I will have it ready by Thursday afternoon.
+d03_44k_stereo 1 engineer 36.560 40.170 <o,f0,meeting> Same here. I will include the load test results if they are finished.
+d04 1 agent 0.400 4.110 <o,f0,clean> Thanks for calling Swift Deliveries. Can I have your tracking number please?
+d04 1 customer 4.460 7.320 <o,f0,clean> Sure, it is A B seven three nine two.
+d04 1 agent 8.320 13.470 <o,f0,clean> Thank you. I can see the parcel is at your local depot. It will be delivered tomorrow before noon.
+d04 1 customer 13.820 18.060 <o,f0,clean> Great. Can the driver leave it with my neighbour if I am out?
+d04 1 agent 18.410 20.720 <o,f0,clean> Yes, I have added that note to the delivery.
+d04 1 customer 20.420 21.560 <o,f0,clean> Brilliant, thanks.
+d05_clipped 1 advisor 0.500 5.140 <o,f0,clipped> You are speaking to the card services team. Before we start, can you confirm your full name?
+d05_clipped 1 caller 5.490 10.900 <o,f0,clipped> It is Daniel Morgan. My card was declined this morning when I tried to pay for petrol.
+d05_clipped 1 advisor 11.250 17.320 <o,f0,clipped> Thank you, Mr Morgan. I can see a temporary block was placed on the card because of an unusual payment overseas.
+d05_clipped 1 caller 17.670 20.590 <o,f0,clipped> That was not me. I have not been abroad this year.
+d05_clipped 1 advisor 21.290 27.020 <o,f0,clipped> Understood. I will cancel that card now and send a replacement. It should arrive within five working days.
+d05_clipped 1 caller 27.370 29.910 <o,f0,clipped> Will I get the money back for the overseas payment?
+d05_clipped 1 advisor 30.260 35.510 <o,f0,clipped> Yes, the payment will be refunded once our fraud team has reviewed it, usually within ten days.
+d05_clipped 1 caller 35.010 36.690 <o,f0,clipped> Okay, that is a relief.
+d06 1 lead 0.400 5.970 <o,f0,noisy> Morning everyone. Let us go round quickly. What did you work on yesterday and is anything blocking you?
+d06 1 designer 6.320 11.720 <o,f0,noisy> I finished the new sign up screens and shared them in the design channel. I am waiting on feedback from marketing.
+d06 1 lead 11.220 12.440 <o,f0,noisy> I will chase them today.
+d06 1 tester 12.840 18.520 <o,f0,noisy> I tested the password reset flow. I found two bugs, one on mobile and one with expired links.
+d06 1 designer 18.870 22.090 <o,f0,noisy> Is the mobile one about the button being hidden behind the keyboard?
+d06 1 tester 22.440 25.510 <o,f0,noisy> Yes, exactly. It only happens on smaller phones.
+d06 1 lead 26.110 31.100 <o,f0,noisy> Can you two pair on that this morning? I would like both bugs fixed before the demo on Wednesday.
+d06 1 designer 30.500 31.570 <o,f0,noisy> Sounds good to me.
+d06 1 tester 31.270 31.840 <o,f0,noisy> Sure.
+d06 1 lead 32.340 38.150 <o,f0,noisy> Great. Last thing, please update your tickets before lunch so the board is accurate for the planning meeting.
+d06 1 tester 38.500 41.810 <o,f0,noisy> Will do. I will also add the steps to reproduce both bugs.
+d06 1 designer 42.160 45.060 <o,f0,noisy> And I will attach the updated screens to the sign up ticket.
+d07_corrupt 1 agent 0.000 1.000 <o,f0,corrupt> unreadable
+d08_long 1 d01_agent 0.500 5.550 <o,f0,long> Good morning, you are through to the broadband support team. My name is Sarah. How can I help?
+d08_long 1 d01_customer 5.900 11.440 <o,f0,long> Hi Sarah. My internet keeps dropping out every evening, usually around seven o'clock.
+d08_long 1 d01_agent 11.790 16.190 <o,f0,long> I am sorry to hear that. Can you tell me which lights are showing on your router right now?
+d08_long 1 d01_customer 16.540 20.660 <o,f0,long> The power light is green, but the internet light is flashing orange.
+d08_long 1 d01_agent 21.260 25.880 <o,f0,long> Thanks. That usually means the line is out of sync. I will run a quick test from our side.
+d08_long 1 d01_customer 25.480 26.720 <o,f0,long> Okay, no problem.
+d08_long 1 d01_agent 27.920 33.630 <o,f0,long> The test found some noise on the line. I can book an engineer for Thursday morning. Does that work for you?
+d08_long 1 d01_customer 33.980 37.130 <o,f0,long> Thursday morning is perfect. Thank you very much.
+d08_long 1 d02_8k_receptionist 39.530 42.270 <o,f0,long> Hello, Riverside dental practice, Emma speaking.
+d08_long 1 d02_8k_patient 42.620 46.450 <o,f0,long> Hi, I would like to book a check up please. I have not been in for about a year.
+d08_long 1 d02_8k_receptionist 46.800 50.190 <o,f0,long> Of course. Could I take your date of birth and the first line of your address?
+d08_long 1 d02_8k_patient 50.540 54.810 <o,f0,long> Yes, it is the fourth of March, nineteen eighty six, and I live at twelve Mill Lane.
+d08_long 1 d02_8k_receptionist 55.610 61.540 <o,f0,long> Thank you. I have found your record. We have an appointment on Tuesday at half past two, or Friday at ten in the morning.
+d08_long 1 d02_8k_patient 61.890 63.770 <o,f0,long> Friday at ten would be better for me.
+d08_long 1 d02_8k_receptionist 63.470 64.990 <o,f0,long> Lovely. That is booked for you.
+d08_long 1 d02_8k_receptionist 65.390 69.770 <o,f0,long> We will send a reminder text the day before. Is there anything else I can help with?
+d08_long 1 d02_8k_patient 70.120 72.100 <o,f0,long> No, that is everything. Thanks, bye.
+d08_long 1 d03_44k_stereo_chair 74.800 80.700 <o,f0,long> Right, let us get started. The main item today is the release plan for the new billing system.
+d08_long 1 d03_44k_stereo_analyst 81.050 86.280 <o,f0,long> I have the numbers from last week. Error rates dropped by almost half after the patch went out.
+d08_long 1 d03_44k_stereo_engineer 85.580 88.220 <o,f0,long> That matches what we saw in the logs as well.
+d08_long 1 d03_44k_stereo_chair 88.720 92.710 <o,f0,long> Good. So are we confident enough to move the launch forward by one week?
+d08_long 1 d03_44k_stereo_engineer 93.060 98.160 <o,f0,long> I would rather keep the original date. We still need to finish the load tests on the payment service.
+d08_long 1 d03_44k_stereo_analyst 98.510 102.620 <o,f0,long> I agree. One more week of data would also make the report much stronger.
+d08_long 1 d03_44k_stereo_chair 102.220 103.190 <o,f0,long> Fair enough.
+d08_long 1 d03_44k_stereo_chair 103.490 107.400 <o,f0,long> We keep the date. Can you both send me a short summary by Friday?
+d08_long 1 d03_44k_stereo_analyst 107.750 110.410 <o,f0,long> Yes, I will have it ready by Thursday afternoon.
+d08_long 1 d03_44k_stereo_engineer 110.760 114.370 <o,f0,long> Same here. I will include the load test results if they are finished.
+d08_long 1 d04_agent 116.870 120.580 <o,f0,long> Thanks for calling Swift Deliveries. Can I have your tracking number please?
+d08_long 1 d04_customer 120.930 123.790 <o,f0,long> Sure, it is A B seven three nine two.
+d08_long 1 d04_agent 124.790 129.940 <o,f0,long> Thank you. I can see the parcel is at your local depot. It will be delivered tomorrow before noon.
+d08_long 1 d04_customer 130.290 134.530 <o,f0,long> Great. Can the driver leave it with my neighbour if I am out?
+d08_long 1 d04_agent 134.880 137.190 <o,f0,long> Yes, I have added that note to the delivery.
+d08_long 1 d04_customer 136.890 138.030 <o,f0,long> Brilliant, thanks.
+d08_long 1 d05_clipped_advisor 140.630 145.270 <o,f0,long> You are speaking to the card services team. Before we start, can you confirm your full name?
+d08_long 1 d05_clipped_caller 145.620 151.030 <o,f0,long> It is Daniel Morgan. My card was declined this morning when I tried to pay for petrol.
+d08_long 1 d05_clipped_advisor 151.380 157.450 <o,f0,long> Thank you, Mr Morgan. I can see a temporary block was placed on the card because of an unusual payment overseas.
+d08_long 1 d05_clipped_caller 157.800 160.720 <o,f0,long> That was not me. I have not been abroad this year.
+d08_long 1 d05_clipped_advisor 161.420 167.150 <o,f0,long> Understood. I will cancel that card now and send a replacement. It should arrive within five working days.
+d08_long 1 d05_clipped_caller 167.500 170.040 <o,f0,long> Will I get the money back for the overseas payment?
+d08_long 1 d05_clipped_advisor 170.390 175.640 <o,f0,long> Yes, the payment will be refunded once our fraud team has reviewed it, usually within ten days.
+d08_long 1 d05_clipped_caller 175.140 176.820 <o,f0,long> Okay, that is a relief.
+d08_long 1 d06_lead 179.320 184.890 <o,f0,long> Morning everyone. Let us go round quickly. What did you work on yesterday and is anything blocking you?
+d08_long 1 d06_designer 185.240 190.640 <o,f0,long> I finished the new sign up screens and shared them in the design channel. I am waiting on feedback from marketing.
+d08_long 1 d06_lead 190.140 191.360 <o,f0,long> I will chase them today.
+d08_long 1 d06_tester 191.760 197.440 <o,f0,long> I tested the password reset flow. I found two bugs, one on mobile and one with expired links.
+d08_long 1 d06_designer 197.790 201.010 <o,f0,long> Is the mobile one about the button being hidden behind the keyboard?
+d08_long 1 d06_tester 201.360 204.430 <o,f0,long> Yes, exactly. It only happens on smaller phones.
+d08_long 1 d06_lead 205.030 210.020 <o,f0,long> Can you two pair on that this morning? I would like both bugs fixed before the demo on Wednesday.
+d08_long 1 d06_designer 209.420 210.490 <o,f0,long> Sounds good to me.
+d08_long 1 d06_tester 210.190 210.760 <o,f0,long> Sure.
+d08_long 1 d06_lead 211.260 217.070 <o,f0,long> Great. Last thing, please update your tickets before lunch so the board is accurate for the planning meeting.
+d08_long 1 d06_tester 217.420 220.730 <o,f0,long> Will do. I will also add the steps to reproduce both bugs.
+d08_long 1 d06_designer 221.080 223.980 <o,f0,long> And I will attach the updated screens to the sign up ticket.
+d08_long 1 d01_agent 226.580 231.630 <o,f0,long> Good morning, you are through to the broadband support team. My name is Sarah. How can I help?
+d08_long 1 d01_customer 231.980 237.520 <o,f0,long> Hi Sarah. My internet keeps dropping out every evening, usually around seven o'clock.
+d08_long 1 d01_agent 237.870 242.270 <o,f0,long> I am sorry to hear that. Can you tell me which lights are showing on your router right now?
+d08_long 1 d01_customer 242.620 246.740 <o,f0,long> The power light is green, but the internet light is flashing orange.
+d08_long 1 d01_agent 247.340 251.960 <o,f0,long> Thanks. That usually means the line is out of sync. I will run a quick test from our side.
+d08_long 1 d01_customer 251.560 252.800 <o,f0,long> Okay, no problem.
+d08_long 1 d01_agent 254.000 259.710 <o,f0,long> The test found some noise on the line. I can book an engineer for Thursday morning. Does that work for you?
+d08_long 1 d01_customer 260.060 263.210 <o,f0,long> Thursday morning is perfect. Thank you very much.
+d08_long 1 d02_8k_receptionist 265.610 268.350 <o,f0,long> Hello, Riverside dental practice, Emma speaking.
+d08_long 1 d02_8k_patient 268.700 272.530 <o,f0,long> Hi, I would like to book a check up please. I have not been in for about a year.
+d08_long 1 d02_8k_receptionist 272.880 276.270 <o,f0,long> Of course. Could I take your date of birth and the first line of your address?
+d08_long 1 d02_8k_patient 276.620 280.890 <o,f0,long> Yes, it is the fourth of March, nineteen eighty six, and I live at twelve Mill Lane.
+d08_long 1 d02_8k_receptionist 281.690 287.620 <o,f0,long> Thank you. I have found your record. We have an appointment on Tuesday at half past two, or Friday at ten in the morning.
+d08_long 1 d02_8k_patient 287.970 289.850 <o,f0,long> Friday at ten would be better for me.
+d08_long 1 d02_8k_receptionist 289.550 291.070 <o,f0,long> Lovely. That is booked for you.
+d08_long 1 d02_8k_receptionist 291.470 295.850 <o,f0,long> We will send a reminder text the day before. Is there anything else I can help with?
+d08_long 1 d02_8k_patient 296.200 298.180 <o,f0,long> No, that is everything. Thanks, bye.
+d08_long 1 d03_44k_stereo_chair 300.880 306.780 <o,f0,long> Right, let us get started. The main item today is the release plan for the new billing system.
+d08_long 1 d03_44k_stereo_analyst 307.130 312.360 <o,f0,long> I have the numbers from last week. Error rates dropped by almost half after the patch went out.
+d08_long 1 d03_44k_stereo_engineer 311.660 314.300 <o,f0,long> That matches what we saw in the logs as well.
+d08_long 1 d03_44k_stereo_chair 314.800 318.790 <o,f0,long> Good. So are we confident enough to move the launch forward by one week?
+d08_long 1 d03_44k_stereo_engineer 319.140 324.240 <o,f0,long> I would rather keep the original date. We still need to finish the load tests on the payment service.
+d08_long 1 d03_44k_stereo_analyst 324.590 328.700 <o,f0,long> I agree. One more week of data would also make the report much stronger.
+d08_long 1 d03_44k_stereo_chair 328.300 329.270 <o,f0,long> Fair enough.
+d08_long 1 d03_44k_stereo_chair 329.570 333.480 <o,f0,long> We keep the date. Can you both send me a short summary by Friday?
+d08_long 1 d03_44k_stereo_analyst 333.830 336.490 <o,f0,long> Yes, I will have it ready by Thursday afternoon.
+d08_long 1 d03_44k_stereo_engineer 336.840 340.450 <o,f0,long> Same here. I will include the load test results if they are finished.

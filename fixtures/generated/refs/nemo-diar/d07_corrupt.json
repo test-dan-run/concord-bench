@@ -1,0 +1,14 @@
+{
+ "status": "success",
+ "session_id": "d07_corrupt",
+ "transcription": "unreadable",
+ "speaker_count": 1,
+ "sentences": [
+  {
+   "speaker": "agent",
+   "start_time": 0.0,
+   "end_time": 1.0,
+   "text": "unreadable"
+  }
+ ]
+}

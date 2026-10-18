@@ -1,0 +1,14 @@
+.git
+.venv
+data
+**/__pycache__
+**/node_modules
+frontend/dist
+frontend/test-results
+fixtures/synth
+fixtures/recorded
+fixtures/generated/dataset
+fixtures/generated/refs
+fixtures/generated/malformed
+tests
+.env

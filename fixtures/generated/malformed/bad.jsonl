@@ -1,0 +1,4 @@
+{"audio_filepath": "d01.flac", "text": "fine"}
+not json
+{"text": "no file field"}
+{"file": "d01.flac", "start": 3.0, "end": 1.0, "speaker": "a"}

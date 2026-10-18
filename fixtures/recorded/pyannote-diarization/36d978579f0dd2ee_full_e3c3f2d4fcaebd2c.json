@@ -1,0 +1,1 @@
+{"service": "pyannote-diarization", "params": {"adapter": "OIPSegmenter"}, "audio": {"sha256": "36d978579f0dd2ee634aff2674938f2c40089bce9ce624eca26a9a30d1830eea", "start": 0.0, "end": -1.0}, "latency_s": 0.8556, "raw": {"SEGMENTS": [[0.4191, 2.056], [2.3428, 3.406], [2.8997, 5.6335], [5.9035, 6.7135], [7.0678, 8.266], [8.5528, 9.9366]], "SPEAKERS": [0, 0, 1, 1, 0, 0]}}

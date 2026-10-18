@@ -1,0 +1,50 @@
+[
+ {
+  "file": "d05_clipped.wav",
+  "start": 0.5,
+  "end": 5.14,
+  "speaker": "advisor"
+ },
+ {
+  "file": "d05_clipped.wav",
+  "start": 5.49,
+  "end": 10.9,
+  "speaker": "caller"
+ },
+ {
+  "file": "d05_clipped.wav",
+  "start": 11.25,
+  "end": 17.32,
+  "speaker": "advisor"
+ },
+ {
+  "file": "d05_clipped.wav",
+  "start": 17.67,
+  "end": 20.59,
+  "speaker": "caller"
+ },
+ {
+  "file": "d05_clipped.wav",
+  "start": 21.29,
+  "end": 27.02,
+  "speaker": "advisor"
+ },
+ {
+  "file": "d05_clipped.wav",
+  "start": 27.37,
+  "end": 29.91,
+  "speaker": "caller"
+ },
+ {
+  "file": "d05_clipped.wav",
+  "start": 30.26,
+  "end": 35.51,
+  "speaker": "advisor"
+ },
+ {
+  "file": "d05_clipped.wav",
+  "start": 35.01,
+  "end": 36.69,
+  "speaker": "caller"
+ }
+]

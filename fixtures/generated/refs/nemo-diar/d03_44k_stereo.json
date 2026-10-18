@@ -1,0 +1,68 @@
+{
+ "status": "success",
+ "session_id": "d03_44k_stereo",
+ "transcription": "Right, let us get started. The main item today is the release plan for the new billing system. I have the numbers from last week. Error rates dropped by almost half after the patch went out. That matches what we saw in the logs as well. Good. So are we confident enough to move the launch forward by one week? I would rather keep the original date. We still need to finish the load tests on the payment service. I agree. One more week of data would also make the report much stronger. Fair enough. We keep the date. Can you both send me a short summary by Friday? Yes, I will have it ready by Thursday afternoon. Same here. I will include the load test results if they are finished.",
+ "speaker_count": 3,
+ "sentences": [
+  {
+   "speaker": "chair",
+   "start_time": 0.6,
+   "end_time": 6.5,
+   "text": "Right, let us get started. The main item today is the release plan for the new billing system."
+  },
+  {
+   "speaker": "analyst",
+   "start_time": 6.85,
+   "end_time": 12.08,
+   "text": "I have the numbers from last week. Error rates dropped by almost half after the patch went out."
+  },
+  {
+   "speaker": "engineer",
+   "start_time": 11.38,
+   "end_time": 14.02,
+   "text": "That matches what we saw in the logs as well."
+  },
+  {
+   "speaker": "chair",
+   "start_time": 14.52,
+   "end_time": 18.51,
+   "text": "Good. So are we confident enough to move the launch forward by one week?"
+  },
+  {
+   "speaker": "engineer",
+   "start_time": 18.86,
+   "end_time": 23.96,
+   "text": "I would rather keep the original date. We still need to finish the load tests on the payment service."
+  },
+  {
+   "speaker": "analyst",
+   "start_time": 24.31,
+   "end_time": 28.42,
+   "text": "I agree. One more week of data would also make the report much stronger."
+  },
+  {
+   "speaker": "chair",
+   "start_time": 28.02,
+   "end_time": 28.99,
+   "text": "Fair enough."
+  },
+  {
+   "speaker": "chair",
+   "start_time": 29.29,
+   "end_time": 33.2,
+   "text": "We keep the date. Can you both send me a short summary by Friday?"
+  },
+  {
+   "speaker": "analyst",
+   "start_time": 33.55,
+   "end_time": 36.21,
+   "text": "Yes, I will have it ready by Thursday afternoon."
+  },
+  {
+   "speaker": "engineer",
+   "start_time": 36.56,
+   "end_time": 40.17,
+   "text": "Same here. I will include the load test results if they are finished."
+  }
+ ]
+}

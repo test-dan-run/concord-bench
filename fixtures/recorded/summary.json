@@ -1,0 +1,212 @@
+{
+ "checks": {
+  "silero-vad": {
+   "capabilities": [
+    "vad"
+   ],
+   "timing_level": "segment",
+   "lines": [
+    [
+     "pass",
+     "contract"
+    ],
+    [
+     "pass",
+     "signature"
+    ],
+    [
+     "pass",
+     "request"
+    ],
+    [
+     "pass",
+     "segments"
+    ],
+    [
+     "pass",
+     "result"
+    ]
+   ]
+  },
+  "pyannote-diarization": {
+   "capabilities": [
+    "diar"
+   ],
+   "timing_level": "segment",
+   "lines": [
+    [
+     "pass",
+     "contract"
+    ],
+    [
+     "pass",
+     "signature"
+    ],
+    [
+     "pass",
+     "request"
+    ],
+    [
+     "pass",
+     "speakers"
+    ],
+    [
+     "pass",
+     "result"
+    ]
+   ]
+  },
+  "nemotron-3-diarization": {
+   "capabilities": [
+    "diar"
+   ],
+   "timing_level": "segment",
+   "lines": [
+    [
+     "pass",
+     "contract"
+    ],
+    [
+     "pass",
+     "signature"
+    ],
+    [
+     "pass",
+     "request"
+    ],
+    [
+     "pass",
+     "speakers"
+    ],
+    [
+     "pass",
+     "result"
+    ]
+   ]
+  },
+  "whisper-large-v3": {
+   "capabilities": [
+    "asr"
+   ],
+   "timing_level": "segment",
+   "lines": [
+    [
+     "pass",
+     "contract"
+    ],
+    [
+     "pass",
+     "request"
+    ],
+    [
+     "pass",
+     "timing"
+    ],
+    [
+     "pass",
+     "transcript"
+    ],
+    [
+     "pass",
+     "result"
+    ]
+   ]
+  },
+  "faster-whisper-large-v3": {
+   "capabilities": [
+    "asr"
+   ],
+   "timing_level": "word",
+   "lines": [
+    [
+     "pass",
+     "contract"
+    ],
+    [
+     "pass",
+     "request"
+    ],
+    [
+     "pass",
+     "timing"
+    ],
+    [
+     "pass",
+     "transcript"
+    ],
+    [
+     "pass",
+     "result"
+    ]
+   ]
+  }
+ },
+ "asr": {
+  "5": 0.02894356005788712,
+  "4": 0.02894356005788712
+ },
+ "diar": {
+  "3": [
+   "DER",
+   0.12231044305715497
+  ],
+  "2": [
+   "DER",
+   0.15112067398024126
+  ],
+  "1": [
+   "VAD error",
+   0.06922096059262854
+  ]
+ },
+ "pipelines": [
+  {
+   "label": "Reference segments + speakers \u2192 faster-whisper-large-v3",
+   "cpwer": 0.020260492040520984,
+   "wer": 0.020260492040520984,
+   "der": 0.0
+  },
+  {
+   "label": "Reference segments + speakers \u2192 whisper-large-v3",
+   "cpwer": 0.024602026049204053,
+   "wer": 0.024602026049204053,
+   "der": 0.0
+  },
+  {
+   "label": "nemotron-3-diarization \u2192 whisper-large-v3",
+   "cpwer": 0.13314037626628075,
+   "wer": 0.023154848046309694,
+   "der": 0.12231044305715497
+  },
+  {
+   "label": "nemotron-3-diarization \u2192 faster-whisper-large-v3",
+   "cpwer": 0.14182344428364688,
+   "wer": 0.02894356005788712,
+   "der": 0.12231044305715497
+  },
+  {
+   "label": "pyannote-diarization \u2192 whisper-large-v3",
+   "cpwer": 0.1476121562952243,
+   "wer": 0.03762662807525326,
+   "der": 0.15112067398024126
+  },
+  {
+   "label": "pyannote-diarization \u2192 faster-whisper-large-v3",
+   "cpwer": 0.15195369030390737,
+   "wer": 0.041968162083936326,
+   "der": 0.15112067398024126
+  },
+  {
+   "label": "silero-vad \u2192 faster-whisper-large-v3",
+   "cpwer": null,
+   "wer": 0.020260492040520984,
+   "der": null
+  },
+  {
+   "label": "silero-vad \u2192 whisper-large-v3",
+   "cpwer": null,
+   "wer": 0.024602026049204053,
+   "der": null
+  }
+ ]
+}

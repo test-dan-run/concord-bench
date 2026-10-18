@@ -1,0 +1,118 @@
+@import "tailwindcss";
+@import "@fontsource-variable/inter";
+@import "@fontsource-variable/jetbrains-mono";
+
+/* AeroAudio DS (HANDOFF §7). Dark slate only. */
+@theme {
+  --font-sans: "Inter Variable", Inter, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, monospace;
+
+  --color-canvas: #0a0f1d;
+  --color-panel: #111827;
+  --color-track: #1e293b;
+  --color-active: #283548;
+  --color-line: #334155;
+  --color-fg: #f8fafc;
+  --color-muted: #94a3b8;
+  --color-subtle: #64748b;
+  --color-focus: #38bdf8;
+  --color-primary: #06b6d4;
+  --color-secondary: #6366f1;
+
+  /* outcome / confidence */
+  --color-good: #10b981;
+  --color-warn: #f59e0b;
+  --color-bad: #f43f5e;
+  --color-pending: #64748b;
+
+  /* error types: ASR (ins / del / sub) and DER (missed / false alarm / confusion) */
+  --color-ins: #10b981;
+  --color-del: #f43f5e;
+  --color-sub: #f59e0b;
+  --color-missed: #f43f5e;
+  --color-fa: #f59e0b;
+  --color-confusion: #a855f7;
+
+  /* pipeline stages */
+  --color-stage-asr: #38bdf8;
+  --color-stage-seg: #10b981;
+  --color-stage-spk: #a855f7;
+
+  /* speakers, up to 8 */
+  --color-spk-1: #14b8a6;
+  --color-spk-2: #f97316;
+  --color-spk-3: #a855f7;
+  --color-spk-4: #facc15;
+  --color-spk-5: #38bdf8;
+  --color-spk-6: #ec4899;
+  --color-spk-7: #84cc16;
+  --color-spk-8: #8b5cf6;
+  --color-overlap: #dc143c;
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    min-height: 100%;
+  }
+  body {
+    margin: 0;
+    background: var(--color-canvas);
+    color: var(--color-fg);
+    font-family: var(--font-sans);
+    font-size: 14px;
+    -webkit-font-smoothing: antialiased;
+  }
+  a {
+    color: var(--color-focus);
+  }
+  a:hover {
+    color: #7dd3fc;
+  }
+  button,
+  select,
+  input,
+  textarea {
+    font-family: inherit;
+  }
+  input::placeholder,
+  textarea::placeholder {
+    color: var(--color-subtle);
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-focus);
+    outline-offset: 2px;
+  }
+  ::selection {
+    background: #38bdf855;
+  }
+}
+
+/* Every metric, time and token: JetBrains Mono with tabular figures. */
+.num {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.hatch {
+  background-image: repeating-linear-gradient(
+    45deg,
+    color-mix(in srgb, var(--color-overlap) 55%, transparent) 0 2px,
+    transparent 2px 6px
+  );
+}
+
+.scroll-thin {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-line) transparent;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}

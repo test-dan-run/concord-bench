@@ -1,0 +1,26 @@
+{
+ "status": "success",
+ "session_id": "d01",
+ "transcription": "Good morning, you are through to the broadband support team. My name is Sarah. How can I help? Hi Sarah. My internet keeps dropping out every evening, usually around seven o'clock. I am sorry to hear that. Can you tell me which lights are showing on your router right now?",
+ "speaker_count": 2,
+ "sentences": [
+  {
+   "speaker": "agent",
+   "start_time": 0.5,
+   "end_time": 5.55,
+   "text": "Good morning, you are through to the broadband support team. My name is Sarah. How can I help?"
+  },
+  {
+   "speaker": "customer",
+   "start_time": 5.9,
+   "end_time": 11.44,
+   "text": "Hi Sarah. My internet keeps dropping out every evening, usually around seven o'clock."
+  },
+  {
+   "speaker": "agent",
+   "start_time": 11.79,
+   "end_time": 16.19,
+   "text": "I am sorry to hear that. Can you tell me which lights are showing on your router right now?"
+  }
+ ]
+}

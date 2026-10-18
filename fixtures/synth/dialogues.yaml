@@ -1,0 +1,114 @@
+# Dialogue specs for the synthesised fixture set (PLAN §5 M0, Q10).
+#
+# Each turn is synthesised alone by kokoro-tts, trimmed to its speech, then placed:
+#   at: <s>        absolute start
+#   gap: <s>       start <s> after the previous turn ends (default 0.35)
+#   overlap: <s>   start <s> before the previous turn ends (overlapped speech)
+# `text` is exactly what the voice reads, so it is the reference transcript.
+# `output` says how the mixed audio is written: the ingest edge cases come from conversion.
+
+check_clip:
+  # ~10 s, two voices, one short overlap: the compatibility-check clip.
+  id: check_clip
+  voices: {agent: af_heart, caller: am_michael}
+  noise_db: null
+  turns:
+    - {spk: agent, at: 0.4, text: "Thank you for calling the help desk. How can I help you today?"}
+    - {spk: caller, overlap: 0.5, text: "Hi, my parcel was meant to arrive yesterday but it never came."}
+    - {spk: agent, gap: 0.3, text: "I am sorry about that. Let me check the tracking for you."}
+
+dataset:
+  - id: d01
+    voices: {agent: af_heart, customer: am_michael}
+    noise_db: -50
+    output: {format: flac}
+    condition: clean
+    turns:
+      - {spk: agent, at: 0.5, text: "Good morning, you are through to the broadband support team. My name is Sarah. How can I help?"}
+      - {spk: customer, text: "Hi Sarah. My internet keeps dropping out every evening, usually around seven o'clock."}
+      - {spk: agent, text: "I am sorry to hear that. Can you tell me which lights are showing on your router right now?"}
+      - {spk: customer, text: "The power light is green, but the internet light is flashing orange."}
+      - {spk: agent, gap: 0.6, text: "Thanks. That usually means the line is out of sync. I will run a quick test from our side."}
+      - {spk: customer, overlap: 0.4, text: "Okay, no problem."}
+      - {spk: agent, gap: 1.2, text: "The test found some noise on the line. I can book an engineer for Thursday morning. Does that work for you?"}
+      - {spk: customer, text: "Thursday morning is perfect. Thank you very much."}
+
+  - id: d02_8k
+    voices: {receptionist: bf_emma, patient: am_adam}
+    noise_db: -45
+    output: {format: wav, sample_rate: 8000}
+    condition: telephony
+    turns:
+      - {spk: receptionist, at: 0.3, text: "Hello, Riverside dental practice, Emma speaking."}
+      - {spk: patient, text: "Hi, I would like to book a check up please. I have not been in for about a year."}
+      - {spk: receptionist, text: "Of course. Could I take your date of birth and the first line of your address?"}
+      - {spk: patient, text: "Yes, it is the fourth of March, nineteen eighty six, and I live at twelve Mill Lane."}
+      - {spk: receptionist, gap: 0.8, text: "Thank you. I have found your record. We have an appointment on Tuesday at half past two, or Friday at ten in the morning."}
+      - {spk: patient, text: "Friday at ten would be better for me."}
+      - {spk: receptionist, overlap: 0.3, text: "Lovely. That is booked for you."}
+      - {spk: receptionist, gap: 0.4, text: "We will send a reminder text the day before. Is there anything else I can help with?"}
+      - {spk: patient, text: "No, that is everything. Thanks, bye."}
+
+  - id: d03_44k_stereo
+    voices: {chair: bm_george, analyst: af_bella, engineer: am_echo}
+    noise_db: -48
+    output: {format: mp3, sample_rate: 44100, channels: 2}
+    condition: meeting
+    turns:
+      - {spk: chair, at: 0.6, text: "Right, let us get started. The main item today is the release plan for the new billing system."}
+      - {spk: analyst, text: "I have the numbers from last week. Error rates dropped by almost half after the patch went out."}
+      - {spk: engineer, overlap: 0.7, text: "That matches what we saw in the logs as well."}
+      - {spk: chair, gap: 0.5, text: "Good. So are we confident enough to move the launch forward by one week?"}
+      - {spk: engineer, text: "I would rather keep the original date. We still need to finish the load tests on the payment service."}
+      - {spk: analyst, text: "I agree. One more week of data would also make the report much stronger."}
+      - {spk: chair, overlap: 0.4, text: "Fair enough."}
+      - {spk: chair, gap: 0.3, text: "We keep the date. Can you both send me a short summary by Friday?"}
+      - {spk: analyst, text: "Yes, I will have it ready by Thursday afternoon."}
+      - {spk: engineer, text: "Same here. I will include the load test results if they are finished."}
+
+  - id: d04
+    voices: {agent: am_liam, customer: af_nicole}
+    noise_db: -46
+    output: {format: ogg}
+    condition: clean
+    turns:
+      - {spk: agent, at: 0.4, text: "Thanks for calling Swift Deliveries. Can I have your tracking number please?"}
+      - {spk: customer, text: "Sure, it is A B seven three nine two."}
+      - {spk: agent, gap: 1.0, text: "Thank you. I can see the parcel is at your local depot. It will be delivered tomorrow before noon."}
+      - {spk: customer, text: "Great. Can the driver leave it with my neighbour if I am out?"}
+      - {spk: agent, text: "Yes, I have added that note to the delivery."}
+      - {spk: customer, overlap: 0.3, text: "Brilliant, thanks."}
+
+  - id: d05_clipped
+    voices: {advisor: bf_isabella, caller: bm_lewis}
+    noise_db: -44
+    output: {format: wav, gain_db: 14}
+    condition: clipped
+    turns:
+      - {spk: advisor, at: 0.5, text: "You are speaking to the card services team. Before we start, can you confirm your full name?"}
+      - {spk: caller, text: "It is Daniel Morgan. My card was declined this morning when I tried to pay for petrol."}
+      - {spk: advisor, text: "Thank you, Mr Morgan. I can see a temporary block was placed on the card because of an unusual payment overseas."}
+      - {spk: caller, text: "That was not me. I have not been abroad this year."}
+      - {spk: advisor, gap: 0.7, text: "Understood. I will cancel that card now and send a replacement. It should arrive within five working days."}
+      - {spk: caller, text: "Will I get the money back for the overseas payment?"}
+      - {spk: advisor, text: "Yes, the payment will be refunded once our fraud team has reviewed it, usually within ten days."}
+      - {spk: caller, overlap: 0.5, text: "Okay, that is a relief."}
+
+  - id: d06
+    voices: {lead: af_sarah, designer: am_eric, tester: bf_alice}
+    noise_db: -40
+    output: {format: flac}
+    condition: noisy
+    turns:
+      - {spk: lead, at: 0.4, text: "Morning everyone. Let us go round quickly. What did you work on yesterday and is anything blocking you?"}
+      - {spk: designer, text: "I finished the new sign up screens and shared them in the design channel. I am waiting on feedback from marketing."}
+      - {spk: lead, overlap: 0.5, text: "I will chase them today."}
+      - {spk: tester, gap: 0.4, text: "I tested the password reset flow. I found two bugs, one on mobile and one with expired links."}
+      - {spk: designer, text: "Is the mobile one about the button being hidden behind the keyboard?"}
+      - {spk: tester, text: "Yes, exactly. It only happens on smaller phones."}
+      - {spk: lead, gap: 0.6, text: "Can you two pair on that this morning? I would like both bugs fixed before the demo on Wednesday."}
+      - {spk: designer, overlap: 0.6, text: "Sounds good to me."}
+      - {spk: tester, overlap: 0.3, text: "Sure."}
+      - {spk: lead, gap: 0.5, text: "Great. Last thing, please update your tickets before lunch so the board is accurate for the planning meeting."}
+      - {spk: tester, text: "Will do. I will also add the steps to reproduce both bugs."}
+      - {spk: designer, text: "And I will attach the updated screens to the sign up ticket."}

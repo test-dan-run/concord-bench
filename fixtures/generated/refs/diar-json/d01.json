@@ -1,0 +1,50 @@
+[
+ {
+  "file": "d01.flac",
+  "start": 0.5,
+  "end": 5.55,
+  "speaker": "agent"
+ },
+ {
+  "file": "d01.flac",
+  "start": 5.9,
+  "end": 11.44,
+  "speaker": "customer"
+ },
+ {
+  "file": "d01.flac",
+  "start": 11.79,
+  "end": 16.19,
+  "speaker": "agent"
+ },
+ {
+  "file": "d01.flac",
+  "start": 16.54,
+  "end": 20.66,
+  "speaker": "customer"
+ },
+ {
+  "file": "d01.flac",
+  "start": 21.26,
+  "end": 25.88,
+  "speaker": "agent"
+ },
+ {
+  "file": "d01.flac",
+  "start": 25.48,
+  "end": 26.72,
+  "speaker": "customer"
+ },
+ {
+  "file": "d01.flac",
+  "start": 27.92,
+  "end": 33.63,
+  "speaker": "agent"
+ },
+ {
+  "file": "d01.flac",
+  "start": 33.98,
+  "end": 37.13,
+  "speaker": "customer"
+ }
+]

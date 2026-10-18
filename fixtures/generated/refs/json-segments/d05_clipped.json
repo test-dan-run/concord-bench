@@ -1,0 +1,61 @@
+{
+ "file": "d05_clipped.wav",
+ "segments": [
+  {
+   "file": "d05_clipped.wav",
+   "start": 0.5,
+   "end": 5.14,
+   "speaker": "advisor",
+   "text": "You are speaking to the card services team. Before we start, can you confirm your full name?"
+  },
+  {
+   "file": "d05_clipped.wav",
+   "start": 5.49,
+   "end": 10.9,
+   "speaker": "caller",
+   "text": "It is Daniel Morgan. My card was declined this morning when I tried to pay for petrol."
+  },
+  {
+   "file": "d05_clipped.wav",
+   "start": 11.25,
+   "end": 17.32,
+   "speaker": "advisor",
+   "text": "Thank you, Mr Morgan. I can see a temporary block was placed on the card because of an unusual payment overseas."
+  },
+  {
+   "file": "d05_clipped.wav",
+   "start": 17.67,
+   "end": 20.59,
+   "speaker": "caller",
+   "text": "That was not me. I have not been abroad this year."
+  },
+  {
+   "file": "d05_clipped.wav",
+   "start": 21.29,
+   "end": 27.02,
+   "speaker": "advisor",
+   "text": "Understood. I will cancel that card now and send a replacement. It should arrive within five working days."
+  },
+  {
+   "file": "d05_clipped.wav",
+   "start": 27.37,
+   "end": 29.91,
+   "speaker": "caller",
+   "text": "Will I get the money back for the overseas payment?"
+  },
+  {
+   "file": "d05_clipped.wav",
+   "start": 30.26,
+   "end": 35.51,
+   "speaker": "advisor",
+   "text": "Yes, the payment will be refunded once our fraud team has reviewed it, usually within ten days."
+  },
+  {
+   "file": "d05_clipped.wav",
+   "start": 35.01,
+   "end": 36.69,
+   "speaker": "caller",
+   "text": "Okay, that is a relief."
+  }
+ ]
+}

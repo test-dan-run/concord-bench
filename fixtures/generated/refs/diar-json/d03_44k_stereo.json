@@ -1,0 +1,62 @@
+[
+ {
+  "file": "d03_44k_stereo.mp3",
+  "start": 0.6,
+  "end": 6.5,
+  "speaker": "chair"
+ },
+ {
+  "file": "d03_44k_stereo.mp3",
+  "start": 6.85,
+  "end": 12.08,
+  "speaker": "analyst"
+ },
+ {
+  "file": "d03_44k_stereo.mp3",
+  "start": 11.38,
+  "end": 14.02,
+  "speaker": "engineer"
+ },
+ {
+  "file": "d03_44k_stereo.mp3",
+  "start": 14.52,
+  "end": 18.51,
+  "speaker": "chair"
+ },
+ {
+  "file": "d03_44k_stereo.mp3",
+  "start": 18.86,
+  "end": 23.96,
+  "speaker": "engineer"
+ },
+ {
+  "file": "d03_44k_stereo.mp3",
+  "start": 24.31,
+  "end": 28.42,
+  "speaker": "analyst"
+ },
+ {
+  "file": "d03_44k_stereo.mp3",
+  "start": 28.02,
+  "end": 28.99,
+  "speaker": "chair"
+ },
+ {
+  "file": "d03_44k_stereo.mp3",
+  "start": 29.29,
+  "end": 33.2,
+  "speaker": "chair"
+ },
+ {
+  "file": "d03_44k_stereo.mp3",
+  "start": 33.55,
+  "end": 36.21,
+  "speaker": "analyst"
+ },
+ {
+  "file": "d03_44k_stereo.mp3",
+  "start": 36.56,
+  "end": 40.17,
+  "speaker": "engineer"
+ }
+]

@@ -1,0 +1,3 @@
+{"file": "d01.wav", "start": 0.5, "end": 5.55, "speaker": "agent", "text": "Good morning, you are through to the broadband support team. My name is Sarah. How can I help?"}
+{"file": "d01.wav", "start": 5.9, "end": 11.44, "speaker": "customer", "text": "Hi Sarah. My internet keeps dropping out every evening, usually around seven o'clock."}
+{"file": "d01.wav", "start": 11.79, "end": 16.19, "speaker": "agent", "text": "I am sorry to hear that. Can you tell me which lights are showing on your router right now?"}

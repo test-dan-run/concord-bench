@@ -1,0 +1,940 @@
+[
+ {
+  "session_id": "d01",
+  "speaker": "agent",
+  "start_time": 0.5,
+  "end_time": 5.55,
+  "words": "Good morning, you are through to the broadband support team. My name is Sarah. How can I help?"
+ },
+ {
+  "session_id": "d01",
+  "speaker": "customer",
+  "start_time": 5.9,
+  "end_time": 11.44,
+  "words": "Hi Sarah. My internet keeps dropping out every evening, usually around seven o'clock."
+ },
+ {
+  "session_id": "d01",
+  "speaker": "agent",
+  "start_time": 11.79,
+  "end_time": 16.19,
+  "words": "I am sorry to hear that. Can you tell me which lights are showing on your router right now?"
+ },
+ {
+  "session_id": "d01",
+  "speaker": "customer",
+  "start_time": 16.54,
+  "end_time": 20.66,
+  "words": "The power light is green, but the internet light is flashing orange."
+ },
+ {
+  "session_id": "d01",
+  "speaker": "agent",
+  "start_time": 21.26,
+  "end_time": 25.88,
+  "words": "Thanks. That usually means the line is out of sync. I will run a quick test from our side."
+ },
+ {
+  "session_id": "d01",
+  "speaker": "customer",
+  "start_time": 25.48,
+  "end_time": 26.72,
+  "words": "Okay, no problem."
+ },
+ {
+  "session_id": "d01",
+  "speaker": "agent",
+  "start_time": 27.92,
+  "end_time": 33.63,
+  "words": "The test found some noise on the line. I can book an engineer for Thursday morning. Does that work for you?"
+ },
+ {
+  "session_id": "d01",
+  "speaker": "customer",
+  "start_time": 33.98,
+  "end_time": 37.13,
+  "words": "Thursday morning is perfect. Thank you very much."
+ },
+ {
+  "session_id": "d02_8k",
+  "speaker": "receptionist",
+  "start_time": 0.3,
+  "end_time": 3.04,
+  "words": "Hello, Riverside dental practice, Emma speaking."
+ },
+ {
+  "session_id": "d02_8k",
+  "speaker": "patient",
+  "start_time": 3.39,
+  "end_time": 7.22,
+  "words": "Hi, I would like to book a check up please. I have not been in for about a year."
+ },
+ {
+  "session_id": "d02_8k",
+  "speaker": "receptionist",
+  "start_time": 7.57,
+  "end_time": 10.96,
+  "words": "Of course. Could I take your date of birth and the first line of your address?"
+ },
+ {
+  "session_id": "d02_8k",
+  "speaker": "patient",
+  "start_time": 11.31,
+  "end_time": 15.58,
+  "words": "Yes, it is the fourth of March, nineteen eighty six, and I live at twelve Mill Lane."
+ },
+ {
+  "session_id": "d02_8k",
+  "speaker": "receptionist",
+  "start_time": 16.38,
+  "end_time": 22.31,
+  "words": "Thank you. I have found your record. We have an appointment on Tuesday at half past two, or Friday at ten in the morning."
+ },
+ {
+  "session_id": "d02_8k",
+  "speaker": "patient",
+  "start_time": 22.66,
+  "end_time": 24.54,
+  "words": "Friday at ten would be better for me."
+ },
+ {
+  "session_id": "d02_8k",
+  "speaker": "receptionist",
+  "start_time": 24.24,
+  "end_time": 25.76,
+  "words": "Lovely. That is booked for you."
+ },
+ {
+  "session_id": "d02_8k",
+  "speaker": "receptionist",
+  "start_time": 26.16,
+  "end_time": 30.54,
+  "words": "We will send a reminder text the day before. Is there anything else I can help with?"
+ },
+ {
+  "session_id": "d02_8k",
+  "speaker": "patient",
+  "start_time": 30.89,
+  "end_time": 32.87,
+  "words": "No, that is everything. Thanks, bye."
+ },
+ {
+  "session_id": "d03_44k_stereo",
+  "speaker": "chair",
+  "start_time": 0.6,
+  "end_time": 6.5,
+  "words": "Right, let us get started. The main item today is the release plan for the new billing system."
+ },
+ {
+  "session_id": "d03_44k_stereo",
+  "speaker": "analyst",
+  "start_time": 6.85,
+  "end_time": 12.08,
+  "words": "I have the numbers from last week. Error rates dropped by almost half after the patch went out."
+ },
+ {
+  "session_id": "d03_44k_stereo",
+  "speaker": "engineer",
+  "start_time": 11.38,
+  "end_time": 14.02,
+  "words": "That matches what we saw in the logs as well."
+ },
+ {
+  "session_id": "d03_44k_stereo",
+  "speaker": "chair",
+  "start_time": 14.52,
+  "end_time": 18.51,
+  "words": "Good. So are we confident enough to move the launch forward by one week?"
+ },
+ {
+  "session_id": "d03_44k_stereo",
+  "speaker": "engineer",
+  "start_time": 18.86,
+  "end_time": 23.96,
+  "words": "I would rather keep the original date. We still need to finish the load tests on the payment service."
+ },
+ {
+  "session_id": "d03_44k_stereo",
+  "speaker": "analyst",
+  "start_time": 24.31,
+  "end_time": 28.42,
+  "words": "I agree. One more week of data would also make the report much stronger."
+ },
+ {
+  "session_id": "d03_44k_stereo",
+  "speaker": "chair",
+  "start_time": 28.02,
+  "end_time": 28.99,
+  "words": "Fair enough."
+ },
+ {
+  "session_id": "d03_44k_stereo",
+  "speaker": "chair",
+  "start_time": 29.29,
+  "end_time": 33.2,
+  "words": "We keep the date. Can you both send me a short summary by Friday?"
+ },
+ {
+  "session_id": "d03_44k_stereo",
+  "speaker": "analyst",
+  "start_time": 33.55,
+  "end_time": 36.21,
+  "words": "Yes, I will have it ready by Thursday afternoon."
+ },
+ {
+  "session_id": "d03_44k_stereo",
+  "speaker": "engineer",
+  "start_time": 36.56,
+  "end_time": 40.17,
+  "words": "Same here. I will include the load test results if they are finished."
+ },
+ {
+  "session_id": "d04",
+  "speaker": "agent",
+  "start_time": 0.4,
+  "end_time": 4.11,
+  "words": "Thanks for calling Swift Deliveries. Can I have your tracking number please?"
+ },
+ {
+  "session_id": "d04",
+  "speaker": "customer",
+  "start_time": 4.46,
+  "end_time": 7.32,
+  "words": "Sure, it is A B seven three nine two."
+ },
+ {
+  "session_id": "d04",
+  "speaker": "agent",
+  "start_time": 8.32,
+  "end_time": 13.47,
+  "words": "Thank you. I can see the parcel is at your local depot. It will be delivered tomorrow before noon."
+ },
+ {
+  "session_id": "d04",
+  "speaker": "customer",
+  "start_time": 13.82,
+  "end_time": 18.06,
+  "words": "Great. Can the driver leave it with my neighbour if I am out?"
+ },
+ {
+  "session_id": "d04",
+  "speaker": "agent",
+  "start_time": 18.41,
+  "end_time": 20.72,
+  "words": "Yes, I have added that note to the delivery."
+ },
+ {
+  "session_id": "d04",
+  "speaker": "customer",
+  "start_time": 20.42,
+  "end_time": 21.56,
+  "words": "Brilliant, thanks."
+ },
+ {
+  "session_id": "d05_clipped",
+  "speaker": "advisor",
+  "start_time": 0.5,
+  "end_time": 5.14,
+  "words": "You are speaking to the card services team. Before we start, can you confirm your full name?"
+ },
+ {
+  "session_id": "d05_clipped",
+  "speaker": "caller",
+  "start_time": 5.49,
+  "end_time": 10.9,
+  "words": "It is Daniel Morgan. My card was declined this morning when I tried to pay for petrol."
+ },
+ {
+  "session_id": "d05_clipped",
+  "speaker": "advisor",
+  "start_time": 11.25,
+  "end_time": 17.32,
+  "words": "Thank you, Mr Morgan. I can see a temporary block was placed on the card because of an unusual payment overseas."
+ },
+ {
+  "session_id": "d05_clipped",
+  "speaker": "caller",
+  "start_time": 17.67,
+  "end_time": 20.59,
+  "words": "That was not me. I have not been abroad this year."
+ },
+ {
+  "session_id": "d05_clipped",
+  "speaker": "advisor",
+  "start_time": 21.29,
+  "end_time": 27.02,
+  "words": "Understood. I will cancel that card now and send a replacement. It should arrive within five working days."
+ },
+ {
+  "session_id": "d05_clipped",
+  "speaker": "caller",
+  "start_time": 27.37,
+  "end_time": 29.91,
+  "words": "Will I get the money back for the overseas payment?"
+ },
+ {
+  "session_id": "d05_clipped",
+  "speaker": "advisor",
+  "start_time": 30.26,
+  "end_time": 35.51,
+  "words": "Yes, the payment will be refunded once our fraud team has reviewed it, usually within ten days."
+ },
+ {
+  "session_id": "d05_clipped",
+  "speaker": "caller",
+  "start_time": 35.01,
+  "end_time": 36.69,
+  "words": "Okay, that is a relief."
+ },
+ {
+  "session_id": "d06",
+  "speaker": "lead",
+  "start_time": 0.4,
+  "end_time": 5.97,
+  "words": "Morning everyone. Let us go round quickly. What did you work on yesterday and is anything blocking you?"
+ },
+ {
+  "session_id": "d06",
+  "speaker": "designer",
+  "start_time": 6.32,
+  "end_time": 11.72,
+  "words": "I finished the new sign up screens and shared them in the design channel. I am waiting on feedback from marketing."
+ },
+ {
+  "session_id": "d06",
+  "speaker": "lead",
+  "start_time": 11.22,
+  "end_time": 12.44,
+  "words": "I will chase them today."
+ },
+ {
+  "session_id": "d06",
+  "speaker": "tester",
+  "start_time": 12.84,
+  "end_time": 18.52,
+  "words": "I tested the password reset flow. I found two bugs, one on mobile and one with expired links."
+ },
+ {
+  "session_id": "d06",
+  "speaker": "designer",
+  "start_time": 18.87,
+  "end_time": 22.09,
+  "words": "Is the mobile one about the button being hidden behind the keyboard?"
+ },
+ {
+  "session_id": "d06",
+  "speaker": "tester",
+  "start_time": 22.44,
+  "end_time": 25.51,
+  "words": "Yes, exactly. It only happens on smaller phones."
+ },
+ {
+  "session_id": "d06",
+  "speaker": "lead",
+  "start_time": 26.11,
+  "end_time": 31.1,
+  "words": "Can you two pair on that this morning? I would like both bugs fixed before the demo on Wednesday."
+ },
+ {
+  "session_id": "d06",
+  "speaker": "designer",
+  "start_time": 30.5,
+  "end_time": 31.57,
+  "words": "Sounds good to me."
+ },
+ {
+  "session_id": "d06",
+  "speaker": "tester",
+  "start_time": 31.27,
+  "end_time": 31.84,
+  "words": "Sure."
+ },
+ {
+  "session_id": "d06",
+  "speaker": "lead",
+  "start_time": 32.34,
+  "end_time": 38.15,
+  "words": "Great. Last thing, please update your tickets before lunch so the board is accurate for the planning meeting."
+ },
+ {
+  "session_id": "d06",
+  "speaker": "tester",
+  "start_time": 38.5,
+  "end_time": 41.81,
+  "words": "Will do. I will also add the steps to reproduce both bugs."
+ },
+ {
+  "session_id": "d06",
+  "speaker": "designer",
+  "start_time": 42.16,
+  "end_time": 45.06,
+  "words": "And I will attach the updated screens to the sign up ticket."
+ },
+ {
+  "session_id": "d07_corrupt",
+  "speaker": "agent",
+  "start_time": 0.0,
+  "end_time": 1.0,
+  "words": "unreadable"
+ },
+ {
+  "session_id": "d08_long",
+  "speaker": "d01_agent",
+  "start_time": 0.5,
+  "end_time": 5.55,
+  "words": "Good morning, you are through to the broadband support team. My name is Sarah. How can I help?"
+ },
+ {
+  "session_id": "d08_long",
+  "speaker": "d01_customer",
+  "start_time": 5.9,
+  "end_time": 11.44,
+  "words": "Hi Sarah. My internet keeps dropping out every evening, usually around seven o'clock."
+ },
+ {
+  "session_id": "d08_long",
+  "speaker": "d01_agent",
+  "start_time": 11.79,
+  "end_time": 16.19,
+  "words": "I am sorry to hear that. Can you tell me which lights are showing on your router right now?"
+ },
+ {
+  "session_id": "d08_long",
+  "speaker": "d01_customer",
+  "start_time": 16.54,
+  "end_time": 20.66,
+  "words": "The power light is green, but the internet light is flashing orange."
+ },
+ {
+  "session_id": "d08_long",
+  "speaker": "d01_agent",
+  "start_time": 21.26,
+  "end_time": 25.88,
+  "words": "Thanks. That usually means the line is out of sync. I will run a quick test from our side."
+ },
+ {
+  "session_id": "d08_long",
+  "speaker": "d01_customer",
+  "start_time": 25.48,
+  "end_time": 26.72,
+  "words": "Okay, no problem."
+ },
+ {
+  "session_id": "d08_long",
+  "speaker": "d01_agent",
+  "start_time": 27.92,
+  "end_time": 33.63,
+  "words": "The test found some noise on the line. I can book an engineer for Thursday morning. Does that work for you?"
+ },
+ {
+  "session_id": "d08_long",
+  "speaker": "d01_customer",
+  "start_time": 33.98,
+  "end_time": 37.13,
+  "words": "Thursday morning is perfect. Thank you very much."
+ },
+ {
+  "session_id": "d08_long",
+  "speaker": "d02_8k_receptionist",
+  "start_time": 39.53,
+  "end_time": 42.27,
+  "words": "Hello, Riverside dental practice, Emma speaking."
+ },
+ {
+  "session_id": "d08_long",
+  "speaker": "d02_8k_patient",
+  "start_time": 42.62,
+  "end_time": 46.45,
+  "words": "Hi, I would like to book a check up please. I have not been in for about a year."
+ },
+ {
+  "session_id": "d08_long",
+  "speaker": "d02_8k_receptionist",
+  "start_time": 46.8,
+  "end_time": 50.19,
+  "words": "Of course. Could I take your date of birth and the first line of your address?"
+ },
+ {
+  "session_id": "d08_long",
+  "speaker": "d02_8k_patient",
+  "start_time": 50.54,
+  "end_time": 54.81,
+  "words": "Yes, it is the fourth of March, nineteen eighty six, and I live at twelve Mill Lane."
+ },
+ {
+  "session_id": "d08_long",
+  "speaker": "d02_8k_receptionist",
+  "start_time": 55.61,
+  "end_time": 61.54,
+  "words": "Thank you. I have found your record. We have an appointment on Tuesday at half past two, or Friday at ten in the morning."
+ },
+ {
+  "session_id": "d08_long",
+  "speaker": "d02_8k_patient",
+  "start_time": 61.89,
+  "end_time": 63.77,
+  "words": "Friday at ten would be better for me."
+ },
+ {
+  "session_id": "d08_long",
+  "speaker": "d02_8k_receptionist",
+  "start_time": 63.47,
+  "end_time": 64.99,
+  "words": "Lovely. That is booked for you."
+ },
+ {
+  "session_id": "d08_long",
+  "speaker": "d02_8k_receptionist",
+  "start_time": 65.39,
+  "end_time": 69.77,
+  "words": "We will send a reminder text the day before. Is there anything else I can help with?"
+ },
+ {
+  "session_id": "d08_long",
+  "speaker": "d02_8k_patient",
+  "start_time": 70.12,
+  "end_time": 72.1,
+  "words": "No, that is everything. Thanks, bye."
+ },
+ {
+  "session_id": "d08_long",
+  "speaker": "d03_44k_stereo_chair",
+  "start_time": 74.8,
+  "end_time": 80.7,
+  "words": "Right, let us get started. The main item today is the release plan for the new billing system."
+ },
+ {
+  "session_id": "d08_long",
+  "speaker": "d03_44k_stereo_analyst",
+  "start_time": 81.05,
+  "end_time": 86.28,
+  "words": "I have the numbers from last week. Error rates dropped by almost half after the patch went out."
+ },
+ {
+  "session_id": "d08_long",
+  "speaker": "d03_44k_stereo_engineer",
+  "start_time": 85.58,
+  "end_time": 88.22,
+  "words": "That matches what we saw in the logs as well."
+ },
+ {
+  "session_id": "d08_long",
+  "speaker": "d03_44k_stereo_chair",
+  "start_time": 88.72,
+  "end_time": 92.71,
+  "words": "Good. So are we confident enough to move the launch forward by one week?"
+ },
+ {
+  "session_id": "d08_long",
+  "speaker": "d03_44k_stereo_engineer",
+  "start_time": 93.06,
+  "end_time": 98.16,
+  "words": "I would rather keep the original date. We still need to finish the load tests on the payment service."
+ },
+ {
+  "session_id": "d08_long",
+  "speaker": "d03_44k_stereo_analyst",
+  "start_time": 98.51,
+  "end_time": 102.62,
+  "words": "I agree. One more week of data would also make the report much stronger."
+ },
+ {
+  "session_id": "d08_long",
+  "speaker": "d03_44k_stereo_chair",
+  "start_time": 102.22,
+  "end_time": 103.19,
+  "words": "Fair enough."
+ },
+ {
+  "session_id": "d08_long",
+  "speaker": "d03_44k_stereo_chair",
+  "start_time": 103.49,
+  "end_time": 107.4,
+  "words": "We keep the date. Can you both send me a short summary by Friday?"
+ },
+ {
+  "session_id": "d08_long",
+  "speaker": "d03_44k_stereo_analyst",
+  "start_time": 107.75,
+  "end_time": 110.41,
+  "words": "Yes, I will have it ready by Thursday afternoon."
+ },
+ {
+  "session_id": "d08_long",
+  "speaker": "d03_44k_stereo_engineer",
+  "start_time": 110.76,
+  "end_time": 114.37,
+  "words": "Same here. I will include the load test results if they are finished."
+ },
+ {
+  "session_id": "d08_long",
+  "speaker": "d04_agent",
+  "start_time": 116.87,
+  "end_time": 120.58,
+  "words": "Thanks for calling Swift Deliveries. Can I have your tracking number please?"
+ },
+ {
+  "session_id": "d08_long",
+  "speaker": "d04_customer",
+  "start_time": 120.93,
+  "end_time": 123.79,
+  "words": "Sure, it is A B seven three nine two."
+ },
+ {
+  "session_id": "d08_long",
+  "speaker": "d04_agent",
+  "start_time": 124.79,
+  "end_time": 129.94,
+  "words": "Thank you. I can see the parcel is at your local depot. It will be delivered tomorrow before noon."
+ },
+ {
+  "session_id": "d08_long",
+  "speaker": "d04_customer",
+  "start_time": 130.29,
+  "end_time": 134.53,
+  "words": "Great. Can the driver leave it with my neighbour if I am out?"
+ },
+ {
+  "session_id": "d08_long",
+  "speaker": "d04_agent",
+  "start_time": 134.88,
+  "end_time": 137.19,
+  "words": "Yes, I have added that note to the delivery."
+ },
+ {
+  "session_id": "d08_long",
+  "speaker": "d04_customer",
+  "start_time": 136.89,
+  "end_time": 138.03,
+  "words": "Brilliant, thanks."
+ },
+ {
+  "session_id": "d08_long",
+  "speaker": "d05_clipped_advisor",
+  "start_time": 140.63,
+  "end_time": 145.27,
+  "words": "You are speaking to the card services team. Before we start, can you confirm your full name?"
+ },
+ {
+  "session_id": "d08_long",
+  "speaker": "d05_clipped_caller",
+  "start_time": 145.62,
+  "end_time": 151.03,
+  "words": "It is Daniel Morgan. My card was declined this morning when I tried to pay for petrol."
+ },
+ {
+  "session_id": "d08_long",
+  "speaker": "d05_clipped_advisor",
+  "start_time": 151.38,
+  "end_time": 157.45,
+  "words": "Thank you, Mr Morgan. I can see a temporary block was placed on the card because of an unusual payment overseas."
+ },
+ {
+  "session_id": "d08_long",
+  "speaker": "d05_clipped_caller",
+  "start_time": 157.8,
+  "end_time": 160.72,
+  "words": "That was not me. I have not been abroad this year."
+ },
+ {
+  "session_id": "d08_long",
+  "speaker": "d05_clipped_advisor",
+  "start_time": 161.42,
+  "end_time": 167.15,
+  "words": "Understood. I will cancel that card now and send a replacement. It should arrive within five working days."
+ },
+ {
+  "session_id": "d08_long",
+  "speaker": "d05_clipped_caller",
+  "start_time": 167.5,
+  "end_time": 170.04,
+  "words": "Will I get the money back for the overseas payment?"
+ },
+ {
+  "session_id": "d08_long",
+  "speaker": "d05_clipped_advisor",
+  "start_time": 170.39,
+  "end_time": 175.64,
+  "words": "Yes, the payment will be refunded once our fraud team has reviewed it, usually within ten days."
+ },
+ {
+  "session_id": "d08_long",
+  "speaker": "d05_clipped_caller",
+  "start_time": 175.14,
+  "end_time": 176.82,
+  "words": "Okay, that is a relief."
+ },
+ {
+  "session_id": "d08_long",
+  "speaker": "d06_lead",
+  "start_time": 179.32,
+  "end_time": 184.89,
+  "words": "Morning everyone. Let us go round quickly. What did you work on yesterday and is anything blocking you?"
+ },
+ {
+  "session_id": "d08_long",
+  "speaker": "d06_designer",
+  "start_time": 185.24,
+  "end_time": 190.64,
+  "words": "I finished the new sign up screens and shared them in the design channel. I am waiting on feedback from marketing."
+ },
+ {
+  "session_id": "d08_long",
+  "speaker": "d06_lead",
+  "start_time": 190.14,
+  "end_time": 191.36,
+  "words": "I will chase them today."
+ },
+ {
+  "session_id": "d08_long",
+  "speaker": "d06_tester",
+  "start_time": 191.76,
+  "end_time": 197.44,
+  "words": "I tested the password reset flow. I found two bugs, one on mobile and one with expired links."
+ },
+ {
+  "session_id": "d08_long",
+  "speaker": "d06_designer",
+  "start_time": 197.79,
+  "end_time": 201.01,
+  "words": "Is the mobile one about the button being hidden behind the keyboard?"
+ },
+ {
+  "session_id": "d08_long",
+  "speaker": "d06_tester",
+  "start_time": 201.36,
+  "end_time": 204.43,
+  "words": "Yes, exactly. It only happens on smaller phones."
+ },
+ {
+  "session_id": "d08_long",
+  "speaker": "d06_lead",
+  "start_time": 205.03,
+  "end_time": 210.02,
+  "words": "Can you two pair on that this morning? I would like both bugs fixed before the demo on Wednesday."
+ },
+ {
+  "session_id": "d08_long",
+  "speaker": "d06_designer",
+  "start_time": 209.42,
+  "end_time": 210.49,
+  "words": "Sounds good to me."
+ },
+ {
+  "session_id": "d08_long",
+  "speaker": "d06_tester",
+  "start_time": 210.19,
+  "end_time": 210.76,
+  "words": "Sure."
+ },
+ {
+  "session_id": "d08_long",
+  "speaker": "d06_lead",
+  "start_time": 211.26,
+  "end_time": 217.07,
+  "words": "Great. Last thing, please update your tickets before lunch so the board is accurate for the planning meeting."
+ },
+ {
+  "session_id": "d08_long",
+  "speaker": "d06_tester",
+  "start_time": 217.42,
+  "end_time": 220.73,
+  "words": "Will do. I will also add the steps to reproduce both bugs."
+ },
+ {
+  "session_id": "d08_long",
+  "speaker": "d06_designer",
+  "start_time": 221.08,
+  "end_time": 223.98,
+  "words": "And I will attach the updated screens to the sign up ticket."
+ },
+ {
+  "session_id": "d08_long",
+  "speaker": "d01_agent",
+  "start_time": 226.58,
+  "end_time": 231.63,
+  "words": "Good morning, you are through to the broadband support team. My name is Sarah. How can I help?"
+ },
+ {
+  "session_id": "d08_long",
+  "speaker": "d01_customer",
+  "start_time": 231.98,
+  "end_time": 237.52,
+  "words": "Hi Sarah. My internet keeps dropping out every evening, usually around seven o'clock."
+ },
+ {
+  "session_id": "d08_long",
+  "speaker": "d01_agent",
+  "start_time": 237.87,
+  "end_time": 242.27,
+  "words": "I am sorry to hear that. Can you tell me which lights are showing on your router right now?"
+ },
+ {
+  "session_id": "d08_long",
+  "speaker": "d01_customer",
+  "start_time": 242.62,
+  "end_time": 246.74,
+  "words": "The power light is green, but the internet light is flashing orange."
+ },
+ {
+  "session_id": "d08_long",
+  "speaker": "d01_agent",
+  "start_time": 247.34,
+  "end_time": 251.96,
+  "words": "Thanks. That usually means the line is out of sync. I will run a quick test from our side."
+ },
+ {
+  "session_id": "d08_long",
+  "speaker": "d01_customer",
+  "start_time": 251.56,
+  "end_time": 252.8,
+  "words": "Okay, no problem."
+ },
+ {
+  "session_id": "d08_long",
+  "speaker": "d01_agent",
+  "start_time": 254.0,
+  "end_time": 259.71,
+  "words": "The test found some noise on the line. I can book an engineer for Thursday morning. Does that work for you?"
+ },
+ {
+  "session_id": "d08_long",
+  "speaker": "d01_customer",
+  "start_time": 260.06,
+  "end_time": 263.21,
+  "words": "Thursday morning is perfect. Thank you very much."
+ },
+ {
+  "session_id": "d08_long",
+  "speaker": "d02_8k_receptionist",
+  "start_time": 265.61,
+  "end_time": 268.35,
+  "words": "Hello, Riverside dental practice, Emma speaking."
+ },
+ {
+  "session_id": "d08_long",
+  "speaker": "d02_8k_patient",
+  "start_time": 268.7,
+  "end_time": 272.53,
+  "words": "Hi, I would like to book a check up please. I have not been in for about a year."
+ },
+ {
+  "session_id": "d08_long",
+  "speaker": "d02_8k_receptionist",
+  "start_time": 272.88,
+  "end_time": 276.27,
+  "words": "Of course. Could I take your date of birth and the first line of your address?"
+ },
+ {
+  "session_id": "d08_long",
+  "speaker": "d02_8k_patient",
+  "start_time": 276.62,
+  "end_time": 280.89,
+  "words": "Yes, it is the fourth of March, nineteen eighty six, and I live at twelve Mill Lane."
+ },
+ {
+  "session_id": "d08_long",
+  "speaker": "d02_8k_receptionist",
+  "start_time": 281.69,
+  "end_time": 287.62,
+  "words": "Thank you. I have found your record. We have an appointment on Tuesday at half past two, or Friday at ten in the morning."
+ },
+ {
+  "session_id": "d08_long",
+  "speaker": "d02_8k_patient",
+  "start_time": 287.97,
+  "end_time": 289.85,
+  "words": "Friday at ten would be better for me."
+ },
+ {
+  "session_id": "d08_long",
+  "speaker": "d02_8k_receptionist",
+  "start_time": 289.55,
+  "end_time": 291.07,
+  "words": "Lovely. That is booked for you."
+ },
+ {
+  "session_id": "d08_long",
+  "speaker": "d02_8k_receptionist",
+  "start_time": 291.47,
+  "end_time": 295.85,
+  "words": "We will send a reminder text the day before. Is there anything else I can help with?"
+ },
+ {
+  "session_id": "d08_long",
+  "speaker": "d02_8k_patient",
+  "start_time": 296.2,
+  "end_time": 298.18,
+  "words": "No, that is everything. Thanks, bye."
+ },
+ {
+  "session_id": "d08_long",
+  "speaker": "d03_44k_stereo_chair",
+  "start_time": 300.88,
+  "end_time": 306.78,
+  "words": "Right, let us get started. The main item today is the release plan for the new billing system."
+ },
+ {
+  "session_id": "d08_long",
+  "speaker": "d03_44k_stereo_analyst",
+  "start_time": 307.13,
+  "end_time": 312.36,
+  "words": "I have the numbers from last week. Error rates dropped by almost half after the patch went out."
+ },
+ {
+  "session_id": "d08_long",
+  "speaker": "d03_44k_stereo_engineer",
+  "start_time": 311.66,
+  "end_time": 314.3,
+  "words": "That matches what we saw in the logs as well."
+ },
+ {
+  "session_id": "d08_long",
+  "speaker": "d03_44k_stereo_chair",
+  "start_time": 314.8,
+  "end_time": 318.79,
+  "words": "Good. So are we confident enough to move the launch forward by one week?"
+ },
+ {
+  "session_id": "d08_long",
+  "speaker": "d03_44k_stereo_engineer",
+  "start_time": 319.14,
+  "end_time": 324.24,
+  "words": "I would rather keep the original date. We still need to finish the load tests on the payment service."
+ },
+ {
+  "session_id": "d08_long",
+  "speaker": "d03_44k_stereo_analyst",
+  "start_time": 324.59,
+  "end_time": 328.7,
+  "words": "I agree. One more week of data would also make the report much stronger."
+ },
+ {
+  "session_id": "d08_long",
+  "speaker": "d03_44k_stereo_chair",
+  "start_time": 328.3,
+  "end_time": 329.27,
+  "words": "Fair enough."
+ },
+ {
+  "session_id": "d08_long",
+  "speaker": "d03_44k_stereo_chair",
+  "start_time": 329.57,
+  "end_time": 333.48,
+  "words": "We keep the date. Can you both send me a short summary by Friday?"
+ },
+ {
+  "session_id": "d08_long",
+  "speaker": "d03_44k_stereo_analyst",
+  "start_time": 333.83,
+  "end_time": 336.49,
+  "words": "Yes, I will have it ready by Thursday afternoon."
+ },
+ {
+  "session_id": "d08_long",
+  "speaker": "d03_44k_stereo_engineer",
+  "start_time": 336.84,
+  "end_time": 340.45,
+  "words": "Same here. I will include the load test results if they are finished."
+ }
+]

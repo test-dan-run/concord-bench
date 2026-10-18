@@ -3,7 +3,7 @@ import type { ColumnDef } from "@tanstack/react-table";
 import { useMemo, useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import { api, qs, type AlignOp, type Page, type Run, type Utterance, type UtteranceDetail } from "../../lib/api";
-import { useNormalisers } from "../../lib/config";
+import { useNormaliser, useNormalisers } from "../../lib/config";
 import { clock, deltaPts, num, pct, timingLabel } from "../../lib/format";
 import { AudioPlayer, PlayFrom, useAudio } from "../../components/AudioPlayer";
 import { AlignmentGrid, DiffText } from "../../components/DiffText";
@@ -30,7 +30,7 @@ interface Summary {
 export function AsrErrors() {
   const { runId } = useParams();
   const [params, setParams] = useSearchParams();
-  const normaliser = params.get("normaliser") ?? undefined;
+  const [normaliser, setNormaliser] = useNormaliser();
   const compare = params.get("compare") ?? undefined;
   const { data: norms } = useNormalisers();
   const s = useQuery({
@@ -87,7 +87,7 @@ export function AsrErrors() {
                     </option>
                   ))}
                 </Select>
-                <Select label="Normaliser" value={d.normaliser.split("@")[0]} onChange={(e) => set("normaliser", e.target.value)}>
+                <Select label="Normaliser" value={normaliser} onChange={(e) => setNormaliser(e.target.value)}>
                   {(norms ?? []).map((n) => (
                     <option key={n.id} value={n.id}>
                       {n.label}

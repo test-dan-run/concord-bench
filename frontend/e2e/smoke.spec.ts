@@ -38,6 +38,26 @@ test("benchmarks: ASR, diarisation and pipeline tabs show scores", async ({ page
   expect(errors).toEqual([]);
 });
 
+test("the text normaliser stays the same across Benchmarks and Error analysis", async ({ page }) => {
+  const errors = watchErrors(page);
+  await page.goto("/benchmarks/asr");
+  await page.getByLabel("Text normaliser").selectOption("whisper_en");
+  await expect(page.getByText(/normaliser whisper_en@1/)).toBeVisible();
+  // nav links carry no query string: the choice still holds
+  await page.getByRole("navigation", { name: "Primary" }).getByRole("link", { name: "Error analysis" }).click();
+  await expect(page).toHaveURL(/\/errors\/asr\/\d+/);
+  await expect(page.getByLabel("Normaliser")).toHaveValue("whisper_en");
+  await page.getByLabel("Normaliser").selectOption("none");
+  await page.getByRole("navigation", { name: "Primary" }).getByRole("link", { name: "Benchmarks" }).click();
+  await expect(page.getByLabel("Text normaliser")).toHaveValue("none");
+  await page.getByRole("tab", { name: "ASR + diarisation pipelines" }).click();
+  await expect(page.getByLabel("Text normaliser")).toHaveValue("none");
+  // ...and survives a reload (each test starts with fresh browser storage)
+  await page.goto("/benchmarks/asr");
+  await expect(page.getByLabel("Text normaliser")).toHaveValue("none");
+  expect(errors).toEqual([]);
+});
+
 test("ASR errors: loads, sorts, expands and plays", async ({ page }) => {
   const errors = watchErrors(page);
   await page.goto("/errors");

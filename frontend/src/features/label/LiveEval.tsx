@@ -3,7 +3,7 @@ import { useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { api, qs, type Dataset, type LiveEval, type LiveModel } from "../../lib/api";
 import { C, MODEL_SERIES } from "../../lib/colors";
-import { IfFeature, useNormalisers } from "../../lib/config";
+import { IfFeature, useNormaliser, useNormalisers } from "../../lib/config";
 import { ago, clock, deltaPts, num, pct } from "../../lib/format";
 import * as I from "../../components/icons";
 import { Button, Empty, ErrorNote, Fact, PageHeader, Panel, Select, Spinner } from "../../components/ui";
@@ -25,7 +25,7 @@ function seriesColors(models: LiveModel[]): Map<number, string> {
 
 function Live({ datasetId }: { datasetId: number }) {
   const norms = useNormalisers();
-  const [normaliser, setNormaliser] = useState("basic");
+  const [normaliser, setNormaliser] = useNormaliser();
   const q = useQuery({
     queryKey: ["label-live", datasetId, normaliser],
     queryFn: () => api.get<LiveEval>(`/label/datasets/${datasetId}/live${qs({ normaliser })}`),

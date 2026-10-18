@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { api, qs, type BenchCell, type BenchTable, type Dataset } from "../../lib/api";
-import { useConfig, useNormalisers } from "../../lib/config";
+import { useConfig, useNormaliser, useNormalisers } from "../../lib/config";
 import { ERROR_COLORS } from "../../lib/colors";
 import { ago, deltaPts, pct, rtf } from "../../lib/format";
 import * as I from "../../components/icons";
@@ -36,7 +36,7 @@ export function BenchmarksPage() {
   const [params, setParams] = useSearchParams();
   const { data: cfg } = useConfig();
   const { data: norms } = useNormalisers();
-  const normaliser = params.get("normaliser") ?? cfg?.default_normaliser ?? "basic";
+  const [normaliser, setNormaliser] = useNormaliser();
   const collar = Number(params.get("collar") ?? cfg?.default_collar ?? 0.25);
   const [showPlan, setShowPlan] = useState(false);
   const tasks = (cfg?.tasks ?? []).filter((t) => t.enabled);
@@ -87,7 +87,7 @@ export function BenchmarksPage() {
         </div>
         <div className="flex flex-wrap gap-3 pb-2">
           {(tab === "asr" || tab === "pipeline") && (
-            <Select label="Text normaliser" value={normaliser.split("@")[0]} onChange={(e) => setParam("normaliser", e.target.value)}>
+            <Select label="Text normaliser" value={normaliser} onChange={(e) => setNormaliser(e.target.value)}>
               {(norms ?? []).map((n) => (
                 <option key={n.id} value={n.id} title={n.description}>
                   {n.label}

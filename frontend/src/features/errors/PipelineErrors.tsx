@@ -3,7 +3,7 @@ import type { ColumnDef } from "@tanstack/react-table";
 import { useMemo, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { api, qs, type AlignOp, type Attribution, type ErrorRegion, type Lane, type Page, type Run } from "../../lib/api";
-import { useConfig, useNormalisers } from "../../lib/config";
+import { useConfig, useNormaliser, useNormalisers } from "../../lib/config";
 import { STAGE_COLORS, STAGE_LABELS, speakerColors } from "../../lib/colors";
 import { clock, num, pct, rtf } from "../../lib/format";
 import { AudioPlayer, useAudio } from "../../components/AudioPlayer";
@@ -66,7 +66,7 @@ export function PipelineErrors() {
   const [params, setParams] = useSearchParams();
   const { data: cfg } = useConfig();
   const { data: norms } = useNormalisers();
-  const normaliser = params.get("normaliser") ?? undefined;
+  const [normaliser, setNormaliser] = useNormaliser();
   const collar = params.get("collar") ?? undefined;
   const s = useQuery({
     queryKey: ["pipe-summary", runId, normaliser, collar],
@@ -111,7 +111,7 @@ export function PipelineErrors() {
             path={(r) => `/errors/pipeline/${r.id}${qs({ normaliser, collar })}`}
             extra={
               <>
-                <Select label="Normaliser" value={d.normaliser.split("@")[0]} onChange={(e) => set("normaliser", e.target.value)}>
+                <Select label="Normaliser" value={normaliser} onChange={(e) => setNormaliser(e.target.value)}>
                   {(norms ?? []).map((n) => (
                     <option key={n.id} value={n.id}>
                       {n.label}

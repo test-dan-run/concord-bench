@@ -16,7 +16,7 @@ from fastapi.staticfiles import StaticFiles
 
 from ..core import db
 from ..core.settings import get_settings
-from . import audio, benchmarks, config, datasets, errors, models, runs
+from . import audio, benchmarks, config, datasets, errors, label, models, runs, sync
 
 log = logging.getLogger("concord")
 
@@ -46,7 +46,7 @@ def create_app(migrate: bool = True) -> FastAPI:
     improve = improve_router()
     app.state.features = {"improve": improve is not None}
     for r in (config.router, datasets.router, models.router, runs.router, benchmarks.router, errors.router,
-              audio.router):
+              audio.router, label.router, sync.router):
         app.include_router(r, prefix="/api")
     if improve is not None:
         app.include_router(improve, prefix="/api/improve")

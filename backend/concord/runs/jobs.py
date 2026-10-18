@@ -5,6 +5,7 @@ Job types:
 - check   {service}                             compatibility check on the check clip
 - run     {run_id, normalisers?}                inference, then scoring with the default normaliser / collar
 - score   {run_id, normaliser, collar}          rescoring that needs a platform service (text.transform)
+- label   {run_id}                              ensemble pseudo-labelling (Phase 2), writes segments
 
 Before a job needs services, the worker starts them with the platform's `stack.py`. It batches: the
 services of later queued jobs that fit next to this job's under `util_limit` are started in the
@@ -188,6 +189,25 @@ def _handle_run(session: Session, job: Job, ctx: JobContext) -> dict[str, Any]:
     return {"run_id": run.id, "score_ids": score_ids}
 
 
+def _handle_label(session: Session, job: Job, ctx: JobContext) -> dict[str, Any]:
+    from ..label import pseudo
+
+    run = session.get(Run, job.payload["run_id"])
+    if run is None:
+        raise ValueError(f"run {job.payload['run_id']} not found")
+    try:
+        pseudo.execute(session, run, ctx.log, ctx.progress)
+        run.status = "done"
+        session.commit()
+    except Exception as exc:
+        session.rollback()
+        run = session.get(Run, job.payload["run_id"])
+        run.status, run.error = "failed", str(exc)[:2000]
+        session.commit()
+        raise
+    return {"run_id": run.id, "summary": {k: v for k, v in run.outputs["summary"].items() if k != "agreement"}}
+
+
 def _handle_score(session: Session, job: Job, ctx: JobContext) -> dict[str, Any]:
     run = session.get(Run, job.payload["run_id"])
     sc = scoring.score_run(session, run, job.payload.get("normaliser"), job.payload.get("collar"))
@@ -195,7 +215,9 @@ def _handle_score(session: Session, job: Job, ctx: JobContext) -> dict[str, Any]
     return {"run_id": run.id, "score_id": sc.id}
 
 
-HANDLERS = {"ingest": _handle_ingest, "check": _handle_check, "run": _handle_run, "score": _handle_score}
+HANDLERS = {"ingest": _handle_ingest, "check": _handle_check, "run": _handle_run, "score": _handle_score,
+            "label": _handle_label}
+RUN_JOBS = ("run", "label")  # job types whose payload names a `run` that mirrors the job's state
 
 
 def run_job(job_id: int, batch: list[str] | None = None) -> None:
@@ -212,7 +234,7 @@ def run_job(job_id: int, batch: list[str] | None = None) -> None:
                 ctx.log(f"blocked: {exc}")
                 job.status, job.error, job.finished_at = JobStatus.blocked, str(exc), utcnow()
                 job.message = ctx.message[:300] or None
-                if job.type == "run":
+                if job.type in RUN_JOBS:
                     run = session.get(Run, job.payload["run_id"])
                     if run is not None:
                         run.status, run.error = "blocked", str(exc)
@@ -255,7 +277,7 @@ def run_pending(max_jobs: int | None = None) -> int:
 
 def retry(session: Session, job: Job) -> None:
     job.status, job.error, job.progress, job.message = JobStatus.queued, None, 0.0, None
-    if job.type == "run":
+    if job.type in RUN_JOBS:
         run = session.get(Run, job.payload["run_id"])
         if run is not None:
             run.status, run.error = "queued", None

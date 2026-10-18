@@ -2,11 +2,16 @@
 `result`), so a new normaliser or collar rescores without re-running any model.
 
 KWS hooks (Q6): `kws` is in every task enum and `keyword_event` exists, but nothing writes them yet.
+
+Phase 2 (Label) writes the same `segment` table: pseudo-labels carry `source_run_id` (a `label` run) and
+a status from confidence triage; a person's edits set `edited_at`. Improve can later read segments
+without Label importing it.
 """
 
 from __future__ import annotations
 
 import enum
+import uuid
 from datetime import UTC, datetime
 from typing import Any
 
@@ -16,6 +21,10 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 def utcnow() -> datetime:
     return datetime.now(UTC).replace(tzinfo=None)
+
+
+def new_uid() -> str:
+    return uuid.uuid4().hex
 
 
 class Base(DeclarativeBase):
@@ -46,6 +55,7 @@ class RunTask(enum.StrEnum):
     seg = "seg"
     pipeline = "pipeline"
     kws = "kws"
+    label = "label"  # Phase 2 ensemble pseudo-labelling
 
 
 class FileStatus(enum.StrEnum):
@@ -118,11 +128,16 @@ class AudioFile(Base):
 class Segment(Base):
     """A reference (or, from Phase 2, pseudo) label. Text-only file-level transcripts are one segment
     spanning the file with no speaker; RTTM turns have a speaker and no text; speaker-attributed
-    transcripts have both."""
+    transcripts have both.
+
+    `uid` identifies the segment across installs (label packages). `edited_at` is set whenever a person
+    changes or reviews it; pseudo-labelling never replaces a segment a person has touched. `meta` holds
+    what pseudo-labelling knew: the ASR span, each member's cache row and the chosen member."""
 
     __tablename__ = "segment"
-    __table_args__ = (Index("ix_segment_file", "audio_file_id", "start"),)
+    __table_args__ = (Index("ix_segment_file", "audio_file_id", "start"), Index("ix_segment_uid", "uid"))
     id: Mapped[int] = mapped_column(primary_key=True)
+    uid: Mapped[str] = mapped_column(String(32), default=new_uid)
     audio_file_id: Mapped[int] = mapped_column(ForeignKey("audio_file.id", ondelete="CASCADE"))
     start: Mapped[float] = mapped_column(Float)
     end: Mapped[float] = mapped_column(Float)
@@ -133,9 +148,16 @@ class Segment(Base):
     source_run_id: Mapped[int | None] = mapped_column(ForeignKey("run.id", ondelete="SET NULL"))
     flagged: Mapped[bool] = mapped_column(Boolean, default=False)
     flag_note: Mapped[str | None] = mapped_column(Text)
+    edited_at: Mapped[datetime | None] = mapped_column(DateTime)
+    meta: Mapped[dict[str, Any]] = mapped_column(default=dict)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
     audio_file: Mapped[AudioFile] = relationship(back_populates="segments")
+
+    @property
+    def reviewed(self) -> bool:
+        """Reviewed work: confirmed, or touched by a person. Pseudo-labels never overwrite it."""
+        return self.status == SegmentStatus.confirmed or self.edited_at is not None
 
 
 class KeywordEvent(Base):
@@ -284,3 +306,26 @@ class Job(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     started_at: Mapped[datetime | None] = mapped_column(DateTime)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime)
+
+
+class SyncPackage(Base):
+    """One label package exported from or imported into this install (HANDOFF §4, Import / export).
+
+    Imports keep the merge outcome, the conflict list and the path of the snapshot taken before the
+    merge, so a merge can be undone."""
+
+    __tablename__ = "sync_package"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    direction: Mapped[str] = mapped_column(String(8))  # export | import
+    dataset_id: Mapped[int | None] = mapped_column(ForeignKey("dataset.id", ondelete="SET NULL"))
+    # export: built | import: staged | applied | undone
+    status: Mapped[str] = mapped_column(String(16))
+    scope: Mapped[dict[str, Any]] = mapped_column(default=dict)
+    counts: Mapped[dict[str, Any]] = mapped_column(default=dict)
+    manifest: Mapped[dict[str, Any]] = mapped_column(default=dict)
+    conflicts: Mapped[list[Any]] = mapped_column(default=list)
+    path: Mapped[str | None] = mapped_column(String(1000))  # the package zip (export) or staged folder (import)
+    snapshot_path: Mapped[str | None] = mapped_column(String(1000))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    applied_at: Mapped[datetime | None] = mapped_column(DateTime)
+    undone_at: Mapped[datetime | None] = mapped_column(DateTime)

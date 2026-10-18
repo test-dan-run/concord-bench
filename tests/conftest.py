@@ -68,3 +68,27 @@ def replay(monkeypatch, data_dir):
     reset_settings()
     yield RECORDED
     reset_settings()
+
+
+# ---------------------------------------------------------------- Label (Phase 2)
+
+@pytest.fixture
+def label_flow(replay, client, tmp_path):
+    """The Phase 1 acceptance flow, plus an audio-only copy of the same audio ("unlabelled")."""
+    from concord.acceptance import run_flow
+    from label_helpers import audio_only_dataset
+
+    out = run_flow(client, tmp_path / "staging", log=lambda m: None)
+    out["ids"] = {n: m["id"] for n, m in out["models"].items()}
+    out["unlabelled"] = audio_only_dataset(client, tmp_path)
+    return out
+
+
+@pytest.fixture
+def labelled(label_flow, client):
+    """The label flow plus one pseudo-label run (pyannote -> both Whispers) on the audio-only dataset."""
+    from label_helpers import label
+
+    started, res = label(client, label_flow)
+    label_flow["started"], label_flow["results"] = started, res
+    return label_flow

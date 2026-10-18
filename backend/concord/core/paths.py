@@ -36,6 +36,21 @@ def exports() -> Path:
     return data_root() / "exports"
 
 
+def snapshots() -> Path:
+    """Segment snapshots taken before a label-package merge (undo)."""
+    return data_root() / "snapshots"
+
+
+def imports(package_id: int) -> Path:
+    """An imported label package, unpacked."""
+    return data_root() / "imports" / str(package_id)
+
+
+def install_id() -> Path:
+    """A random id naming this install in label-package manifests."""
+    return data_root() / "install_id"
+
+
 def job_log(job_id: int) -> Path:
     return data_root() / "logs" / f"job-{job_id}.log"
 
@@ -45,5 +60,5 @@ def job_progress(job_id: int) -> Path:
 
 
 def ensure_dirs() -> None:
-    for sub in ("originals", "derived", "peaks", "uploads", "exports", "logs"):
+    for sub in ("originals", "derived", "peaks", "uploads", "exports", "logs", "snapshots", "imports"):
         (data_root() / sub).mkdir(parents=True, exist_ok=True)

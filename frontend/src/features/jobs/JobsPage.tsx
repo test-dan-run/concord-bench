@@ -12,7 +12,7 @@ export function JobsPage() {
   const retry = useMutation({ mutationFn: (id: number) => api.post(`/jobs/${id}/retry`), onSuccess: () => qc.invalidateQueries({ queryKey: ["jobs"] }) });
   return (
     <>
-      <PageHeader crumbs="Concord" title="Jobs" subtitle="Ingests, compatibility checks, runs and rescoring. One worker runs them in order, starting the platform services each needs." />
+      <PageHeader crumbs="Concord Bench" title="Jobs" subtitle="Ingests, compatibility checks, runs and rescoring. One worker runs them in order, starting the platform services each needs." />
       <div className="flex flex-col xl:flex-row gap-5 items-start">
         <Panel className="flex-1 w-full">
           {q.isLoading && <Spinner />}

@@ -12,8 +12,7 @@ import { MetricTile } from "../../components/MetricTile";
 import { ExpandCell, SortableTable } from "../../components/SortableTable";
 import { StageLegend } from "../../components/StageLegend";
 import { ErrorLegend, Timeline } from "../../components/Timeline";
-import * as I from "../../components/icons";
-import { cx, Empty, ErrorNote, LinkButton, PageHeader, Panel, Select, Spinner } from "../../components/ui";
+import { cx, Empty, ErrorNote, PageHeader, Panel, Select, Spinner } from "../../components/ui";
 import { Crumbs, RunPickers, Switcher, useSwitchLinks } from "./common";
 import { speakerLaneGroups } from "./DiarErrors";
 
@@ -262,9 +261,6 @@ function PipeFileDetail({ id, modelName }: { id: number; modelName: string }) {
       <div className="flex flex-col gap-3 bg-panel border border-track rounded-md p-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <AudioPlayer ctl={ctl} start={0} end={f.duration} label="Play file" />
-          <LinkButton to={`/label/file/${f.file_id}`}>
-            <I.Pen size={13} /> Open in annotator
-          </LinkButton>
         </div>
         <Timeline fileId={f.file_id} t0={0} t1={f.duration} groups={groups} errors={f.errors} overlaps={f.overlaps} time={ctl.time} onSeek={(t) => ctl.play(t)} />
       </div>

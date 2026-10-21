@@ -77,7 +77,7 @@ export function ExportOffline() {
       <PageHeader
         crumbs="Bring your own"
         title="Export for offline"
-        subtitle="Write a kit for a machine without internet access: the models' images and weights, the platform files that start them, and for a full kit Concord itself. Registrations, scores and datasets stay here; labels come back as label packages."
+        subtitle="Write a kit for a machine without internet access: the models' images and weights, the platform files that start them, and for a full kit Concord Bench itself. Registrations, scores and datasets stay here."
       />
       <div className="flex flex-col xl:flex-row gap-5 items-start">
         <Panel className="flex-1 w-full" title="Platform registry" subtitle="Every service in the platform, registered in Concord or not. Nothing is added automatically, not even the other half of a pipeline.">

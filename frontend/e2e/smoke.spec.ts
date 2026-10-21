@@ -1,7 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
 // Acceptance item 3: every error-analysis view loads, sorts, expands and plays audio on the fixture
-// set; plus a load check of every other Phase 1 screen. Console errors fail the test.
+// set; plus a load check of every other Concord Bench screen. Console errors fail the test.
 
 function watchErrors(page: Page): string[] {
   const errors: string[] = [];
@@ -109,16 +109,19 @@ test("pipeline errors: loads, sorts, expands and plays", async ({ page }) => {
   expect(errors).toEqual([]);
 });
 
-test("bring-your-own screens load; lite has no Training", async ({ page }) => {
+test("bring-your-own screens load; Bench has no Label or Training pages", async ({ page }) => {
   const errors = watchErrors(page);
   await page.goto("/datasets");
   await expect(page.getByRole("link", { name: "Synth fixtures" })).toBeVisible();
   await page.getByRole("link", { name: "Synth fixtures" }).click();
   await expect(page.getByText("Flagged files")).toBeVisible();
   await expect(page.getByText(/Over the length cap/)).toBeVisible();
+  await expect(page.getByText("Flagged references")).toBeVisible();
+  await expect(page.getByRole("link", { name: /Pseudo-label|Open in annotator/ })).toHaveCount(0);
   await page.goto("/datasets/upload");
   await expect(page.getByRole("heading", { name: "Upload dataset" })).toBeVisible();
   await expect(page.getByRole("link", { name: "asr.jsonl" })).toBeVisible();
+  await expect(page.getByRole("radio", { name: /Audio only/ })).toHaveCount(0);
   await page.goto("/models/add?name=pyannote-diarization");
   await expect(page.getByText("OIP signature")).toBeVisible();
   await page.goto("/models");
@@ -127,8 +130,36 @@ test("bring-your-own screens load; lite has no Training", async ({ page }) => {
   await expect(page.getByText("How capabilities and timing are detected")).toBeVisible();
   await page.goto("/jobs");
   await expect(page.getByRole("heading", { name: "Jobs" })).toBeVisible();
-  await expect(page.getByRole("link", { name: "Training" })).toHaveCount(0);
-  await page.goto("/training");
-  await expect(page).toHaveURL(/\/benchmarks/);
+  const nav = page.getByRole("navigation", { name: "Primary" });
+  await expect(nav.getByText("Concord Bench")).toBeVisible();
+  for (const name of ["Benchmarks", "Error analysis", "Datasets", "Models", "Export for offline"]) {
+    await expect(nav.getByRole("link", { name, exact: true })).toBeVisible();
+  }
+  for (const name of ["Training", "Review console", "Pseudo-label", "Annotate", "Live evaluation", "Import / export"]) {
+    await expect(nav.getByRole("link", { name })).toHaveCount(0);
+  }
+  for (const path of ["/training", "/label", "/label/annotate"]) {
+    await page.goto(path);
+    await expect(page).toHaveURL(/\/benchmarks/);
+  }
+  await expect(page).toHaveTitle("Concord Bench");
+  expect(errors).toEqual([]);
+});
+
+test("a reference flagged on the ASR error page is listed on the dataset page", async ({ page }) => {
+  const errors = watchErrors(page);
+  await page.goto("/errors");
+  await expect(page).toHaveURL(/\/errors\/asr\/\d+/);
+  await page.locator("tbody tr").first().click();
+  await expect(page.getByText(/Open in annotator/)).toHaveCount(0);
+  await page.getByRole("button", { name: "Flag reference as wrong" }).click();
+  await expect(page.getByRole("button", { name: /Reference flagged/ })).toBeVisible();
+  await expect(page.getByText(/listed on the dataset page/)).toBeVisible();
+  await page.goto("/datasets");
+  await page.getByRole("link", { name: "Synth fixtures" }).click();
+  await expect(page.getByText("Flagged references")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Unflag" })).toHaveCount(1);
+  await page.getByRole("button", { name: "Unflag" }).click();
+  await expect(page.getByText("No references flagged.")).toBeVisible();
   expect(errors).toEqual([]);
 });

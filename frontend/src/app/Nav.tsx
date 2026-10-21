@@ -2,7 +2,6 @@ import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState, type ReactNode } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import { api, type Job } from "../lib/api";
-import { IfFeature, useConfig } from "../lib/config";
 import * as I from "../components/icons";
 import { cx } from "../components/ui";
 
@@ -64,7 +63,6 @@ function Jobs() {
 }
 
 export function Nav() {
-  const { data: cfg } = useConfig();
   const [open, setOpen] = useState(false);
   const loc = useLocation();
   useEffect(() => setOpen(false), [loc.pathname]);
@@ -77,8 +75,8 @@ export function Nav() {
           <I.Logo size={22} />
         </span>
         <div className="flex flex-col">
-          <span className="font-semibold text-[15px] tracking-tight">Concord</span>
-          <span className="text-[11px] text-muted">Speech evaluation + labelling{cfg?.variant === "full" ? " · full" : ""}</span>
+          <span className="font-semibold text-[15px] tracking-tight">Concord Bench</span>
+          <span className="text-[11px] text-muted">Speech model benchmarks</span>
         </div>
         <button
           type="button"
@@ -95,18 +93,6 @@ export function Nav() {
         <Item to="/benchmarks" icon={<I.Chart />}>Benchmarks</Item>
         <Item to="/errors" icon={<I.Bug />}>Error analysis</Item>
       </Group>
-      <Group title="Label">
-        <Item to="/label" icon={<I.List />}>Review console</Item>
-        <Item to="/label/pseudo" icon={<I.Wand />} prefix>Pseudo-label</Item>
-        <Item to="/label/annotate" icon={<I.Pen />} prefix>Annotate</Item>
-        <Item to="/label/live" icon={<I.Pulse />} prefix>Live evaluation</Item>
-        <Item to="/label/sync" icon={<I.Refresh />}>Import / export</Item>
-      </Group>
-      <IfFeature name="improve">
-        <Group title="Improve">
-          <Item to="/training" icon={<I.Flask />}>Training</Item>
-        </Group>
-      </IfFeature>
       <Group title="Bring your own">
         <Item to="/datasets/upload" icon={<I.Upload />}>Upload dataset</Item>
         <Item to="/datasets" icon={<I.Database />}>Datasets</Item>

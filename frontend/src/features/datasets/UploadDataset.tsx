@@ -26,9 +26,16 @@ export function labelTypesOf(ins: Inspection | null): string[] {
   return out;
 }
 
+/** Concord Bench benchmarks against references: at least one audio file must have matched annotations. */
+export function hasReferences(ins: Inspection | null): boolean {
+  return !!ins && ins.audio_files > 0 && ins.audio_without_labels.length < ins.audio_files && Object.keys(ins.tasks).length > 0;
+}
+
+export const NO_REFERENCES =
+  "No references matched. Concord Bench benchmarks against references: add transcript or speaker-label files named like the audio files (see the templates below). To label audio, use Concord Label.";
+
 export function UploadDataset() {
   const nav = useNavigate();
-  const [mode, setMode] = useState<"annotated" | "audio_only">("annotated");
   const [name, setName] = useState("");
   const [language, setLanguage] = useState("en");
   const [description, setDescription] = useState("");
@@ -70,7 +77,7 @@ export function UploadDataset() {
         tags,
         upload_id: source === "files" ? uploadId : null,
         local_path: source === "path" ? localPath : null,
-        plan: mode === "annotated" && planCount(plan, labelTypesOf(inspection)) > 0 ? plan : null,
+        plan: planCount(plan, labelTypesOf(inspection)) > 0 ? plan : null,
       }),
     onSuccess: (r) => nav(`/datasets/${r.dataset.id}`),
   });
@@ -85,9 +92,9 @@ export function UploadDataset() {
     upload.mutate(files);
   };
 
-  const labels = mode === "annotated" ? labelTypesOf(inspection) : [];
+  const labels = labelTypesOf(inspection);
   const n = planCount(plan, labels);
-  const ready = !!inspection && inspection.audio_files > 0 && !!name.trim() && (source === "path" || !!uploadId);
+  const ready = hasReferences(inspection) && !!name.trim() && (source === "path" || !!uploadId);
   const cta = !inspection ? "Upload" : n > 0 ? `Upload and run ${n} ${plan.mode === "grid" ? `pipeline${n === 1 ? "" : "s"}` : `benchmark${n === 1 ? "" : "s"}`}` : "Upload dataset";
 
   return (
@@ -95,28 +102,8 @@ export function UploadDataset() {
       <PageHeader
         crumbs={<><Link to="/benchmarks">Benchmarks</Link> / Upload dataset</>}
         title="Upload dataset"
-        subtitle="Each upload is its own dataset. Labelled data becomes a benchmark straight away."
+        subtitle="Audio with its references (transcripts and/or speaker labels). Each upload is its own dataset and becomes a benchmark straight away."
       />
-      <div className="grid gap-3 sm:grid-cols-2" role="radiogroup" aria-label="Upload mode">
-        {(
-          [
-            ["annotated", "Audio + annotations", "Transcripts and/or speaker labels: becomes a benchmark dataset."],
-            ["audio_only", "Audio only", "Stored now, then pseudo-labelled with model ensembles and reviewed in Label."],
-          ] as const
-        ).map(([m, title, body]) => (
-          <button
-            key={m}
-            type="button"
-            role="radio"
-            aria-checked={mode === m}
-            onClick={() => setMode(m)}
-            className={cx("text-left rounded-lg border p-4 cursor-pointer flex flex-col gap-1", mode === m ? "border-primary bg-active/50" : "border-track bg-panel hover:border-line")}
-          >
-            <span className="font-medium">{title}</span>
-            <span className="text-xs text-muted">{body}</span>
-          </button>
-        ))}
-      </div>
       <div className="flex flex-col xl:flex-row gap-5 items-start">
         <div className="flex-1 w-full flex flex-col gap-5 min-w-0">
           <Panel title="Details">
@@ -203,40 +190,33 @@ export function UploadDataset() {
             <ErrorNote error={upload.error ?? inspectPath.error} />
             {inspection && <AudioSummary ins={inspection} />}
           </Panel>
-          {mode === "annotated" ? (
-            <Panel title="Annotations" subtitle="Detected from the files you added and matched to audio by file name (without extension).">
-              {!inspection && <span className="text-[13px] text-muted">Add audio and annotation files above to see what was matched.</span>}
-              {inspection && <Annotations ins={inspection} />}
-              <div className="flex flex-col gap-1.5">
-                <span className="text-[11px] text-muted uppercase tracking-wider">Templates</span>
-                <span className="flex flex-wrap gap-2">
-                  {(templates.data ?? []).map((t) => (
-                    <a key={t.name} href={`/api/templates/${t.name}`} download className="inline-flex items-center gap-1.5 text-xs border border-line rounded-md px-2 py-1 !text-muted hover:!text-fg no-underline num">
-                      <I.Download size={12} /> {t.name}
-                    </a>
-                  ))}
-                </span>
-              </div>
-            </Panel>
-          ) : (
-            <Panel title="After upload">
-              <span className="text-[13px] text-muted">Unlabelled audio can't be benchmarked until it has reference labels. After upload, pseudo-label it with a model ensemble, review the result, then promote the confirmed segments to a benchmark dataset.</span>
-            </Panel>
-          )}
+          <Panel title="Annotations" subtitle="Detected from the files you added and matched to audio by file name (without extension).">
+            {!inspection && <span className="text-[13px] text-muted">Add audio and annotation files above to see what was matched.</span>}
+            {inspection && <Annotations ins={inspection} />}
+            <div className="flex flex-col gap-1.5">
+              <span className="text-[11px] text-muted uppercase tracking-wider">Templates</span>
+              <span className="flex flex-wrap gap-2">
+                {(templates.data ?? []).map((t) => (
+                  <a key={t.name} href={`/api/templates/${t.name}`} download className="inline-flex items-center gap-1.5 text-xs border border-line rounded-md px-2 py-1 !text-muted hover:!text-fg no-underline num">
+                    <I.Download size={12} /> {t.name}
+                  </a>
+                ))}
+              </span>
+            </div>
+          </Panel>
         </div>
         <aside className="w-full xl:w-[360px] shrink-0 flex flex-col gap-4">
           <Panel title="Summary">
             <Fact k="Name" v={name || "—"} />
             <Fact k="Audio" v={inspection ? `${num(inspection.audio_files)} files · ${bytes(inspection.audio_bytes)}` : "—"} />
-            <Fact k="Labels" v={labels.length ? labels.map((l) => (l === "asr" ? "ASR" : "Diarisation")).join(" + ") : mode === "audio_only" ? "audio only" : "—"} />
+            <Fact k="Labels" v={labels.length ? labels.map((l) => (l === "asr" ? "ASR" : "Diarisation")).join(" + ") : "—"} />
             {tags.length > 0 && <span className="flex flex-wrap gap-1">{tags.map((t) => <Chip key={t}>#{t}</Chip>)}</span>}
           </Panel>
-          {mode === "annotated" && (
-            <Panel title="Benchmark plan" subtitle="Ranked by tags shared with this dataset">
-              {inspection ? <PlanPanel tags={tags} labelTypes={labels} language={language} value={plan} onChange={setPlan} /> : <span className="text-[13px] text-muted">Shown once annotations are matched.</span>}
-              <Link to="/models/add" className="text-xs">Add another model</Link>
-            </Panel>
-          )}
+          <Panel title="Benchmark plan" subtitle="Ranked by tags shared with this dataset">
+            {hasReferences(inspection) ? <PlanPanel tags={tags} labelTypes={labels} language={language} value={plan} onChange={setPlan} /> : <span className="text-[13px] text-muted">Shown once annotations are matched.</span>}
+            <Link to="/models/add" className="text-xs">Add another model</Link>
+          </Panel>
+          {inspection && !hasReferences(inspection) && <span role="alert" className="text-xs text-warn">{NO_REFERENCES}</span>}
           <ErrorNote error={create.error} />
           <Button variant="primary" disabled={!ready || create.isPending} onClick={() => create.mutate()}>
             {create.isPending ? "Starting…" : cta}
@@ -267,7 +247,7 @@ function Annotations({ ins }: { ins: Inspection }) {
   const tasks = Object.entries(ins.tasks) as [string, TaskMatch][];
   return (
     <div className="flex flex-col gap-4">
-      {tasks.length === 0 && <span className="text-[13px] text-warn">No annotations matched. Add a transcript or speaker-label file, or switch to “Audio only”.</span>}
+      {tasks.length === 0 && <span className="text-[13px] text-warn">No annotations matched. Add a transcript or speaker-label file named like the audio files.</span>}
       {tasks.map(([task, m]) => (
         <div key={task} className="flex flex-col gap-2 border border-track rounded-md p-3">
           <div className="flex flex-wrap items-center gap-2">

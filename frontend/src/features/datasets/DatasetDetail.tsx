@@ -1,10 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { api, type Dataset, type Run } from "../../lib/api";
+import { api, type Dataset, type FlaggedReference, type Run } from "../../lib/api";
 import { ago, clock, hours, num } from "../../lib/format";
 import { TagInput } from "../../components/TagInput";
-import { Button, Chip, Empty, ErrorNote, Fact, JobPill, LinkButton, PageHeader, Panel, Spinner, StatusDot } from "../../components/ui";
+import { Button, Chip, Empty, ErrorNote, Fact, JobPill, PageHeader, Panel, Spinner, StatusDot } from "../../components/ui";
 import { PlanPanel, planCount, type PlanValue } from "../benchmarks/PlanPanel";
 
 interface FileRow {
@@ -29,6 +29,11 @@ export function DatasetDetail() {
     refetchInterval: (query) => (query.state.data?.status === "ingesting" ? 1500 : false),
   });
   const files = useQuery({ queryKey: ["dataset-files", id, q.data?.status], queryFn: () => api.get<FileRow[]>(`/datasets/${id}/files`), enabled: q.data?.status === "ready" });
+  const flags = useQuery({ queryKey: ["dataset-flags", id], queryFn: () => api.get<FlaggedReference[]>(`/datasets/${id}/flags`), enabled: q.data?.status === "ready" });
+  const unflag = useMutation({
+    mutationFn: (segmentId: number) => api.post(`/segments/${segmentId}/flag`, { flagged: false }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ["dataset-flags", id] }),
+  });
   const runs = useQuery({ queryKey: ["dataset-runs", id], queryFn: () => api.get<Run[]>(`/runs?dataset_id=${id}`), refetchInterval: 4000, enabled: q.data?.status === "ready" });
   const [plan, setPlan] = useState<PlanValue>({ seg_model_ids: [], asr_model_ids: [], oracle: false, mode: "grid" });
   const [editTags, setEditTags] = useState<string[] | null>(null);
@@ -58,11 +63,6 @@ export function DatasetDetail() {
         subtitle={d.description ?? undefined}
         actions={
           <>
-            {d.status === "ready" && (
-              <LinkButton to={d.mode === "audio_only" ? `/label/pseudo/${d.id}` : `/label/annotate/${d.id}`} variant={d.mode === "audio_only" ? "primary" : "outline"}>
-                {d.mode === "audio_only" ? "Pseudo-label" : "Open in annotator"}
-              </LinkButton>
-            )}
             <Button variant="danger" size="sm" onClick={() => confirm(`Delete dataset “${d.name}” and its runs? Original audio files stay on disk.`) && del.mutate()}>
               Delete
             </Button>
@@ -88,7 +88,7 @@ export function DatasetDetail() {
               <Panel title="Report">
                 <Fact k="Files" v={`${num(rep.usable_files)} usable of ${num(rep.files)}`} />
                 <Fact k="Audio" v={`${hours(rep.usable_hours)} usable of ${hours(rep.hours)}`} />
-                <Fact k="Labels" v={d.label_types.length ? d.label_types.map((l) => (l === "asr" ? "ASR" : "Diarisation")).join(" + ") : "audio only"} />
+                <Fact k="Labels" v={d.label_types.length ? d.label_types.map((l) => (l === "asr" ? "ASR" : "Diarisation")).join(" + ") : "—"} />
                 <Fact k="cpWER-ready" v={rep.has_speaker_text ? "yes (speaker-attributed transcripts)" : "no"} />
                 <Fact k="Language" v={d.language ?? "—"} />
                 <div className="flex flex-col gap-1.5 pt-1">
@@ -150,6 +150,21 @@ export function DatasetDetail() {
                   </tbody>
                 </table>
               </div>
+            </Panel>
+            <Panel
+              title="Flagged references"
+              subtitle="Marked wrong with “Flag reference as wrong” on the ASR error pages. Scores still use them until the references are corrected."
+            >
+              {(flags.data ?? []).length === 0 && <span className="text-[13px] text-muted">No references flagged.</span>}
+              {(flags.data ?? []).map((f) => (
+                <div key={f.id} className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-[13px] border-b border-track last:border-0 py-1.5">
+                  <span className="num text-xs text-muted">{f.path} · {clock(f.start)}–{clock(f.end)}</span>
+                  {f.speaker && <Chip>{f.speaker}</Chip>}
+                  <span className="flex-1 min-w-[200px]">{f.text ?? <span className="text-muted">(no text)</span>}</span>
+                  {f.note && <span className="text-xs text-warn">{f.note}</span>}
+                  <Button size="sm" disabled={unflag.isPending} onClick={() => unflag.mutate(f.id)}>Unflag</Button>
+                </div>
+              ))}
             </Panel>
             <Panel title="Runs on this dataset">
               {(runs.data ?? []).length === 0 && <Empty>No runs yet.</Empty>}

@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useCallback, useEffect, useSyncExternalStore, type ReactNode } from "react";
+import { useCallback, useEffect, useSyncExternalStore } from "react";
 import { useSearchParams } from "react-router-dom";
 import { api, type AppConfig, type Normaliser } from "./api";
 
@@ -54,7 +54,7 @@ export function resetNormaliserChoice(): void {
 }
 
 /**
- * The text normaliser chosen anywhere in the app (Benchmarks, Error analysis, Live evaluation), as a
+ * The text normaliser chosen anywhere in the app (Benchmarks, Error analysis), as a
  * normaliser id. A `?normaliser=` in the URL wins (so shared links keep theirs) and becomes the choice;
  * otherwise the last choice made on any page, kept across reloads; otherwise the server default. A
  * remembered id the server no longer offers falls back to the default.
@@ -86,16 +86,4 @@ export function useNormaliser(): [string, (id: string) => void] {
     [setParams],
   );
   return [value, set];
-}
-
-/** Improve is on only when this build includes it AND the server mounted its router. */
-export function useFeature(name: "improve"): boolean {
-  const { data } = useConfig();
-  if (name === "improve") return __FEATURE_IMPROVE__ && !!data?.features.improve;
-  return false;
-}
-
-/** The single wrapper for everything Improve-related (nav item, "Use for retraining", ...). */
-export function IfFeature({ name, children }: { name: "improve"; children: ReactNode }) {
-  return useFeature(name) ? <>{children}</> : null;
 }

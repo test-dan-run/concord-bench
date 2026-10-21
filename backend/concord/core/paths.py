@@ -36,6 +36,11 @@ def exports() -> Path:
     return data_root() / "exports"
 
 
+def offline_kits() -> Path:
+    """Default destination of offline kits (the export form can name any folder)."""
+    return data_root() / "offline"
+
+
 def snapshots() -> Path:
     """Segment snapshots taken before a label-package merge (undo)."""
     return data_root() / "snapshots"

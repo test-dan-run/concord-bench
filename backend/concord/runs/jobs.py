@@ -6,6 +6,7 @@ Job types:
 - run     {run_id, normalisers?}                inference, then scoring with the default normaliser / collar
 - score   {run_id, normaliser, collar}          rescoring that needs a platform service (text.transform)
 - label   {run_id}                              ensemble pseudo-labelling (Phase 2), writes segments
+- export  {export_id, services, kind, dest, ...}  an offline kit (OFFLINE_EXPORT_PLAN.md); needs no service
 
 Before a job needs services, the worker starts them with the platform's `stack.py`. It batches: the
 services of later queued jobs that fit next to this job's under `util_limit` are started in the
@@ -27,7 +28,7 @@ from sqlalchemy.orm import Session
 
 from ..core import paths
 from ..core.db import SessionLocal
-from ..core.models import Dataset, Job, JobStatus, Model, Run, utcnow
+from ..core.models import Dataset, Job, JobStatus, Model, OfflineExport, Run, utcnow
 from ..platform import services
 from . import executor, scoring
 
@@ -215,8 +216,31 @@ def _handle_score(session: Session, job: Job, ctx: JobContext) -> dict[str, Any]
     return {"run_id": run.id, "score_id": sc.id}
 
 
+def _handle_export(session: Session, job: Job, ctx: JobContext) -> dict[str, Any]:
+    from ..offline import export as offline
+
+    p = job.payload
+    rec = session.get(OfflineExport, p["export_id"])
+    if rec is None:
+        raise ValueError(f"offline export {p['export_id']} not found")
+    rec.status, rec.error = "running", None
+    session.commit()
+    try:
+        out = offline.export(p["services"], p["kind"], Path(p["dest"]), p.get("concord_image"), p.get("name"),
+                             ctx.log, ctx.progress)
+    except Exception as exc:
+        session.rollback()
+        rec = session.get(OfflineExport, p["export_id"])
+        rec.status, rec.error, rec.finished_at = "failed", str(exc)[:2000], utcnow()
+        session.commit()
+        raise
+    rec.status, rec.path, rec.bytes, rec.finished_at = "done", out["path"], out["bytes"], utcnow()
+    session.commit()
+    return {"export_id": rec.id, "path": out["path"], "bytes": out["bytes"]}
+
+
 HANDLERS = {"ingest": _handle_ingest, "check": _handle_check, "run": _handle_run, "score": _handle_score,
-            "label": _handle_label}
+            "label": _handle_label, "export": _handle_export}
 RUN_JOBS = ("run", "label")  # job types whose payload names a `run` that mirrors the job's state
 
 
@@ -281,3 +305,7 @@ def retry(session: Session, job: Job) -> None:
         run = session.get(Run, job.payload["run_id"])
         if run is not None:
             run.status, run.error = "queued", None
+    if job.type == "export":
+        rec = session.get(OfflineExport, job.payload["export_id"])
+        if rec is not None:
+            rec.status, rec.error, rec.finished_at = "queued", None, None

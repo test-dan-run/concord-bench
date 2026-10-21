@@ -1,6 +1,6 @@
 # Concord — Offline export plan
 
-Planned 2026-10-18, not built. Kept apart from [PLAN.md](PLAN.md), which covers Phases 1–3; references
+Planned 2026-10-18. O1–O3 built 2026-10-18; O4 (the live `whisper-large-v3` run) is still to do, see §11. Kept apart from [PLAN.md](PLAN.md), which covers Phases 1–3; references
 to it are written as "PLAN.md §N". Section numbers without a file name are in this document.
 
 Take Concord and chosen models to a separate machine with no internet access, where other datasets are
@@ -117,14 +117,12 @@ concord-offline-<name>-<date>/
 
 ## 7. Milestones
 
-| # | Work | Exit | Size |
-|---|---|---|---|
-| O1 | Platform flags (§4) and their tests | `just bundle silero-vad --dir --with-images --with-weights --platform-tree` writes a kit that starts with `stack.py up silero-vad` from inside it | 3–4 d |
-| O2 | Concord backend: export job, API, CLI, `verify-kit` | `just export-offline silero-vad --kind full` writes a full kit | 3–4 d |
-| O3 | `install.sh` (full and `--add`), `compose.yml`, `UV_OFFLINE`, frontend page | The air-gap test in §8 passes | 3–4 d |
-| O4 | Live run with `whisper-large-v3`, README section | Benchmark on the fixture set matches the source machine | 1–2 d |
-
-About 2.5 weeks for one developer.
+| # | Work | Exit |
+|---|---|---|
+| O1 | Platform flags (§4) and their tests | `just bundle silero-vad --dir --with-images --with-weights --platform-tree` writes a kit that starts with `stack.py up silero-vad` from inside it |
+| O2 | Concord backend: export job, API, CLI, `verify-kit` | `just export-offline silero-vad --kind full` writes a full kit |
+| O3 | `install.sh` (full and `--add`), `compose.yml`, `UV_OFFLINE`, frontend page | The air-gap test in §8 passes |
+| O4 | Live run with `whisper-large-v3`, README section | Benchmark on the fixture set matches the source machine |
 
 ## 8. Testing
 
@@ -161,3 +159,30 @@ weights.
 | Q2 | Extend the platform's `tools/bundle.py` (§4), or keep all export code in Concord? | Extend the platform; Concord already drives the platform's own tools. |
 | Q3 | Which Concord image goes into a full kit? | `concord-lite`; `concord-full` when chosen in the export form. |
 | Q4 | How is the kit carried (one directory, or archives split for a size-limited drive)? | A plain directory with checksums and a `verify` step. |
+
+## 11. As built (2026-10-18)
+
+| # | Status |
+|---|---|
+| O1 | Done. `bundle.py` gained `--dir [PATH]`, `--with-weights`, `--platform-tree`, `--dry-run --json` and `--all`; 11 platform tests. The exit command wrote a kit whose `stack.py up silero-vad` started healthy from inside it. |
+| O2 | Done. `concord/offline/` (`export`, `kit`, `merge`), job type `export`, `/api/offline/{services,preview,exports}`, `export-offline`, `verify-kit`, `add-kit`. `just export-offline silero-vad --kind full` wrote a 0.56 GB kit in 10 s. |
+| O3 | Done. `install.sh` (full and `--add`), `concord/compose.yml`, `UV_OFFLINE=1` in the image, the *Export for offline* page. `just test-offline` passes: VAD error 0.069221 on the `--internal` network, same as the source machine. |
+| O4 | Not run: the GPU was 30.7 of 32 GB in use by running platform services. The README section is written. |
+
+Differences from the plan:
+- `install.sh` checks `SHA256SUMS` with `sha256sum` (coreutils), since a full kit's Concord image is
+  not loaded yet when it runs. `verify-kit` checks the same checksums in `manifest.json`.
+- The `--add` merge rules run as `python -m concord.cli add-kit` inside the install's Concord image, as
+  root, then give what they touched back to the owner of the install folder (Concord's platform
+  renders files as root). An engine whose image differs between kit and install is refused too, unless
+  `--replace`; port and alias clashes are always refused. A failed validation puts the install back.
+- The platform's `config.yaml` gained `compose_project` (default `aiplatform`), so a kit can run next to
+  the source platform on one Docker daemon (the air-gap test uses it). `render.COMPOSE_PROJECT` is gone.
+- The platform tree also holds `contracts/` and `ui/` (needed by `load_platform` and `render.py`).
+- Image sizes come from `docker image inspect` and are upper bounds: with the containerd image store
+  `docker save` writes compressed layers (silero-vad: 434 MB image, 104 MB tar). Too little free space is
+  therefore a warning, not a refusal.
+- `GET /api/offline/services` (the form's table, a dry run over every service) was added beside the
+  preview, which covers only the chosen services.
+- `config.yaml` is covered by the checksums, so the kit README says to edit it after `./install.sh`.
+

@@ -113,6 +113,7 @@ export function Nav() {
         <Item to="/models/add" icon={<I.Plus />}>Add model</Item>
         <Item to="/models" icon={<I.Cpu />}>Models</Item>
         <Item to="/contract" icon={<I.Doc />}>Model contract</Item>
+        <Item to="/offline" icon={<I.Download />}>Export for offline</Item>
       </Group>
       <Jobs />
       </div>

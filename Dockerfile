@@ -66,8 +66,9 @@ WORKDIR /srv/apps/concord
 COPY README.md ./
 COPY fixtures/generated/check fixtures/generated/check
 COPY fixtures/generated/templates fixtures/generated/templates
+# UV_OFFLINE: `uv run --no-sync` for the platform tools never reaches for the network (offline kits).
 ENV CONCORD_HOME=/srv/apps/concord CONCORD_DATA=/data PLATFORM_DIR=/platform PLATFORM_VENV=/opt/platform-venv \
-    AI_HOST={name} AICORE_ENDPOINTS=/platform/clients/aicore/src/aicore/endpoints.generated.yaml
+    AI_HOST={name} AICORE_ENDPOINTS=/platform/clients/aicore/src/aicore/endpoints.generated.yaml UV_OFFLINE=1
 VOLUME /data
 EXPOSE 8600
 CMD ["sh", "-c", "python -m concord.cli migrate && (python -m concord.runs.worker &) && exec uvicorn concord.api.app:app --host 0.0.0.0 --port 8600"]

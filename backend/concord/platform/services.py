@@ -13,6 +13,7 @@ import subprocess
 import time
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -109,11 +110,17 @@ def platform_env() -> dict[str, str]:
     return env
 
 
-def stack_command(names: list[str]) -> list[str]:
+def platform_command(tool: str, *args: str, platform_dir: Path | None = None) -> list[str]:
+    """`uv run ... python tools/<tool> ARGS` for a platform tool, run with cwd = the platform directory."""
     s = get_settings()
     sync = ["--no-sync"] if s.platform_venv else []
-    cmd = ["uv", "run", "--quiet", *sync, "--project", str(s.platform_dir), "python", "tools/stack.py", "up", *names]
-    if s.no_evict:
+    root = platform_dir or s.platform_dir
+    return ["uv", "run", "--quiet", *sync, "--project", str(root), "python", f"tools/{tool}", *args]
+
+
+def stack_command(names: list[str]) -> list[str]:
+    cmd = platform_command("stack.py", "up", *names)
+    if get_settings().no_evict:
         cmd.append("--no-evict")
     return cmd
 

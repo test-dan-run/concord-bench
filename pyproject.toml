@@ -47,10 +47,11 @@ aicore = { path = "../../platform/clients/aicore", editable = true }
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["backend", "tests"]
-addopts = "--import-mode=importlib -m 'not live and not perf'"
+addopts = "--import-mode=importlib -m 'not live and not perf and not offline'"
 markers = [
     "live: needs running platform services (run with `just test-live`)",
     "perf: realistic-size performance check (run with `just test-perf`)",
+    "offline: air-gap test of an offline kit, needs Docker (run with `just test-offline`)",
 ]
 
 [tool.ruff]

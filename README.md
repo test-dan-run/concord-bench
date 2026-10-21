@@ -125,9 +125,39 @@ compose against the host's Docker daemon with paths from the mounted platform di
 the platform at the same absolute path it has on the host if your compose file uses relative bind
 mounts. In development, run Concord on the host instead.
 
+## Offline kits
+
+Concord and chosen models can go to a machine with no internet access ([OFFLINE_EXPORT_PLAN.md](OFFLINE_EXPORT_PLAN.md)).
+**Export for offline** (Bring your own) lists every platform service with its image and weight sizes;
+tick the models, pick a kit kind and a destination folder, and the worker writes the kit there
+(progress on the Jobs page). From the command line:
+
+```bash
+just export-offline silero-vad whisper-large-v3 --kind full --out /mnt/usb   # Concord + platform + models
+just export-offline whisper-large-v3-turbo --kind models --out /mnt/usb       # models only, for an existing install
+just verify-kit /mnt/usb/concord-offline-...                                  # checksums against manifest.json
+```
+
+- A kit is a folder: `images/` (one `docker save` of the models' images, plus `concord.tar` in a full
+  kit), `assets/` (weights in `AI_ASSETS` layout; Hugging Face models as a fresh cache entry with real
+  files), `platform/` (a runnable platform tree holding only the chosen services), `install.sh`,
+  `README.md`, `manifest.json` and `SHA256SUMS`. The platform's `tools/bundle.py` writes the first three.
+- Missing images or weights stop the export (`just build NAME`, `docker pull`, `just fetch-weights NAME`,
+  or start an engine model once so it downloads). Not fitting under `util_limit` together is only a warning.
+- On the offline machine, `./install.sh` (full kit) verifies the checksums, loads the images, writes
+  `platform/.env` (`AI_ASSETS=<kit>/assets`, `HF_HUB_OFFLINE=1`) and starts Concord from
+  `concord/compose.yml` with `platform/` and `assets/` mounted at their host paths. `./install.sh --add
+  <install>` (model kit) merges models into it; a service already there with another image is refused
+  unless `--replace`. Register models there with Add model: no registrations, scores or datasets travel.
+- Exporting from a containerised Concord needs the platform and `$AI_ASSETS` mounted read-only at their
+  host paths and the destination folder mounted; on the host none of this applies.
+- `just test-offline` exports a full `silero-vad` kit, installs it on an `--internal` Docker network,
+  benchmarks VAD there and compares with the recorded score, then merges a `text-normalizer` model kit
+  (Docker only, no GPU; about a minute).
+
 ## Status
 
-Phase 1 milestones M0–M7 and Phase 2 (PLAN §6) are implemented; see "Known limits" below and PLAN
+Phase 1 milestones M0–M7, Phase 2 (PLAN §6) and the offline export (O1–O3 of OFFLINE_EXPORT_PLAN.md) are implemented; see "Known limits" below and PLAN
 §10 for open questions.
 
 Known limits:

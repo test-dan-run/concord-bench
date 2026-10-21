@@ -590,3 +590,70 @@ export interface ImportPlan {
   conflicts: Conflict[];
   rules: { outcome: string; rule: string }[];
 }
+
+// ---------------------------------------------------------------- Export for offline
+
+export interface OfflineService {
+  name: string;
+  alias: string | null;
+  kind: string;
+  engine: string;
+  contract: string;
+  api: string;
+  tasks: string[];
+  description: string | null;
+  port: number;
+  gpu: boolean;
+  gpu_fraction: number;
+  image: string;
+  image_present: boolean | null;
+  image_id: string | null;
+  image_bytes: number | null;
+  image_problem: string | null;
+  weights: { kind: string; path: string; files: number; bytes: number; revision: string | null; problems: string[] } | null;
+  weights_bytes: number;
+  problems: string[];
+  model_id?: number | null;
+  display_name?: string | null;
+}
+
+export interface OfflineServices {
+  services: OfflineService[];
+  platform: { gpu_total_gb: number; util_limit: number; network: string; compose_project: string };
+  warnings: string[];
+  concord_images: { image: string; present: boolean; bytes: number | null }[];
+  default_image: string;
+  default_dest: string;
+}
+
+export interface OfflinePreview {
+  kind: "full" | "models";
+  services: OfflineService[];
+  budget: { total_fraction: number; util_limit: number; ok: boolean };
+  images: { refs: string[]; bytes: number };
+  weights_bytes: number;
+  concord: { image: string; present: boolean; id: string | null; bytes: number | null } | null;
+  bytes: number;
+  free_bytes: number | null;
+  dest: string;
+  kit: string | null;
+  problems: string[];
+  warnings: string[];
+}
+
+export interface OfflineExport {
+  id: number;
+  kind: "full" | "models";
+  services: string[];
+  concord_image: string | null;
+  dest: string;
+  name: string | null;
+  status: "queued" | "running" | "done" | "failed";
+  path: string | null;
+  bytes: number | null;
+  error: string | null;
+  job_id: number | null;
+  job: Job | null;
+  created_at: string;
+  finished_at: string | null;
+}

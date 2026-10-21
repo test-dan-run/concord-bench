@@ -19,6 +19,7 @@ import { LiveEvalPage } from "../features/label/LiveEval";
 import { PseudoLabelPage } from "../features/label/PseudoLabel";
 import { ReviewConsole } from "../features/label/ReviewConsole";
 import { SyncPage } from "../features/label/SyncPage";
+import { ExportOffline } from "../features/offline/ExportOffline";
 import { useFeature } from "../lib/config";
 
 // Improve (Phase 3) is a separate chunk; a lite build (VITE_FEATURE_IMPROVE=0) never references it.
@@ -83,6 +84,7 @@ export const router = createBrowserRouter([
       { path: "models", element: <ModelsPage /> },
       { path: "models/add", element: <AddModel /> },
       { path: "contract", element: <ContractPage /> },
+      { path: "offline", element: <ExportOffline /> },
       { path: "jobs", element: <JobsPage /> },
       { path: "training", element: <Training /> },
       { path: "*", element: <Navigate to="/benchmarks" replace /> },

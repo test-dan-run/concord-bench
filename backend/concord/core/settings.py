@@ -40,6 +40,8 @@ class Settings(BaseSettings):
     record_dir: Path | None = None
     # Seconds to wait for `stack.py up` (all services in one call).
     services_timeout_s: int = 20 * 60
+    # The Concord image a full offline kit carries unless the export form picks another (Q3).
+    concord_image: str = "concord-lite:0.1.0"
     # Built frontend served by FastAPI; absent in development (Vite serves it).
     frontend_dist: Path = Field(default=REPO_ROOT / "frontend" / "dist")
 

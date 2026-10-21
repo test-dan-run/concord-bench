@@ -140,7 +140,10 @@ same code in Concord Label.
 Environment variables (or `.env`, see [.env.example](.env.example)): `CONCORD_DATA`, `PLATFORM_DIR`,
 `AICORE_ENDPOINTS`, `AI_HOST`, `NO_EVICT`, `REPLAY_DIR`, `RECORD_DIR`, `CONCORD_IMAGE`, `CONCORD_HOME`,
 `LABEL_URL` (Concord Label's base URL, e.g. `http://localhost:8620`; unset means no Label links).
-Each app has its own data directory and database; nothing is shared on disk.
+Each app has its own data directory and database; nothing is shared on disk. Bench's schema versions
+start with `bench_`, and Bench refuses to start (the API, the worker and `just migrate`) on a database
+it did not write — Concord Label's, or one from the single Concord app before the split — without
+changing it. Point `CONCORD_DATA` at an empty folder to start fresh.
 
 ## Fixtures and recordings
 

@@ -3,8 +3,8 @@
 `reference_import` holds received reference packages (staged, accepted, rejected); a dataset made from
 one keeps where its references came from and links to its earlier versions (SPLIT_PLAN.md §4.3).
 
-Revision ID: 0002
-Revises: 0001
+Revision ID: bench_0002
+Revises: bench_0001
 Create Date: 2026-10-22 09:00:00
 """
 
@@ -13,8 +13,8 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "0002"
-down_revision: str | None = "0001"
+revision: str = "bench_0002"
+down_revision: str | None = "bench_0001"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

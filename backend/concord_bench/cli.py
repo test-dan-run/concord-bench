@@ -41,14 +41,18 @@ def main(argv: list[str] | None = None) -> int:
 
     from .core import db
 
+    try:
+        if args.cmd in ("migrate", "revision"):
+            db.migrate()
+    except db.ForeignDatabase as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
     if args.cmd == "migrate":
-        db.migrate()
         print("database at", db.db_url())
     elif args.cmd == "revision":
         from alembic import command
 
-        db.migrate()
-        command.revision(db.alembic_config(), message=args.message, autogenerate=True)
+        command.revision(db.alembic_config(), message=args.message, autogenerate=True, rev_id=db.next_revision_id())
     elif args.cmd == "record":
         from .recording import record
 

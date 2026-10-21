@@ -23,7 +23,11 @@ def create_app(migrate: bool = True) -> FastAPI:
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
         if migrate:
-            db.migrate()
+            try:
+                db.migrate()
+            except db.ForeignDatabase as exc:
+                log.error("%s", exc)
+                raise
         yield
 
     app = FastAPI(title="Concord Bench", version=__version__, lifespan=lifespan)

@@ -24,7 +24,11 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s worker %(message)s", datefmt="%H:%M:%S")
     get_settings()
-    db.migrate()
+    try:
+        db.migrate()
+    except db.ForeignDatabase as exc:
+        log.error("%s", exc)
+        return 2
     with db.session_scope() as s:
         n = jobs.recover(s)
     if n:

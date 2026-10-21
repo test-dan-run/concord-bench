@@ -91,7 +91,7 @@ dev/apps/
   contract left to enforce.
 - **Images**: `concord-bench` and `concord-label`. Each image runs its own API and worker. `concord-lite`,
   `concord-full` and `FEATURE_IMPROVE` go away from Bench.
-- **Names and ports (decided)**: Concord Bench on 8600 (unchanged), Concord Label on 8610. Development:
+- **Names and ports (decided)**: Concord Bench on 8600 (unchanged), Concord Label on 8620 (decided as 8610, moved because the Synthetics app already uses 8610 on this machine). Development:
   Vite 5173 (Bench) and 5174 (Label).
 - **Data**: each app has its own data directory and database (`CONCORD_DATA` in each repo's `.env`). Nothing
   is shared on disk, so the two can run on different machines.
@@ -209,7 +209,7 @@ reader are each tested against the same sample packages.
   files.csv          path, sha256, duration, sample_rate
   refs/segments.seglst.json   speaker-attributed transcripts (cpWER, WER, DER)
   refs/refs.rttm              diarisation only (scope `complete`)
-  refs/refs.jsonl             per-file text, for ASR-only datasets (scope `any`)
+  refs/segments.jsonl         timed text without speakers, for ASR-only datasets (scope `any`)
   refs/uids.jsonl             segment uid per (file, start, end), so flags can come back (§4.5)
   outputs/           optional: seg-model outputs on whole files (§4.4)
 ```
@@ -286,7 +286,7 @@ answered, so the UI shows or hides each link.
 ### 5.2 Open in Label
 
 Bench's error pages show "Open in Label" for a dataset whose references came from Label. The link is
-`LABEL_URL/label/file/by-sha/<sha256>?t=<start>`, so it does not depend on Label's database ids. Label
+`LABEL_URL/label/file/by-sha/<sha256>?dataset_uid=<uid>&t=<start>`, so it does not depend on Label's database ids. Label
 resolves the sha256 within the source dataset named in the provenance.
 
 ### 5.3 Locked score

@@ -12,7 +12,7 @@ services:
       PLATFORM_DIR: ${KIT_DIR}/platform
       AICORE_ENDPOINTS: ${KIT_DIR}/platform/clients/aicore/src/aicore/endpoints.generated.yaml
       UV_OFFLINE: "1"
-      LABEL_URL: http://concord-label:8610
+      LABEL_URL: http://concord-label:8620
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ${KIT_DIR:?install.sh writes KIT_DIR into concord/.env}/platform:${KIT_DIR}/platform
@@ -23,7 +23,7 @@ services:
     hostname: concord-label
     restart: unless-stopped
     networks: [platform]
-    ports: ["127.0.0.1:8610:8610"]
+    ports: ["127.0.0.1:8620:8620"]
     environment:
       PLATFORM_DIR: ${KIT_DIR}/platform
       AICORE_ENDPOINTS: ${KIT_DIR}/platform/clients/aicore/src/aicore/endpoints.generated.yaml

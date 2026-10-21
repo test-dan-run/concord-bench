@@ -72,11 +72,12 @@ folder may be the zip's root or its only top-level directory).
 | `audio_included` | yes | `"all"`, `"partial"` or `"none"` |
 | `review` | no | free-form review statistics, shown in the import preview |
 | `models` | no | registry names of the models that produced the pseudo-labels |
-| `normaliser` | no | suggested WER normaliser id |
+| `normaliser` | no | suggested WER normaliser, as an id (`basic`) or a key (`basic@1`) |
 
 ### 2.2 `files.csv`
 
-Header `path,sha256,duration,sample_rate`; one row per audio file of the dataset. `path` is the file's
+Header `path,sha256,duration,sample_rate`; one row per audio file in the package, which may be fewer than
+the source dataset has (scope `complete` leaves out files that are not fully reviewed). `path` is the file's
 path in the dataset, and its location under `audio/` when included. `sha256` is the hex SHA-256 of the
 original bytes. File stems (the file name without its extension) are unique, ignoring case, because
 references are matched to audio by stem.
@@ -110,12 +111,16 @@ Seg-model (VAD / diarisation) outputs on whole files, one per line:
 
 ```
 {"model": registry name, "image": pinned image tag, "sha256": audio sha256,
- "params": {...the call's params, written out in full...}, "latency_s": number,
+ "params": {"adapter": "OIPSegmenter", "image": pinned image tag, ...the adapter's options},
+ "latency_s": number,
  "output": {"segments": [[start, end], ...], "speakers": ["spk0", ...] or null}}
 ```
 
-The receiver computes its own cache key from these fields and stores an output only when `image` is the
-tag it would use for that model.
+`params` is exactly the writer's seg adapter params for that call, written out in full (not a hash):
+`adapter` is the adapter class name, `image` is the same tag as the top-level `image`, and any other key is
+an adapter option. The receiver computes its own cache key and stores an output only when `adapter` names
+its own adapter for that model, `image` is the tag it would use, and every other key equals its own call's
+option (`sample_rate`, if given, must be 16000). Otherwise the row is skipped.
 
 ### 2.6 Packages without a manifest
 
@@ -138,7 +143,8 @@ Sends "reference is wrong" flags from Bench back to Label.
 | `flags` | list of `{"uid": string or null, "file_sha256", "start", "end", "note": string or null}` |
 
 The receiver looks for the dataset with `source.dataset_uid`, then matches each flag by `uid`, else by
-`file_sha256` and time overlap (IoU >= 0.5). Matched segments get `flagged = true` and the note.
+`file_sha256` and time overlap (IoU >= 0.5). Matched segments get `flagged = true` and the note. Flags
+are not a review. A flags file whose `source.install_id` is not the receiver's own install is refused (404).
 
 ---
 
@@ -149,8 +155,8 @@ The receiver looks for the dataset with `source.dataset_uid`, then matches each 
 | `POST /api/fingerprints/missing` | `{"sha256": [hex, ...]}` | `{"missing": [hex, ...]}`: the ones Bench has no original for |
 | `POST /api/uploads` | none | `{"upload_id"}` |
 | `PUT /api/uploads/{upload_id}/chunk?path=<name>.zip&offset=<n>` | raw bytes of the zip from `offset` | `{"path", "size"}`; `409` when `offset` is not the current size |
-| `POST /api/reference-imports` | `{"upload_id"}` | `201` `{"id", "status": "staged", "preview": {...}}`; `400` with `{"detail"}` when the package is invalid |
-| `GET /api/datasets/by-source/{dataset_uid}/scores?install_id=<id>&normaliser=<id>` | none | `{"dataset": {"id", "name", "export_version"}, "scores": [{"model", "display_name", "wer", "normaliser", "run_id", "score_id", "created_at"}]}` for the newest version; `404` when Bench has no dataset from that source |
+| `POST /api/reference-imports` | `{"upload_id"}` | `201` `{"id", "status": "staged", "preview": {"name", "source", "export_version", "files", "new_files", "hours", "segments", "label_types", "previous_version": {"dataset_id", "name", "export_version"} or null}}`; `400` with `{"detail"}` when the package is invalid |
+| `GET /api/datasets/by-source/{dataset_uid}/scores?install_id=<id>&normaliser=<id or key>` (`install_id` optional) | none | `{"dataset": {"id", "name", "export_version"}, "scores": [{"model", "display_name", "wer", "normaliser", "run_id", "score_id", "created_at"}]}` for the newest version; `404` when Bench has no dataset from that source |
 
 A pushed package stays staged until a person accepts it in Bench. `scores` holds, per model, its latest
 finished ASR run on that dataset version, scored with the requested normaliser when such a score exists,
@@ -177,10 +183,10 @@ service per app, as in `samples/kit/compose.yml`:
 |---|---|---|
 | Compose service and hostname | `concord-bench` | `concord-label` |
 | Image | `concord-bench:<version>` | `concord-label:<version>` |
-| Port inside the container and on `127.0.0.1` | 8600 | 8610 |
+| Port inside the container and on `127.0.0.1` | 8600 | 8620 |
 | Image tar in the kit | `images/concord-bench.tar` | `images/concord-label.tar` |
 | Data volume | `bench-data` at `/data` | `label-data` at `/data` |
-| Peer URL set when both are in the kit | `LABEL_URL=http://concord-label:8610` | `BENCH_URL=http://concord-bench:8600` |
+| Peer URL set when both are in the kit | `LABEL_URL=http://concord-label:8620` | `BENCH_URL=http://concord-bench:8600` |
 
 Both services also get `PLATFORM_DIR=${KIT_DIR}/platform`, `AICORE_ENDPOINTS=${KIT_DIR}/platform/clients/aicore/src/aicore/endpoints.generated.yaml`,
 `UV_OFFLINE=1`, the Docker socket, and `platform/` and `assets/` mounted at the same absolute path they

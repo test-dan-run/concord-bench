@@ -36,12 +36,34 @@ registry, then Run evaluation.
 |---|---|
 | API (and the built frontend) | 8600 (`CONCORD_PORT`) |
 | Vite dev server | 5173 (`CONCORD_WEB_PORT`) |
-| Concord Label, for reference | 8610, Vite 5174 |
+| Concord Label, for reference | 8620, Vite 5174 |
 
 `GET /api/config` reports `app` (`concord-bench`), `version`, `contract_version` and `peer`
 (CONTRACTS.md §1). `peer` describes Concord Label at `LABEL_URL`: Bench asks its `/api/config` with a
 1 s timeout and keeps the answer for 30 s. Label links show only when Label answers with the same
 contract version.
+
+## Two apps
+
+Concord Bench (this repository) and Concord Label (`../concord-label`) run side by side, each with its
+own data directory and database.
+
+- **Development.** `just dev` here (API 8600, Vite 5173) and `just dev` in Label (API 8620, Vite 5174).
+  Each finds the other through one setting in its `.env`: `LABEL_URL=http://localhost:8620` here and
+  `BENCH_URL=http://localhost:8600` in Label. Unset, the links between them are hidden and packages are
+  downloaded instead of pushed.
+- **Handoff.** In Label, **Send to Bench** on a dataset writes a reference package (CONTRACTS.md §2):
+  pushed straight here when Bench answers (only the audio Bench lacks travels), or downloaded as a zip.
+  Here, **Import reference package** stages it with a preview; accepting it makes a new dataset (a later
+  package from the same source becomes `<name> v<N>`). Back the other way: "Open in Label" on the error
+  pages, the locked score in Label's live evaluation, and "Send flags to Label" on the dataset page.
+  `just e2e-handoff` in the Label repository runs this round trip with both images.
+- **Offline.** A full offline kit written by either app can hold Bench, Label or both; with both, they
+  start from one compose file and already know each other's address (see Offline kits).
+- **Contracts.** `just check-contracts` checks `contracts/samples` and compares `CONTRACTS.md` and
+  `contracts/` with `../concord-label` (or `--peer PATH`); they must stay byte-identical.
+- **Fixtures.** Bench owns `fixtures/generated` and `fixtures/recorded`. When `just fixtures` or
+  `just record` changes them, copy both folders into the Label repository too.
 
 ## Layout
 
@@ -117,7 +139,7 @@ same code in Concord Label.
 
 Environment variables (or `.env`, see [.env.example](.env.example)): `CONCORD_DATA`, `PLATFORM_DIR`,
 `AICORE_ENDPOINTS`, `AI_HOST`, `NO_EVICT`, `REPLAY_DIR`, `RECORD_DIR`, `CONCORD_IMAGE`, `CONCORD_HOME`,
-`LABEL_URL` (Concord Label's base URL, e.g. `http://localhost:8610`; unset means no Label links).
+`LABEL_URL` (Concord Label's base URL, e.g. `http://localhost:8620`; unset means no Label links).
 Each app has its own data directory and database; nothing is shared on disk.
 
 ## Fixtures and recordings
@@ -139,8 +161,11 @@ copy them there again when they change.
 - `just e2e`: Playwright smoke tests on replayed fixtures. The API runs in the `concord-bench:0.2.0` image
   (build it first with `just build`) with this checkout's backend, tests and `frontend/dist` mounted;
   browsers run in the Playwright image.
-- `just test-offline`: the air-gap test of an offline kit (Docker, no GPU, about a minute; needs the
-  image).
+- `just test-offline`: the air-gap test of an offline kit (Docker, no GPU, about two minutes): a kit with
+  Bench alone (plus a model kit merged with `install.sh --add`) and a kit with both apps, each installed
+  on an `--internal` network and benchmarked there. Needs `concord-bench:0.2.0` and, for the second,
+  `concord-label:0.2.0` (`just build` in each repository), and ports 8600 and 8620 free.
+- `just e2e-handoff` in the Label repository: the round trip between the two images.
 - `just test-live`, `just test-perf`: against live services, and at realistic size.
 
 ## Image
@@ -161,40 +186,49 @@ In development, run Bench on the host instead.
 
 ## Offline kits
 
-Concord Bench and chosen models can go to a machine with no internet access
-([OFFLINE_EXPORT_PLAN.md](OFFLINE_EXPORT_PLAN.md)). **Export for offline** lists every platform service
-with its image and weight sizes; tick the models, pick a kit kind and a destination folder, and the
-worker writes the kit there (progress on the Jobs page). From the command line:
+Concord Bench, Concord Label or both, and chosen models, can go to a machine with no internet access
+([OFFLINE_EXPORT_PLAN.md](OFFLINE_EXPORT_PLAN.md), CONTRACTS.md §6). **Export for offline** lists every
+platform service with its image and weight sizes; tick the models, pick a kit kind, tick the apps a full
+kit carries ("Include Concord Bench" is ticked; "Include Concord Label" shows Label's local image tag, or
+says to run `just build` in that repository) and a destination folder, and the worker writes the kit
+there (progress on the Jobs page). From the command line:
 
 ```bash
 just export-offline silero-vad whisper-large-v3 --kind full --out /mnt/usb   # Bench + platform + models
+just export-offline silero-vad --kind full --app concord-bench --app concord-label --out /mnt/usb  # both apps
 just export-offline whisper-large-v3-turbo --kind models --out /mnt/usb       # models only, for an existing install
 just verify-kit /mnt/usb/concord-offline-...                                  # checksums against manifest.json
 ```
 
-- A kit is a folder: `images/` (one `docker save` of the models' images, plus `concord.tar` in a full
-  kit), `assets/` (weights in `AI_ASSETS` layout; Hugging Face models as a fresh cache entry with real
-  files), `platform/` (a runnable platform tree holding only the chosen services), `install.sh`,
-  `README.md`, `manifest.json` and `SHA256SUMS`. The platform's `tools/bundle.py` writes the first three.
+`--app concord-label=concord-label:0.2.0` picks a tag; without one the other app's image is its contract
+name, `concord-label:<this version>`, or else the first tag `docker images concord-label` lists.
+
+- A kit is a folder: `images/` (one `docker save` of the models' images, plus `concord-bench.tar` and/or
+  `concord-label.tar` in a full kit), `assets/` (weights in `AI_ASSETS` layout; Hugging Face models as a
+  fresh cache entry with real files), `platform/` (a runnable platform tree holding only the chosen
+  services), `concord/compose.yml`, `install.sh`, `README.md`, `manifest.json` (with `"apps"`) and
+  `SHA256SUMS`. The platform's `tools/bundle.py` writes the first three.
 - Missing images or weights stop the export (`just build NAME`, `docker pull`, `just fetch-weights NAME`,
   or start an engine model once so it downloads). Not fitting under `util_limit` together is only a
   warning.
 - On the offline machine, `./install.sh` (full kit) verifies the checksums, loads the images, writes
-  `platform/.env` (`AI_ASSETS=<kit>/assets`, `HF_HUB_OFFLINE=1`) and starts Bench from
-  `concord/compose.yml` with `platform/` and `assets/` mounted at their host paths.
+  `platform/.env` (`AI_ASSETS=<kit>/assets`, `HF_HUB_OFFLINE=1`) and `concord/.env` (`BENCH_IMAGE`,
+  `LABEL_IMAGE`), and starts the apps from `concord/compose.yml` (services `concord-bench` on
+  http://127.0.0.1:8600 and `concord-label` on http://127.0.0.1:8620, with `platform/` and `assets/`
+  mounted at their host paths). With both apps, `LABEL_URL` and `BENCH_URL` point at each other, so Send
+  to Bench, Open in Label and the locked score work there too.
   `./install.sh --add <install>` (model kit) merges models into it; a service already there with another
   image is refused unless `--replace`. Register models there with Add model: no registrations, scores or
   datasets travel.
 - Exporting from a containerised Bench needs the platform and `$AI_ASSETS` mounted read-only at their
   host paths and the destination folder mounted; on the host none of this applies.
-- Kits with both apps (CONTRACTS.md §6) are not built yet.
 
 ## Status
 
 Phase 1 (PLAN.md §5, milestones M0 to M7) and the offline export (O1 to O3) are implemented, renamed and
 trimmed to Concord Bench (SPLIT_PLAN.md milestone S3), with Bench's side of reference package import
-(S4), the links to Concord Label (S5) and GPU leases shared with Label (S6). Not built yet: kits holding
-both apps (S7).
+(S4), the links to Concord Label (S5), GPU leases shared with Label (S6), and offline kits holding either
+or both apps (S7). The split (SPLIT_PLAN.md) is built.
 
 Known limits:
 - KWS is not built (Q6). Only its hooks exist: the enums, the `keyword_event` table, task-keyed

@@ -1,6 +1,6 @@
 # Concord — Split into Bench and Label
 
-Planned 2026-10-21, not built. Kept apart from [PLAN.md](PLAN.md) (Phases 1–3) and
+Planned and built 2026-10-21. Kept apart from [PLAN.md](PLAN.md) (Phases 1–3) and
 [OFFLINE_EXPORT_PLAN.md](OFFLINE_EXPORT_PLAN.md); references to them are written as "PLAN.md §N" and
 "OFFLINE_EXPORT_PLAN.md §N". Section numbers without a file name are in this document.
 

@@ -23,7 +23,7 @@ def main(argv: list[str] | None = None) -> int:
                     help="full: Concord + platform + models (sets up a machine); models: models only (default full)")
     ex.add_argument("--out", help="folder the kit is written into (default: CONCORD_DATA/offline)")
     ex.add_argument("--name", help="kit name (default: from the services)")
-    ex.add_argument("--concord-image", help="Concord image for a full kit (default: CONCORD_IMAGE, concord-lite)")
+    ex.add_argument("--concord-image", help="Concord image for a full kit (default: CONCORD_IMAGE, concord-bench)")
     vk = sub.add_parser("verify-kit", help="check an offline kit's files against its manifest.json")
     vk.add_argument("kit")
     ak = sub.add_parser("add-kit", help="merge a model kit into an offline install (run by install.sh --add)")

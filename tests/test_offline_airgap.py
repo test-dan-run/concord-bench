@@ -27,7 +27,7 @@ from concord_bench.offline import export, kit
 pytestmark = pytest.mark.offline
 
 ROOT = Path(__file__).resolve().parents[1]
-IMAGE = "concord-lite:0.1.0"
+IMAGE = "concord-bench:0.2.0"
 SERVICE = "silero-vad"
 NETWORK = "concord-airgap-net"
 PROJECT = "concord-airgap"  # the kit platform's compose project

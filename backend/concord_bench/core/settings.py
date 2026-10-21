@@ -9,7 +9,7 @@ from pathlib import Path
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-# The Concord checkout (fixtures, frontend/dist, .env). In an image the package is installed into
+# The Concord Bench checkout (fixtures, frontend/dist, .env). In an image the package is installed into
 # site-packages, so CONCORD_HOME says where the app's files are.
 REPO_ROOT = Path(os.environ.get("CONCORD_HOME") or Path(__file__).resolve().parents[3])
 
@@ -19,8 +19,6 @@ class Settings(BaseSettings):
 
     # Audio, derived files and the database (Q2: local disk only).
     concord_data: Path = Field(default=REPO_ROOT / "data")
-    # Phase 3 (Improve) router and UI. Only concord-full sets this.
-    feature_improve: bool = False
     # Platform repo: stack.py lives here, and the aicore endpoint map is generated here.
     platform_dir: Path = Field(default=REPO_ROOT.parent.parent / "platform")
     # A ready environment for the platform's tools (containers): stack.py then runs with
@@ -40,8 +38,8 @@ class Settings(BaseSettings):
     record_dir: Path | None = None
     # Seconds to wait for `stack.py up` (all services in one call).
     services_timeout_s: int = 20 * 60
-    # The Concord image a full offline kit carries unless the export form picks another (Q3).
-    concord_image: str = "concord-lite:0.1.0"
+    # The Concord Bench image a full offline kit carries unless the export form picks another (Q3).
+    concord_image: str = "concord-bench:0.2.0"
     # Built frontend served by FastAPI; absent in development (Vite serves it).
     frontend_dist: Path = Field(default=REPO_ROOT / "frontend" / "dist")
 

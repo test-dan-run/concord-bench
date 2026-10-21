@@ -1,4 +1,4 @@
-# Concord. Run `just` for the recipe list. See README.md.
+# Concord Bench. Run `just` for the recipe list. See README.md.
 
 set dotenv-load := true
 set shell := ["bash", "-euo", "pipefail", "-c"]
@@ -60,9 +60,10 @@ test-offline *args:
 test-perf:
     uv run pytest -m perf -o addopts="--import-mode=importlib" -s tests/test_perf.py
 
-# Playwright smoke tests (acceptance item 3) on replayed fixtures. The API runs in concord-lite with this
-# checkout's backend, tests and frontend/dist mounted; browsers run in the Playwright image (no host libs).
-e2e: (build-web "0")
+# Playwright smoke tests (acceptance item 3) on replayed fixtures. The API runs in the concord-bench image
+# (`just build`) with this checkout's backend, tests and frontend/dist mounted; browsers run in the
+# Playwright image (no host libs).
+e2e: build-web
     #!/usr/bin/env bash
     set -euo pipefail
     docker network create concord-e2e >/dev/null 2>&1 || true
@@ -71,7 +72,7 @@ e2e: (build-web "0")
     docker run -d --name concord-e2e-api --network concord-e2e -e PYTHONPATH=/srv/apps/concord/backend \
       -v "$PWD/backend":/srv/apps/concord/backend:ro -v "$PWD/fixtures":/srv/apps/concord/fixtures:ro \
       -v "$PWD/tests":/srv/apps/concord/tests:ro -v "$PWD/frontend/dist":/srv/apps/concord/frontend/dist:ro \
-      concord-lite:0.1.0 python tests/e2e_server.py --host 0.0.0.0 --port 8611 >/dev/null
+      concord-bench:0.2.0 python tests/e2e_server.py --host 0.0.0.0 --port 8611 >/dev/null
     until docker logs concord-e2e-api 2>&1 | grep -q "e2e data ready"; do
       docker ps -q -f name=concord-e2e-api | grep -q . || { docker logs concord-e2e-api; exit 1; }
       sleep 1
@@ -79,10 +80,9 @@ e2e: (build-web "0")
     docker run --rm --network concord-e2e --ipc=host -v "$PWD/frontend":/work -w /work \
       -e E2E_BASE_URL=http://concord-e2e-api:8611 mcr.microsoft.com/playwright:v1.64.1-noble npx playwright test
 
-# ruff + import-linter (Evaluate/Label must not import Improve) + frontend typecheck
+# ruff + frontend typecheck
 lint:
     uv run ruff check backend tests fixtures/synth
-    uv run lint-imports
     cd frontend && npm run lint --silent
 
 # check contracts/samples (CONTRACTS.md) and compare with the other app's repository next to this one
@@ -105,14 +105,10 @@ export-offline +args:
 verify-kit dir:
     {{py}} -m concord_bench.cli verify-kit {{dir}}
 
-# frontend production build into frontend/dist (lite: VITE_FEATURE_IMPROVE=0)
-build-web improve="0":
-    cd frontend && VITE_FEATURE_IMPROVE={{improve}} npm run build
+# frontend production build into frontend/dist
+build-web:
+    cd frontend && npm run build
 
-# concord-lite image (no Improve); the platform's aicore client comes in as a named build context
-build-lite:
-    docker build --build-context platform=${PLATFORM_DIR:-../../platform} --target lite -t concord-lite:0.1.0 .
-
-# concord-full image (Improve on)
-build-full:
-    docker build --build-context platform=${PLATFORM_DIR:-../../platform} --target full -t concord-full:0.1.0 .
+# concord-bench image; the platform's aicore client comes in as a named build context
+build:
+    docker build --build-context platform=${PLATFORM_DIR:-../../platform} --target bench -t concord-bench:0.2.0 .

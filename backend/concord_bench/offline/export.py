@@ -19,14 +19,15 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
+from .. import __version__
 from ..core.models import utcnow
 from ..core.settings import get_settings
 from ..platform.services import platform_command, platform_env
 from . import kit as kitfiles
 
 KINDS = ("full", "models")
-CONCORD_VERSION = "0.1.0"
-KNOWN_CONCORD_IMAGES = ("concord-lite:0.1.0", "concord-full:0.1.0")
+CONCORD_VERSION = __version__
+KNOWN_CONCORD_IMAGES = (f"concord-bench:{__version__}",)
 
 Log = Callable[[str], None]
 Progress = Callable[[float, str | None], None]

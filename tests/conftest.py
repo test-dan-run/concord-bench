@@ -21,6 +21,17 @@ def dialogue_files() -> dict:
     return {k: v for k, v in truth().items() if k.startswith("d0") and k not in ("d07_corrupt", "d08_long")}
 
 
+@pytest.fixture(autouse=True)
+def no_platform_tools(request, monkeypatch):
+    """Lease renewals and releases never reach a real stack.py in tests (orchestration tests record
+    them); live tests use the real platform."""
+    from concord_bench.platform import services
+
+    if request.node.get_closest_marker("live") or request.node.get_closest_marker("offline"):
+        return
+    monkeypatch.setattr(services, "run_tool", lambda cmd, timeout=120: (0, ""))
+
+
 @pytest.fixture
 def data_dir(tmp_path, monkeypatch):
     from concord_bench.core import db

@@ -10,7 +10,8 @@ Job types:
 Before a job needs services, the worker starts them with the platform's `stack.py`. It batches: the
 services of later queued jobs that fit next to this job's under `util_limit` are started in the
 same call, which keeps eviction to the minimum. If the platform tool fails, the job is `blocked`
-with its message.
+with its message. The services are leased to `bench:job-<id>` while the job runs, renewed every minute
+and released when it ends (`services.Lease`), so Concord Label's worker never stops them mid-run.
 """
 
 from __future__ import annotations
@@ -224,16 +225,23 @@ HANDLERS = {"ingest": _handle_ingest, "check": _handle_check, "run": _handle_run
 RUN_JOBS = ("run",)  # job types whose payload names a `run` that mirrors the job's state
 
 
+def holder_for(job_id: int) -> str:
+    """The platform lease holder of a job (SPLIT_PLAN.md §6)."""
+    return f"bench:job-{job_id}"
+
+
 def run_job(job_id: int, batch: list[str] | None = None) -> None:
     ctx = JobContext(job_id)
     session = SessionLocal()
+    lease: services.Lease | None = None
     try:
         job = session.get(Job, job_id)
         assert job is not None
         needed = batch or job.required_services
         if needed:
+            lease = services.Lease(needed, holder_for(job_id), ctx.log)
             try:
-                services.ensure_services(needed, ctx.log)
+                lease.acquire()
             except services.ServicesBlocked as exc:
                 ctx.log(f"blocked: {exc}")
                 job.status, job.error, job.finished_at = JobStatus.blocked, str(exc), utcnow()
@@ -259,6 +267,11 @@ def run_job(job_id: int, batch: list[str] | None = None) -> None:
         job.message = ctx.message[:300] or None
         session.commit()
     finally:
+        if lease is not None:
+            try:
+                lease.close()
+            except Exception as exc:  # noqa: BLE001 - the job's outcome is already recorded
+                ctx.log(f"release failed: {exc}")
         session.close()
 
 

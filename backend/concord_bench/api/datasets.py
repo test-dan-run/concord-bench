@@ -16,7 +16,7 @@ from ..core import paths
 from ..core.db import get_session
 from ..core.models import AudioFile, Dataset, Job, Run, Segment
 from ..core.settings import REPO_ROOT
-from ..datasets.ingest import inspect_source
+from ..datasets.ingest import NO_REFERENCES, inspect_source
 from ..runs import jobs
 
 router = APIRouter(tags=["datasets"])
@@ -140,7 +140,7 @@ def dataset_json(session: Session, ds: Dataset, detail: bool = False) -> dict[st
     rep = ds.report or {}
     d: dict[str, Any] = {
         "id": ds.id, "name": ds.name, "language": ds.language, "description": ds.description, "tags": ds.tags,
-        "label_types": ds.label_types, "mode": ds.mode, "status": ds.status, "created_at": ds.created_at.isoformat(),
+        "label_types": ds.label_types, "status": ds.status, "created_at": ds.created_at.isoformat(),
         "files": rep.get("files"), "usable_files": rep.get("usable_files"), "hours": rep.get("hours"),
         "usable_hours": rep.get("usable_hours"), "has_speaker_text": bool(rep.get("has_speaker_text")),
         "flagged": {k: len(v) for k, v in (rep.get("flagged") or {}).items()},
@@ -170,6 +170,12 @@ def create_dataset(body: DatasetIn, session: Session = Depends(get_session)) -> 
     if bool(body.upload_id) == bool(body.local_path):
         raise HTTPException(400, "give exactly one of upload_id or local_path")
     source = _upload_dir(body.upload_id) if body.upload_id else _local_dir(body.local_path or "")
+    try:
+        found = inspect_source(source)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from None
+    if found["audio_files"] and len(found["audio_without_labels"]) == found["audio_files"]:
+        raise HTTPException(400, NO_REFERENCES)
     ds = Dataset(name=body.name.strip(), language=(body.language or "").strip() or None,
                  description=body.description, tags=_clean_tags(body.tags), status="ingesting")
     session.add(ds)
@@ -242,6 +248,19 @@ def dataset_files(dataset_id: int, status: str | None = None, q: str | None = No
 class FlagIn(BaseModel):
     flagged: bool = True
     note: str | None = None
+
+
+@router.get("/datasets/{dataset_id}/flags")
+def dataset_flags(dataset_id: int, session: Session = Depends(get_session)) -> list[dict[str, Any]]:
+    """References flagged as wrong from the error pages ("Flag reference as wrong")."""
+    get_dataset(session, dataset_id)
+    stmt = (select(Segment, AudioFile).join(AudioFile)
+            .where(AudioFile.dataset_id == dataset_id, Segment.flagged.is_(True))
+            .order_by(AudioFile.rel_path, Segment.start))
+    return [{"id": seg.id, "uid": seg.uid, "file_id": f.id, "path": f.rel_path, "sha256": f.sha256,
+             "start": seg.start, "end": seg.end, "speaker": seg.speaker, "text": seg.text, "note": seg.flag_note,
+             "updated_at": seg.updated_at.isoformat() if seg.updated_at else None}
+            for seg, f in session.execute(stmt).all()]
 
 
 @router.post("/segments/{segment_id}/flag")

@@ -5,7 +5,6 @@ Job types:
 - check   {service}                             compatibility check on the check clip
 - run     {run_id, normalisers?}                inference, then scoring with the default normaliser / collar
 - score   {run_id, normaliser, collar}          rescoring that needs a platform service (text.transform)
-- label   {run_id}                              ensemble pseudo-labelling (Phase 2), writes segments
 - export  {export_id, services, kind, dest, ...}  an offline kit (OFFLINE_EXPORT_PLAN.md); needs no service
 
 Before a job needs services, the worker starts them with the platform's `stack.py`. It batches: the
@@ -190,25 +189,6 @@ def _handle_run(session: Session, job: Job, ctx: JobContext) -> dict[str, Any]:
     return {"run_id": run.id, "score_ids": score_ids}
 
 
-def _handle_label(session: Session, job: Job, ctx: JobContext) -> dict[str, Any]:
-    from ..label import pseudo
-
-    run = session.get(Run, job.payload["run_id"])
-    if run is None:
-        raise ValueError(f"run {job.payload['run_id']} not found")
-    try:
-        pseudo.execute(session, run, ctx.log, ctx.progress)
-        run.status = "done"
-        session.commit()
-    except Exception as exc:
-        session.rollback()
-        run = session.get(Run, job.payload["run_id"])
-        run.status, run.error = "failed", str(exc)[:2000]
-        session.commit()
-        raise
-    return {"run_id": run.id, "summary": {k: v for k, v in run.outputs["summary"].items() if k != "agreement"}}
-
-
 def _handle_score(session: Session, job: Job, ctx: JobContext) -> dict[str, Any]:
     run = session.get(Run, job.payload["run_id"])
     sc = scoring.score_run(session, run, job.payload.get("normaliser"), job.payload.get("collar"))
@@ -240,8 +220,8 @@ def _handle_export(session: Session, job: Job, ctx: JobContext) -> dict[str, Any
 
 
 HANDLERS = {"ingest": _handle_ingest, "check": _handle_check, "run": _handle_run, "score": _handle_score,
-            "label": _handle_label, "export": _handle_export}
-RUN_JOBS = ("run", "label")  # job types whose payload names a `run` that mirrors the job's state
+            "export": _handle_export}
+RUN_JOBS = ("run",)  # job types whose payload names a `run` that mirrors the job's state
 
 
 def run_job(job_id: int, batch: list[str] | None = None) -> None:

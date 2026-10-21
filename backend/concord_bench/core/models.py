@@ -3,9 +3,8 @@
 
 KWS hooks (Q6): `kws` is in every task enum and `keyword_event` exists, but nothing writes them yet.
 
-Phase 2 (Label) writes the same `segment` table: pseudo-labels carry `source_run_id` (a `label` run) and
-a status from confidence triage; a person's edits set `edited_at`. Improve can later read segments
-without Label importing it.
+Labelling lives in Concord Label (SPLIT_PLAN.md). Bench's segments are references: confirmed, from an
+annotated upload.
 """
 
 from __future__ import annotations
@@ -55,7 +54,6 @@ class RunTask(enum.StrEnum):
     seg = "seg"
     pipeline = "pipeline"
     kws = "kws"
-    label = "label"  # Phase 2 ensemble pseudo-labelling
 
 
 class FileStatus(enum.StrEnum):
@@ -66,10 +64,7 @@ class FileStatus(enum.StrEnum):
 
 
 class SegmentStatus(enum.StrEnum):
-    pseudo = "pseudo"
-    auto = "auto"
     confirmed = "confirmed"
-    rejected = "rejected"
 
 
 class JobStatus(enum.StrEnum):
@@ -88,7 +83,6 @@ class Dataset(Base):
     description: Mapped[str | None] = mapped_column(Text)
     tags: Mapped[list[str]] = mapped_column(default=list)
     label_types: Mapped[list[str]] = mapped_column(default=list)
-    mode: Mapped[str] = mapped_column(String(16), default="annotated")  # annotated | audio_only
     status: Mapped[str] = mapped_column(String(16), default="ingesting")  # ingesting | ready | failed
     # Ingest report: counts, hours, sample-rate histogram, flagged files, annotation matches.
     report: Mapped[dict[str, Any]] = mapped_column(default=dict)
@@ -126,13 +120,11 @@ class AudioFile(Base):
 
 
 class Segment(Base):
-    """A reference (or, from Phase 2, pseudo) label. Text-only file-level transcripts are one segment
-    spanning the file with no speaker; RTTM turns have a speaker and no text; speaker-attributed
-    transcripts have both.
+    """A reference label. Text-only file-level transcripts are one segment spanning the file with no
+    speaker; RTTM turns have a speaker and no text; speaker-attributed transcripts have both.
 
-    `uid` identifies the segment across installs (label packages). `edited_at` is set whenever a person
-    changes or reviews it; pseudo-labelling never replaces a segment a person has touched. `meta` holds
-    what pseudo-labelling knew: the ASR span, each member's cache row and the chosen member."""
+    `uid` identifies the segment across apps, so "reference is wrong" flags can go back to Concord Label
+    (CONTRACTS.md §3)."""
 
     __tablename__ = "segment"
     __table_args__ = (Index("ix_segment_file", "audio_file_id", "start"), Index("ix_segment_uid", "uid"))
@@ -144,20 +136,12 @@ class Segment(Base):
     speaker: Mapped[str | None] = mapped_column(String(100))
     text: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(16), default=SegmentStatus.confirmed)
-    confidence: Mapped[float | None] = mapped_column(Float)
-    source_run_id: Mapped[int | None] = mapped_column(ForeignKey("run.id", ondelete="SET NULL"))
     flagged: Mapped[bool] = mapped_column(Boolean, default=False)
     flag_note: Mapped[str | None] = mapped_column(Text)
-    edited_at: Mapped[datetime | None] = mapped_column(DateTime)
     meta: Mapped[dict[str, Any]] = mapped_column(default=dict)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
     audio_file: Mapped[AudioFile] = relationship(back_populates="segments")
-
-    @property
-    def reviewed(self) -> bool:
-        """Reviewed work: confirmed, or touched by a person. Pseudo-labels never overwrite it."""
-        return self.status == SegmentStatus.confirmed or self.edited_at is not None
 
 
 class KeywordEvent(Base):
@@ -237,8 +221,7 @@ class Run(Base):
 
 
 class ModelOutput(Base):
-    """The inference cache, keyed on (model, audio, span, params). Shared by runs, pipelines and
-    Phase 2 pseudo-labelling."""
+    """The inference cache, keyed on (model, audio, span, params). Shared by runs and pipelines."""
 
     __tablename__ = "model_output"
     __table_args__ = (UniqueConstraint("model_name", "audio_sha256", "span_start", "span_end", "params_hash"),)
@@ -294,7 +277,7 @@ class Result(Base):
 class Job(Base):
     __tablename__ = "job"
     id: Mapped[int] = mapped_column(primary_key=True)
-    type: Mapped[str] = mapped_column(String(32))  # ingest | check | run | score | label | export
+    type: Mapped[str] = mapped_column(String(32))  # ingest | check | run | score | export
     payload: Mapped[dict[str, Any]] = mapped_column(default=dict)
     status: Mapped[str] = mapped_column(String(16), default=JobStatus.queued)
     required_services: Mapped[list[str]] = mapped_column(default=list)
@@ -306,29 +289,6 @@ class Job(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     started_at: Mapped[datetime | None] = mapped_column(DateTime)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime)
-
-
-class SyncPackage(Base):
-    """One label package exported from or imported into this install (HANDOFF §4, Import / export).
-
-    Imports keep the merge outcome, the conflict list and the path of the snapshot taken before the
-    merge, so a merge can be undone."""
-
-    __tablename__ = "sync_package"
-    id: Mapped[int] = mapped_column(primary_key=True)
-    direction: Mapped[str] = mapped_column(String(8))  # export | import
-    dataset_id: Mapped[int | None] = mapped_column(ForeignKey("dataset.id", ondelete="SET NULL"))
-    # export: built | import: staged | applied | undone
-    status: Mapped[str] = mapped_column(String(16))
-    scope: Mapped[dict[str, Any]] = mapped_column(default=dict)
-    counts: Mapped[dict[str, Any]] = mapped_column(default=dict)
-    manifest: Mapped[dict[str, Any]] = mapped_column(default=dict)
-    conflicts: Mapped[list[Any]] = mapped_column(default=list)
-    path: Mapped[str | None] = mapped_column(String(1000))  # the package zip (export) or staged folder (import)
-    snapshot_path: Mapped[str | None] = mapped_column(String(1000))
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
-    applied_at: Mapped[datetime | None] = mapped_column(DateTime)
-    undone_at: Mapped[datetime | None] = mapped_column(DateTime)
 
 
 class OfflineExport(Base):

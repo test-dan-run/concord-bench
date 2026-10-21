@@ -1,14 +1,16 @@
-"""HTTP API on the fixture set (TestClient): uploads, ingest job, variants, registry errors, templates."""
+"""HTTP API on the fixture set (TestClient): config, uploads, ingest job, flags, registry errors, templates."""
 
 from __future__ import annotations
 
 import io
+import json
+import shutil
 import zipfile
 
 import pytest
 
 from concord_bench.runs import jobs
-from conftest import GEN
+from conftest import GEN, ROOT
 
 
 def upload_fixture(client, refs="stm") -> str:
@@ -26,24 +28,17 @@ def upload_fixture(client, refs="stm") -> str:
     return uid
 
 
-def test_config_lite_by_default(client):
+def test_config_names_the_app_and_contract(client):
+    """CONTRACTS.md §1: app, version, contract version and peer (no Label link yet)."""
     cfg = client.get("/api/config").json()
-    assert cfg["features"] == {"improve": False} and cfg["variant"] == "lite"
+    assert cfg["app"] == "concord-bench" and cfg["version"] == "0.2.0" and cfg["contract_version"] == 1
+    assert cfg["peer"] == {"url": None, "reachable": False, "contract_version": None}
+    sample = json.loads((ROOT / "contracts" / "samples" / "api" / "config.bench.json").read_text())
+    assert set(sample) <= set(cfg) and set(sample["peer"]) == set(cfg["peer"])
+    assert "features" not in cfg and "variant" not in cfg
     assert [t["id"] for t in cfg["tasks"]] == ["asr", "diar", "pipeline"]
-    assert client.get("/api/improve/status").status_code == 404
-
-
-def test_full_variant_mounts_improve(monkeypatch, data_dir):
-    from fastapi.testclient import TestClient
-
-    from concord_bench.api.app import create_app
-    from concord_bench.core.settings import reset_settings
-
-    monkeypatch.setenv("FEATURE_IMPROVE", "1")
-    reset_settings()
-    with TestClient(create_app()) as c:
-        assert c.get("/api/config").json()["features"]["improve"] is True
-        assert c.get("/api/improve/status").json()["state"] == "on hold"
+    for gone in ("/api/improve/status", "/api/label/console", "/api/sync/packages"):
+        assert client.get(gone).status_code == 404
 
 
 def test_upload_inspect_create_ingest(client, data_dir):
@@ -133,3 +128,36 @@ def test_model_requires_successful_check(client, session):
     assert r.status_code == 422
     r = client.post("/api/models", json={"registry_name": "default-vad", "check_job_id": 999})
     assert r.status_code == 400
+
+
+def test_audio_only_upload_refused(client, tmp_path):
+    """Bench needs references: a folder of audio alone is refused before anything is stored."""
+    src = tmp_path / "audio-only"
+    shutil.copytree(GEN / "dataset" / "audio", src / "audio")
+    ins = client.post("/api/uploads/inspect-path", json={"path": str(src)}).json()
+    assert ins["audio_files"] == 8 and ins["tasks"] == {}
+    r = client.post("/api/datasets", json={"name": "Unlabelled", "local_path": str(src)})
+    assert r.status_code == 400 and "no references found" in r.json()["detail"]
+    assert "Concord Label" in r.json()["detail"]
+    assert client.get("/api/datasets").json() == []
+
+
+def test_flagged_references_listed_on_dataset(client, tmp_path):
+    from concord_bench.acceptance import stage_fixture_dataset
+    from concord_bench.core.db import SessionLocal
+    from concord_bench.core.models import Segment
+
+    src = stage_fixture_dataset(tmp_path / "src", refs="stm")
+    ds = client.post("/api/datasets", json={"name": "Calls", "local_path": str(src)}).json()["dataset"]
+    jobs.run_pending()
+    assert client.get(f"/api/datasets/{ds['id']}/flags").json() == []
+    with SessionLocal() as s:
+        seg_id = s.query(Segment.id).order_by(Segment.id).first()[0]
+    r = client.post(f"/api/segments/{seg_id}/flag", json={"flagged": True, "note": "wrong speaker"})
+    assert r.json() == {"id": seg_id, "flagged": True, "note": "wrong speaker"}
+    flags = client.get(f"/api/datasets/{ds['id']}/flags").json()
+    assert [(f["id"], f["note"]) for f in flags] == [(seg_id, "wrong speaker")]
+    assert len(flags[0]["uid"]) == 32 and len(flags[0]["sha256"]) == 64
+    client.post(f"/api/segments/{seg_id}/flag", json={"flagged": False})
+    assert client.get(f"/api/datasets/{ds['id']}/flags").json() == []
+    assert client.get("/api/datasets/999/flags").status_code == 404

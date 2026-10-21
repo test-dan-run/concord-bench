@@ -1,13 +1,14 @@
-"""Config, feature flags, tags, normalisers, task list."""
+"""Config (app, version, contract version, peer), tags, normalisers, task list."""
 
 from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from .. import APP, CONTRACT_VERSION, __version__
 from ..core.db import get_session
 from ..core.models import Dataset, Model
 from ..core.settings import get_settings
@@ -26,12 +27,14 @@ TASKS: list[dict[str, Any]] = [
 
 
 @router.get("/config")
-def get_config(request: Request) -> dict[str, Any]:
+def get_config() -> dict[str, Any]:
     s = get_settings()
     return {
-        "version": "0.1.0",
-        "features": request.app.state.features,
-        "variant": "full" if request.app.state.features.get("improve") else "lite",
+        "app": APP,
+        "version": __version__,
+        "contract_version": CONTRACT_VERSION,
+        # Concord Label (CONTRACTS.md §1). Linking to it comes later (SPLIT_PLAN.md §5); until then no peer.
+        "peer": {"url": None, "reachable": False, "contract_version": None},
         "tasks": TASKS,
         "default_normaliser": normalisers.DEFAULT,
         "default_collar": DEFAULT_COLLAR,

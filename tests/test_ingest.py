@@ -61,7 +61,7 @@ def test_ingest_fixture_dataset(session, tmp_path):
     assert [f["file"] for f in rep["flagged"]["clipped"]] == ["audio/d05_clipped.wav"]
     assert [f["file"] for f in rep["flagged"]["undecodable"]] == ["audio/d07_corrupt.wav"]
     assert [f["file"] for f in rep["flagged"]["too_long"]] == ["audio/d08_long.mp3"]
-    assert ds.label_types == ["asr", "diar"] and ds.mode == "annotated" and rep["has_speaker_text"]
+    assert ds.label_types == ["asr", "diar"] and rep["has_speaker_text"]
     files = {f.stem: f for f in session.scalars(select(AudioFile))}
     t = truth()
     for stem in ("d01", "d02_8k", "d03_44k_stereo", "d04", "d06"):

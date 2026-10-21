@@ -35,9 +35,6 @@ def get_or_create_pipeline(session: Session, seg_model_id: int | None, asr_model
 
 
 def run_label(run: Run) -> str:
-    if run.task == RunTask.label:
-        n = len(run.params.get("asr_model_ids") or [])
-        return f"Pseudo-label · {n} ASR model{'s' if n != 1 else ''}"
     if run.task == RunTask.pipeline and run.pipeline:
         seg = run.pipeline.seg_model.display_name if run.pipeline.seg_model else "Reference segments + speakers"
         return f"{seg} → {run.pipeline.asr_model.display_name}"
@@ -233,9 +230,6 @@ def job_label(session: Session, j: Job) -> str:
         return f"ingest · {d.name}" if d else "ingest"
     if j.type == "check":
         return f"check · {p.get('service')}"
-    if j.type == "label":
-        r = session.get(Run, p.get("run_id"))
-        return f"pseudo-label · {r.dataset.name}" if r else "pseudo-label"
     if j.type == "score":
         return f"rescore · run {p.get('run_id')} · {p.get('normaliser')}"
     if j.type == "export":

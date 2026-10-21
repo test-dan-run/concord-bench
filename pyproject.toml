@@ -23,15 +23,10 @@ dependencies = [
     "aicore[oip]",
 ]
 
-[project.optional-dependencies]
-# concord-full: Phase 3 (Improve). Training dependencies are added here when Phase 3 is scoped (Q5).
-full = []
-
 [dependency-groups]
 dev = [
     "pytest>=8.4",
     "ruff>=0.14",
-    "import-linter>=2.5",
 ]
 
 [build-system]
@@ -39,7 +34,7 @@ requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["backend/concord_bench", "backend/concord_improve"]
+packages = ["backend/concord_bench"]
 
 [tool.uv.sources]
 aicore = { path = "../../platform/clients/aicore", editable = true }

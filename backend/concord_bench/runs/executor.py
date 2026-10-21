@@ -52,8 +52,6 @@ def file_refs(session: Session, dataset_id: int, include_long: bool = False) -> 
 
 
 def services_for(run: Run) -> list[str]:
-    if run.task == RunTask.label:
-        return sorted(run.image_tags or {})
     if run.task == RunTask.pipeline:
         p = run.pipeline
         assert p is not None

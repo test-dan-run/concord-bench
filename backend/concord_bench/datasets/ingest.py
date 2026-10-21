@@ -2,7 +2,9 @@
 stem, then copy originals, derive 16 kHz mono FLAC + peaks, and store reference segments.
 
 `inspect_source` is cheap (no decoding) and drives the upload page's match counts and previews.
-`ingest` runs as a job and reports progress.
+`ingest` runs as a job and reports progress. Concord Bench benchmarks against references, so a source
+whose annotations match no audio file is refused (`NO_REFERENCES`); audio-only datasets belong in
+Concord Label.
 """
 
 from __future__ import annotations
@@ -25,6 +27,8 @@ from . import audio as audio_mod
 from .parsers import ANNOTATION_EXTS, ParseResult, RefRecord, parse_file
 
 Progress = Callable[[float, str], None]
+NO_REFERENCES = ("no references found: Concord Bench benchmarks datasets with references, so add annotation "
+                 "files whose names match the audio files (see the templates). To label audio, use Concord Label.")
 SKIP_DIRS = {"__MACOSX", ".git"}
 
 
@@ -186,6 +190,8 @@ def ingest(session: Session, dataset_id: int, source: Path, progress: Progress |
     m = match(s)
     if not s.audio:
         raise ValueError("no audio files found (accepted: " + ", ".join(sorted(audio_mod.AUDIO_EXTS)) + ")")
+    if not m["matched"]:
+        raise ValueError(NO_REFERENCES)
     existing = {f.rel_path: f for f in session.scalars(select(AudioFile).where(AudioFile.dataset_id == ds.id))}
     total = len(s.audio)
     flagged: dict[str, list[dict[str, Any]]] = {"clipped": [], "undecodable": [], "too_long": []}
@@ -211,8 +217,7 @@ def ingest(session: Session, dataset_id: int, source: Path, progress: Progress |
         seconds += f.duration or 0.0
         # Reference segments: replace whatever this file had from a previous ingest.
         for seg in list(f.segments):
-            if seg.status == SegmentStatus.confirmed and seg.source_run_id is None:
-                session.delete(seg)
+            session.delete(seg)
         meta: dict[str, Any] = {}
         for rec in m["matched"].get(rel, []):
             if rec.start is None:
@@ -228,7 +233,6 @@ def ingest(session: Session, dataset_id: int, source: Path, progress: Progress |
     progress(0.95, "writing report")
     all_records = [r for recs in m["matched"].values() for r in recs]
     ds.label_types = label_types_for(all_records)
-    ds.mode = "annotated" if ds.label_types else "audio_only"
     usable = [f for f in session.scalars(select(AudioFile).where(AudioFile.dataset_id == ds.id)) if f.usable]
     ds.report = {
         "files": total, "usable_files": len(usable), "hours": seconds / 3600,

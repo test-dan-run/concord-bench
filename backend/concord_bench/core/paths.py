@@ -32,28 +32,9 @@ def uploads(upload_id: str) -> Path:
     return data_root() / "uploads" / upload_id
 
 
-def exports() -> Path:
-    return data_root() / "exports"
-
-
 def offline_kits() -> Path:
     """Default destination of offline kits (the export form can name any folder)."""
     return data_root() / "offline"
-
-
-def snapshots() -> Path:
-    """Segment snapshots taken before a label-package merge (undo)."""
-    return data_root() / "snapshots"
-
-
-def imports(package_id: int) -> Path:
-    """An imported label package, unpacked."""
-    return data_root() / "imports" / str(package_id)
-
-
-def install_id() -> Path:
-    """A random id naming this install in label-package manifests."""
-    return data_root() / "install_id"
 
 
 def job_log(job_id: int) -> Path:
@@ -65,5 +46,5 @@ def job_progress(job_id: int) -> Path:
 
 
 def ensure_dirs() -> None:
-    for sub in ("originals", "derived", "peaks", "uploads", "exports", "logs", "snapshots", "imports"):
+    for sub in ("originals", "derived", "peaks", "uploads", "logs"):
         (data_root() / sub).mkdir(parents=True, exist_ok=True)

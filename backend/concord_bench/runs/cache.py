@@ -1,8 +1,8 @@
 """The inference cache (`model_output`), keyed on (model, audio sha256, span, params).
 
 Every model call goes through `get_or_run`, so each seg model runs once per file, each ASR model once
-per segment set, and Phase 2 pseudo-labelling reuses the same rows. The pinned image tag is part of
-the params, so a new image means new outputs.
+per segment set, and pipelines reuse the single-model rows. The pinned image tag is part of the params,
+so a new image means new outputs.
 """
 
 from __future__ import annotations

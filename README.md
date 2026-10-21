@@ -39,7 +39,9 @@ registry, then Run evaluation.
 | Concord Label, for reference | 8610, Vite 5174 |
 
 `GET /api/config` reports `app` (`concord-bench`), `version`, `contract_version` and `peer`
-(CONTRACTS.md §1). Links to Concord Label are not built yet, so `peer` is always empty.
+(CONTRACTS.md §1). `peer` describes Concord Label at `LABEL_URL`: Bench asks its `/api/config` with a
+1 s timeout and keeps the answer for 30 s. Label links show only when Label answers with the same
+contract version.
 
 ## Layout
 
@@ -79,12 +81,24 @@ same code in Concord Label.
   diarisation manifest plus its RTTMs), and speaker-attributed transcripts for cpWER (JSON or JSONL
   segments, STM, SegLST, NeMo diarisation output JSON). Templates are under
   `fixtures/generated/templates`.
+- **Reference packages** (CONTRACTS.md §2, SPLIT_PLAN.md §4). Datasets -> Import reference package takes
+  a package folder or zip, from Concord Label (pushed or downloaded), another tool or by hand (template:
+  `reference_package.zip`). It is staged with a preview until accepted, then ingested from its audio
+  (or Bench's stored originals, by sha256) and its one references file. The dataset keeps where the
+  references came from; a package from the same source is a new dataset `<name> v<N>` linked to the
+  earlier versions, and the dataset page offers to run the models benchmarked on the previous version.
+  Seg-model outputs in the package go into the output cache when the image tag matches. Label calls
+  `POST /api/fingerprints/missing`, the chunked upload, `POST /api/reference-imports` and
+  `GET /api/datasets/by-source/<uid>/scores`.
 - **Models.** Pick a registry entry. The compatibility check runs it on a synthesised 10 s two-speaker
   clip and detects capabilities (ASR, VAD, diarisation) and timing (word, segment or text). Nothing has
   to be typed.
 - **Runs.** One worker process works through the `job` table. Before a job it asks the platform for the
-  job's services (plus those of queued jobs that fit next to them under `util_limit`). If the platform
-  can't start one, the job is `blocked` with the platform's message. Every model call goes through the
+  job's services (plus those of queued jobs that fit next to them under `util_limit`) with
+  `stack.py up NAME... --holder bench:job-<id>`, renews that lease every minute while the job runs and
+  releases it at the end, so Concord Label's worker never stops them mid-run (SPLIT_PLAN.md §6). If the
+  platform can't start one, or it does not fit next to services leased by Label, the job is `blocked`
+  with the platform's message. Every model call goes through the
   output cache (model, audio, span, params including the image tag), so pipelines reuse stage outputs
   and rescoring with another normaliser or collar needs no inference.
 - **Pipelines.** The seg stage (or the dataset's own segments, "oracle") gives segments; short ones are
@@ -95,12 +109,15 @@ same code in Concord Label.
   with a NIST-style collar (seconds each side, 0.25 s by default). cpWER via meeteval.
 - **Errors.** ASR, diarisation and pipeline error pages sort, filter, expand and play every utterance or
   file. "Flag reference as wrong" on the ASR page marks a reference segment; flagged references are
-  listed on the dataset page. Scores keep using them until the references are corrected.
+  listed on the dataset page. Scores keep using them until the references are corrected. For a dataset
+  from Concord Label, the error pages link to the file in Label ("Open in Label") and the dataset page
+  sends the flags back ("Send flags to Label", or download the flags file, CONTRACTS.md §3).
 
 ## Settings
 
 Environment variables (or `.env`, see [.env.example](.env.example)): `CONCORD_DATA`, `PLATFORM_DIR`,
-`AICORE_ENDPOINTS`, `AI_HOST`, `NO_EVICT`, `REPLAY_DIR`, `RECORD_DIR`, `CONCORD_IMAGE`, `CONCORD_HOME`.
+`AICORE_ENDPOINTS`, `AI_HOST`, `NO_EVICT`, `REPLAY_DIR`, `RECORD_DIR`, `CONCORD_IMAGE`, `CONCORD_HOME`,
+`LABEL_URL` (Concord Label's base URL, e.g. `http://localhost:8610`; unset means no Label links).
 Each app has its own data directory and database; nothing is shared on disk.
 
 ## Fixtures and recordings
@@ -175,9 +192,9 @@ just verify-kit /mnt/usb/concord-offline-...                                  # 
 ## Status
 
 Phase 1 (PLAN.md §5, milestones M0 to M7) and the offline export (O1 to O3) are implemented, renamed and
-trimmed to Concord Bench (SPLIT_PLAN.md milestone S3). Not built yet: reference package import (S4), links
-to Concord Label (S5: Open in Label, flags back to Label, locked scores), GPU leases shared with Label (S6),
-and kits holding both apps (S7).
+trimmed to Concord Bench (SPLIT_PLAN.md milestone S3), with Bench's side of reference package import
+(S4), the links to Concord Label (S5) and GPU leases shared with Label (S6). Not built yet: kits holding
+both apps (S7).
 
 Known limits:
 - KWS is not built (Q6). Only its hooks exist: the enums, the `keyword_event` table, task-keyed

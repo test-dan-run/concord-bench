@@ -7,8 +7,8 @@ import zipfile
 
 import pytest
 
-from concord.core import db
-from concord.core.settings import reset_settings
+from concord_bench.core import db
+from concord_bench.core.settings import reset_settings
 from label_helpers import _ok, audio_only_dataset, label
 
 

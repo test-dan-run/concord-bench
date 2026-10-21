@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from concord.label.fusion import AgreementMatrix, Hyp, agreement, best_aligned, fuse, rover, triage
+from concord_bench.label.fusion import AgreementMatrix, Hyp, agreement, best_aligned, fuse, rover, triage
 
 
 def timed(member: str, text: str, t0: float = 0.0) -> Hyp:

@@ -71,7 +71,7 @@ ENV CONCORD_HOME=/srv/apps/concord CONCORD_DATA=/data PLATFORM_DIR=/platform PLA
     AI_HOST={name} AICORE_ENDPOINTS=/platform/clients/aicore/src/aicore/endpoints.generated.yaml UV_OFFLINE=1
 VOLUME /data
 EXPOSE 8600
-CMD ["sh", "-c", "python -m concord.cli migrate && (python -m concord.runs.worker &) && exec uvicorn concord.api.app:app --host 0.0.0.0 --port 8600"]
+CMD ["sh", "-c", "python -m concord_bench.cli migrate && (python -m concord_bench.runs.worker &) && exec uvicorn concord_bench.api.app:app --host 0.0.0.0 --port 8600"]
 
 FROM runtime AS lite
 COPY --from=venv-lite /opt/venv /opt/venv

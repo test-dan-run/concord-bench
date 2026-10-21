@@ -1,6 +1,6 @@
 [importlinter]
 root_packages =
-    concord
+    concord_bench
     concord_improve
 include_external_packages = False
 
@@ -8,6 +8,6 @@ include_external_packages = False
 name = Evaluate / Label / Bring-your-own must not import Improve
 type = forbidden
 source_modules =
-    concord
+    concord_bench
 forbidden_modules =
     concord_improve

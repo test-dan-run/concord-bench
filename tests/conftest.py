@@ -23,8 +23,8 @@ def dialogue_files() -> dict:
 
 @pytest.fixture
 def data_dir(tmp_path, monkeypatch):
-    from concord.core import db
-    from concord.core.settings import reset_settings
+    from concord_bench.core import db
+    from concord_bench.core.settings import reset_settings
 
     monkeypatch.setenv("CONCORD_DATA", str(tmp_path / "data"))
     for var in ("REPLAY_DIR", "RECORD_DIR", "FEATURE_IMPROVE", "NO_EVICT"):
@@ -39,7 +39,7 @@ def data_dir(tmp_path, monkeypatch):
 
 @pytest.fixture
 def session(data_dir):
-    from concord.core.db import SessionLocal
+    from concord_bench.core.db import SessionLocal
 
     s = SessionLocal()
     yield s
@@ -50,7 +50,7 @@ def session(data_dir):
 def client(data_dir):
     from fastapi.testclient import TestClient
 
-    from concord.api.app import create_app
+    from concord_bench.api.app import create_app
 
     with TestClient(create_app()) as c:
         yield c
@@ -59,7 +59,7 @@ def client(data_dir):
 @pytest.fixture
 def replay(monkeypatch, data_dir):
     """Recorded responses instead of live services, with the endpoint map they were recorded with."""
-    from concord.core.settings import reset_settings
+    from concord_bench.core.settings import reset_settings
 
     if not (RECORDED / "endpoints.generated.yaml").is_file():
         pytest.skip("no recorded responses; run `just record`")
@@ -75,7 +75,7 @@ def replay(monkeypatch, data_dir):
 @pytest.fixture
 def label_flow(replay, client, tmp_path):
     """The Phase 1 acceptance flow, plus an audio-only copy of the same audio ("unlabelled")."""
-    from concord.acceptance import run_flow
+    from concord_bench.acceptance import run_flow
     from label_helpers import audio_only_dataset
 
     out = run_flow(client, tmp_path / "staging", log=lambda m: None)

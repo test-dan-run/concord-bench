@@ -1,4 +1,4 @@
-"""The worker process: `python -m concord.runs.worker` (or `just worker`).
+"""The worker process: `python -m concord_bench.runs.worker` (or `just worker`).
 
 Polls the job table and runs one job at a time (one GPU, one user).
 """
@@ -14,7 +14,7 @@ from ..core import db
 from ..core.settings import get_settings
 from . import jobs
 
-log = logging.getLogger("concord.worker")
+log = logging.getLogger("concord_bench.worker")
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -1,4 +1,4 @@
-"""`python -m concord.cli <command>`: migrate, revision, record, and the offline kit commands
+"""`python -m concord_bench.cli <command>`: migrate, revision, record, and the offline kit commands
 export-offline, verify-kit and add-kit (OFFLINE_EXPORT_PLAN.md)."""
 
 from __future__ import annotations
@@ -8,7 +8,7 @@ import sys
 
 
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(prog="concord")
+    ap = argparse.ArgumentParser(prog="concord-bench")
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("migrate", help="create data folders and bring the database to the latest schema")
     rv = sub.add_parser("revision", help="autogenerate an Alembic revision from model changes")

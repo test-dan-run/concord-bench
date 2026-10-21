@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from concord.datasets.parsers import parse_file
+from concord_bench.datasets.parsers import parse_file
 from conftest import GEN, truth
 
 REFS = GEN / "refs"

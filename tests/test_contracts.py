@@ -3,7 +3,7 @@
 import importlib.util
 from pathlib import Path
 
-from concord.datasets.ingest import inspect_source
+from concord_bench.datasets.ingest import inspect_source
 
 REPO = Path(__file__).resolve().parents[1]
 SAMPLES = REPO / "contracts" / "samples"

@@ -20,28 +20,28 @@ dev:
     #!/usr/bin/env bash
     set -euo pipefail
     trap 'kill 0' EXIT INT TERM
-    {{py}} -m concord.cli migrate
-    uv run uvicorn concord.api.app:app --reload --reload-dir backend --port ${CONCORD_PORT:-8600} &
-    {{py}} -m concord.runs.worker &
+    {{py}} -m concord_bench.cli migrate
+    uv run uvicorn concord_bench.api.app:app --reload --reload-dir backend --port ${CONCORD_PORT:-8600} &
+    {{py}} -m concord_bench.runs.worker &
     (cd frontend && npm run dev -- --port ${CONCORD_WEB_PORT:-5173}) &
     wait
 
 # API only (serves the built frontend from frontend/dist when present)
 api:
-    {{py}} -m concord.cli migrate
-    uv run uvicorn concord.api.app:app --port ${CONCORD_PORT:-8600}
+    {{py}} -m concord_bench.cli migrate
+    uv run uvicorn concord_bench.api.app:app --port ${CONCORD_PORT:-8600}
 
 # job worker only
 worker:
-    {{py}} -m concord.runs.worker
+    {{py}} -m concord_bench.runs.worker
 
 # bring the database to the latest schema
 migrate:
-    {{py}} -m concord.cli migrate
+    {{py}} -m concord_bench.cli migrate
 
 # new Alembic revision from model changes: just revision "add foo"
 revision message:
-    {{py}} -m concord.cli revision "{{message}}"
+    {{py}} -m concord_bench.cli revision "{{message}}"
 
 # backend tests (no GPU / platform needed) + frontend unit tests
 test *args:
@@ -95,15 +95,15 @@ fixtures:
 
 # re-record adapter responses against live services into fixtures/recorded (starts the services it needs)
 record:
-    {{py}} -m concord.cli record --out {{recorded}}
+    {{py}} -m concord_bench.cli record --out {{recorded}}
 
 # offline kit of platform services: just export-offline NAME... [--kind full|models] [--out DIR] [--concord-image IMG]
 export-offline +args:
-    {{py}} -m concord.cli export-offline {{args}}
+    {{py}} -m concord_bench.cli export-offline {{args}}
 
 # check an offline kit's files against its manifest.json
 verify-kit dir:
-    {{py}} -m concord.cli verify-kit {{dir}}
+    {{py}} -m concord_bench.cli verify-kit {{dir}}
 
 # frontend production build into frontend/dist (lite: VITE_FEATURE_IMPROVE=0)
 build-web improve="0":

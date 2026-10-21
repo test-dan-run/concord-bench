@@ -10,12 +10,12 @@ import numpy as np
 import openai
 import pytest
 
-from concord.adapters import base, whisper_language
-from concord.adapters.base import AudioRef
-from concord.adapters.oip_segmenter import OIPSegmenter, parse_segments
-from concord.adapters.openai_asr import OpenAIASR, parse_transcription
-from concord.adapters.openai_chat_audio import OpenAIChatAudio, parse_chat_text
-from concord.core.settings import reset_settings
+from concord_bench.adapters import base, whisper_language
+from concord_bench.adapters.base import AudioRef
+from concord_bench.adapters.oip_segmenter import OIPSegmenter, parse_segments
+from concord_bench.adapters.openai_asr import OpenAIASR, parse_transcription
+from concord_bench.adapters.openai_chat_audio import OpenAIChatAudio, parse_chat_text
+from concord_bench.core.settings import reset_settings
 
 AUDIO = (np.sin(np.linspace(0, 200, 16000)) * 0.1).astype(np.float32)
 

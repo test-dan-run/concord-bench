@@ -7,7 +7,7 @@ import random
 import jiwer
 import pytest
 
-from concord.metrics import normalisers, wer
+from concord_bench.metrics import normalisers, wer
 from conftest import dialogue_files
 
 

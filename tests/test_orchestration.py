@@ -7,9 +7,9 @@ import io
 
 import pytest
 
-from concord.platform import services
-from concord.platform.services import Health, ServicesBlocked
-from concord.runs import jobs
+from concord_bench.platform import services
+from concord_bench.platform.services import Health, ServicesBlocked
+from concord_bench.runs import jobs
 
 
 class FakeProc:
@@ -50,7 +50,7 @@ def test_starts_whole_set_and_streams_log(health, data_dir):
 
 
 def test_no_evict_flag(health, data_dir, monkeypatch):
-    from concord.core.settings import reset_settings
+    from concord_bench.core.settings import reset_settings
 
     monkeypatch.setenv("NO_EVICT", "true")
     reset_settings()

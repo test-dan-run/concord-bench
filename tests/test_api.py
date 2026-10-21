@@ -7,7 +7,7 @@ import zipfile
 
 import pytest
 
-from concord.runs import jobs
+from concord_bench.runs import jobs
 from conftest import GEN
 
 
@@ -36,8 +36,8 @@ def test_config_lite_by_default(client):
 def test_full_variant_mounts_improve(monkeypatch, data_dir):
     from fastapi.testclient import TestClient
 
-    from concord.api.app import create_app
-    from concord.core.settings import reset_settings
+    from concord_bench.api.app import create_app
+    from concord_bench.core.settings import reset_settings
 
     monkeypatch.setenv("FEATURE_IMPROVE", "1")
     reset_settings()
@@ -92,7 +92,7 @@ def test_unsafe_upload_path_rejected(client):
 
 
 def test_local_path_ingest_and_validation(client, tmp_path):
-    from concord.acceptance import stage_fixture_dataset
+    from concord_bench.acceptance import stage_fixture_dataset
 
     src = stage_fixture_dataset(tmp_path / "src", refs="rttm")
     assert client.post("/api/uploads/inspect-path", json={"path": "relative/path"}).status_code == 400

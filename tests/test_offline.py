@@ -17,7 +17,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from concord.offline import export, kit, merge
+from concord_bench.offline import export, kit, merge
 
 SILERO = {
     "name": "silero-vad", "alias": "default-vad", "kind": "model", "engine": "custom", "contract": "oip-v2",
@@ -183,7 +183,7 @@ def test_sha256sums_matches_coreutils(tmp_path, docker):
 
 
 def test_cli_verify_kit(tmp_path, docker, capsys):
-    from concord import cli
+    from concord_bench import cli
 
     k = Path(export.export(["silero-vad"], "full", tmp_path, log=lambda m: None, runner=FakeBundle())["path"])
     assert cli.main(["verify-kit", str(k)]) == 0
@@ -225,7 +225,7 @@ def test_kit_name():
 # ---------------------------------------------------------------- API + job
 
 def test_api_preview_export_job_and_history(client, tmp_path, monkeypatch, docker):
-    from concord.runs import jobs
+    from concord_bench.runs import jobs
 
     monkeypatch.setattr(export, "dry_run", lambda names=None: report(SILERO, WHISPER))
     real = export.run_bundle
@@ -257,7 +257,7 @@ def test_api_preview_export_job_and_history(client, tmp_path, monkeypatch, docke
 
 
 def test_failed_export_job_is_recorded_and_retried(client, tmp_path, monkeypatch, docker):
-    from concord.runs import jobs
+    from concord_bench.runs import jobs
 
     monkeypatch.setattr(export, "dry_run", lambda names=None: report(SILERO))
     real = export.run_bundle

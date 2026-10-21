@@ -6,7 +6,7 @@ from __future__ import annotations
 import pytest
 from sqlalchemy import select
 
-from concord.core.models import Run, Score, Segment
+from concord_bench.core.models import Run, Score, Segment
 from label_helpers import _ok, label
 
 

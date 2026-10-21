@@ -117,7 +117,7 @@ install_add() {
   # renders files as root, and gives what it touches back to the owner of the install folder.
   merge() {
     docker run --rm --network none -e UV_OFFLINE=1 -v "$KIT:$KIT:ro" -v "$inst:$inst" "$image" \
-      python -m concord.cli add-kit "$KIT" "$inst" ${replace[@]+"${replace[@]}"} "$@"
+      python -m concord_bench.cli add-kit "$KIT" "$inst" ${replace[@]+"${replace[@]}"} "$@"
   }
   verify
   check_gpu "$inst/platform/config.yaml"

@@ -31,15 +31,15 @@ def main() -> int:
     import uvicorn
     from fastapi.testclient import TestClient
 
-    from concord.acceptance import run_flow, run_label_flow
-    from concord.api.app import create_app
+    from concord_bench.acceptance import run_flow, run_label_flow
+    from concord_bench.api.app import create_app
 
     app = create_app()
     with TestClient(app) as client:
         flow = run_flow(client, work / "staging", log=lambda m: print(m, flush=True))
         run_label_flow(client, work / "staging-label", flow, log=lambda m: print(m, flush=True))
     # Jobs started from the browser (e.g. re-fusing pseudo-labels) need a worker, as under `just dev`.
-    from concord.runs import jobs
+    from concord_bench.runs import jobs
 
     def worker() -> None:
         while True:

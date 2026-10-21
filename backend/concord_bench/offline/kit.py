@@ -241,7 +241,7 @@ def readme(manifest: dict[str, Any]) -> str:
         "",
         "## Verify",
         "",
-        "`sha256sum -c SHA256SUMS` from this folder, or `python -m concord.cli verify-kit <this folder>` "
+        "`sha256sum -c SHA256SUMS` from this folder, or `python -m concord_bench.cli verify-kit <this folder>` "
         "with Concord. `install.sh` does this first.",
         "",
     ]

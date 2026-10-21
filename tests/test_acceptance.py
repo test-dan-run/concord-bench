@@ -18,10 +18,10 @@ from pyannote.core import Annotation, Segment, Timeline
 from pyannote.metrics.diarization import DiarizationErrorRate
 from sqlalchemy import select
 
-from concord.acceptance import ASR_MODELS, SEG_MODELS, run_flow
-from concord.core.models import AudioFile, ModelOutput, Result, Run, Score
-from concord.metrics import normalisers
-from concord.metrics.cpwer import SpkSegment, streams
+from concord_bench.acceptance import ASR_MODELS, SEG_MODELS, run_flow
+from concord_bench.core.models import AudioFile, ModelOutput, Result, Run, Score
+from concord_bench.metrics import normalisers
+from concord_bench.metrics.cpwer import SpkSegment, streams
 from conftest import RECORDED
 
 

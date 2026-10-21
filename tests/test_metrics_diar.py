@@ -7,8 +7,8 @@ from pyannote.core import Annotation, Segment, Timeline
 from pyannote.metrics.detection import DetectionErrorRate
 from pyannote.metrics.diarization import DiarizationErrorRate, JaccardErrorRate
 
-from concord.metrics import der, vad
-from concord.metrics.der import Turn
+from concord_bench.metrics import der, vad
+from concord_bench.metrics.der import Turn
 from conftest import dialogue_files
 
 

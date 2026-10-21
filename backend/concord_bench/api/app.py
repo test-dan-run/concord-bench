@@ -18,7 +18,7 @@ from ..core import db
 from ..core.settings import get_settings
 from . import audio, benchmarks, config, datasets, errors, label, models, offline, runs, sync
 
-log = logging.getLogger("concord")
+log = logging.getLogger("concord_bench")
 
 
 def improve_router():

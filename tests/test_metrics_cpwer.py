@@ -5,8 +5,8 @@ from __future__ import annotations
 import pytest
 from meeteval.wer.wer.cp import cp_word_error_rate
 
-from concord.metrics import attribution, cpwer, normalisers
-from concord.metrics.cpwer import SpkSegment
+from concord_bench.metrics import attribution, cpwer, normalisers
+from concord_bench.metrics.cpwer import SpkSegment
 from conftest import dialogue_files
 
 N = normalisers.get("basic")

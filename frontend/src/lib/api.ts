@@ -1,5 +1,5 @@
 // Thin fetch wrapper + the response shapes the pages use. The backend is the source of truth for
-// field names (backend/concord/api/*.py).
+// field names (backend/concord_bench/api/*.py).
 
 export class ApiError extends Error {
   constructor(

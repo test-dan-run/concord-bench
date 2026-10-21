@@ -87,6 +87,14 @@ class Dataset(Base):
     # Ingest report: counts, hours, sample-rate histogram, flagged files, annotation matches.
     report: Mapped[dict[str, Any]] = mapped_column(default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    # Where the references came from, for a dataset imported from a reference package (CONTRACTS.md §2):
+    # the manifest's source, export_version, scope, review, models, normaliser, and the import id.
+    # Empty for an annotated upload or a package without a manifest.
+    provenance: Mapped[dict[str, Any]] = mapped_column(default=dict)
+    # "<install_id>/<dataset_uid>" of the source: datasets sharing it are versions of one dataset (§4.3).
+    source_key: Mapped[str | None] = mapped_column(String(300), index=True)
+    export_version: Mapped[int | None] = mapped_column(Integer)
+    previous_version_id: Mapped[int | None] = mapped_column(ForeignKey("dataset.id", ondelete="SET NULL"))
 
     files: Mapped[list[AudioFile]] = relationship(back_populates="dataset", cascade="all, delete-orphan")
 
@@ -289,6 +297,26 @@ class Job(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     started_at: Mapped[datetime | None] = mapped_column(DateTime)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime)
+
+
+class ReferenceImport(Base):
+    """A reference package received by Bench (CONTRACTS.md §2, SPLIT_PLAN.md §4.3): staged with a preview
+    until a person accepts it (a new dataset through the ingest job) or rejects it."""
+
+    __tablename__ = "reference_import"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    status: Mapped[str] = mapped_column(String(16), default="staged")  # staged | accepting | accepted | rejected | failed
+    name: Mapped[str] = mapped_column(String(200))
+    upload_id: Mapped[str | None] = mapped_column(String(64))
+    path: Mapped[str] = mapped_column(String(1000))  # the package folder (inside the upload)
+    manifest: Mapped[dict[str, Any] | None] = mapped_column(JSON)  # None: a package without a manifest
+    preview: Mapped[dict[str, Any]] = mapped_column(default=dict)
+    result: Mapped[dict[str, Any]] = mapped_column(default=dict)  # uids matched, outputs imported / skipped
+    error: Mapped[str | None] = mapped_column(Text)
+    dataset_id: Mapped[int | None] = mapped_column(ForeignKey("dataset.id", ondelete="SET NULL"))
+    job_id: Mapped[int | None] = mapped_column(ForeignKey("job.id", ondelete="SET NULL"))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime)
 
 
 class OfflineExport(Base):

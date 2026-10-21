@@ -7,14 +7,15 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from .. import peer
 from ..core import paths
 from ..core.db import get_session
-from ..core.models import AudioFile, Dataset, Job, Run, Segment
+from ..core.models import AudioFile, Dataset, Job, Run, RunTask, Segment
 from ..core.settings import REPO_ROOT
 from ..datasets.ingest import NO_REFERENCES, inspect_source
 from ..runs import jobs
@@ -144,14 +145,50 @@ def dataset_json(session: Session, ds: Dataset, detail: bool = False) -> dict[st
         "files": rep.get("files"), "usable_files": rep.get("usable_files"), "hours": rep.get("hours"),
         "usable_hours": rep.get("usable_hours"), "has_speaker_text": bool(rep.get("has_speaker_text")),
         "flagged": {k: len(v) for k, v in (rep.get("flagged") or {}).items()},
+        "provenance": ds.provenance or {}, "export_version": ds.export_version,
+        "previous_version_id": ds.previous_version_id,
     }
     if detail:
+        d["versions"] = [{"id": v.id, "name": v.name, "export_version": v.export_version, "status": v.status,
+                          "created_at": v.created_at.isoformat()}
+                         for v in session.scalars(select(Dataset).where(Dataset.source_key == ds.source_key)
+                                                  .order_by(Dataset.export_version, Dataset.id))] \
+            if ds.source_key else []
+        d["previous_plan"] = previous_plan(session, ds)
         d["report"] = rep
         d["runs"] = session.scalar(select(func.count(Run.id)).where(Run.dataset_id == ds.id))
         job = session.scalar(select(Job).where(Job.type == "ingest").order_by(Job.id.desc())
                              .where(Job.payload["dataset_id"].as_integer() == ds.id))
         d["ingest_job"] = job_brief(job) if job else None
     return d
+
+
+def previous_plan(session: Session, ds: Dataset) -> dict[str, Any] | None:
+    """"Run the models benchmarked on the previous version against this one" (SPLIT_PLAN.md §4.3): a
+    benchmark plan pre-ticked with the models that have done runs on the previous version."""
+    prev = session.get(Dataset, ds.previous_version_id) if ds.previous_version_id else None
+    if prev is None:
+        return None
+    seg: set[int] = set()
+    asr: set[int] = set()
+    oracle = pipelines = False
+    for r in session.scalars(select(Run).where(Run.dataset_id == prev.id, Run.status == "done")):
+        if r.task == RunTask.asr and r.model_id:
+            asr.add(r.model_id)
+        elif r.task == RunTask.seg and r.model_id:
+            seg.add(r.model_id)
+        elif r.task == RunTask.pipeline and r.pipeline is not None:
+            pipelines = True
+            asr.add(r.pipeline.asr_model_id)
+            if r.pipeline.seg_model_id is None:
+                oracle = True
+            else:
+                seg.add(r.pipeline.seg_model_id)
+    already = {r.model_id for r in session.scalars(select(Run).where(Run.dataset_id == ds.id)) if r.model_id}
+    return {"previous": {"id": prev.id, "name": prev.name, "export_version": prev.export_version},
+            "plan": {"seg_model_ids": sorted(seg), "asr_model_ids": sorted(asr), "oracle": oracle,
+                     "mode": "grid" if pipelines else "stages"},
+            "models": len(seg | asr), "already_run": bool(already & (seg | asr))}
 
 
 def job_brief(job: Job) -> dict[str, Any]:
@@ -261,6 +298,31 @@ def dataset_flags(dataset_id: int, session: Session = Depends(get_session)) -> l
              "start": seg.start, "end": seg.end, "speaker": seg.speaker, "text": seg.text, "note": seg.flag_note,
              "updated_at": seg.updated_at.isoformat() if seg.updated_at else None}
             for seg, f in session.execute(stmt).all()]
+
+
+@router.get("/datasets/{dataset_id}/flags.json")
+def dataset_flags_file(dataset_id: int, session: Session = Depends(get_session)) -> JSONResponse:
+    """The flags file for Concord Label (CONTRACTS.md §3), as a download."""
+    ds = get_dataset(session, dataset_id)
+    try:
+        doc = peer.flags_file(session, ds)
+    except peer.PeerError as exc:
+        raise HTTPException(409, str(exc)) from None
+    stem = "".join(c if c.isalnum() or c in "-_" else "-" for c in ds.name).strip("-") or f"dataset-{ds.id}"
+    return JSONResponse(doc, headers={"Content-Disposition": f'attachment; filename="{stem}-flags.json"'})
+
+
+@router.post("/datasets/{dataset_id}/flags/send")
+def send_flags(dataset_id: int, session: Session = Depends(get_session)) -> dict[str, Any]:
+    """Push the flags file to `LABEL_URL/api/flags/import`: {"matched", "unmatched", "sent"}."""
+    ds = get_dataset(session, dataset_id)
+    try:
+        doc = peer.flags_file(session, ds)
+        if not doc["flags"]:
+            raise HTTPException(409, "no references are flagged")
+        return {**peer.push_flags(doc), "sent": len(doc["flags"])}
+    except peer.PeerError as exc:
+        raise HTTPException(409, str(exc)) from None
 
 
 @router.post("/segments/{segment_id}/flag")

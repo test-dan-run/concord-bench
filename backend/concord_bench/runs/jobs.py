@@ -1,7 +1,9 @@
 """The job queue: one worker process reading the `job` table (no Redis / Celery).
 
 Job types:
-- ingest  {dataset_id, source, cleanup}         copy, decode, derive, parse references
+- ingest  {dataset_id, source, cleanup, plan?, reference_import_id?}
+                                                copy, decode, derive, parse references; for a reference
+                                                package, then its uids and seg-model outputs
 - check   {service}                             compatibility check on the check clip
 - run     {run_id, normalisers?}                inference, then scoring with the default normaliser / collar
 - score   {run_id, normaliser, collar}          rescoring that needs a platform service (text.transform)
@@ -128,15 +130,24 @@ def _handle_ingest(session: Session, job: Job, ctx: JobContext) -> dict[str, Any
 
     p = job.payload
     source = Path(p["source"])
+    imp_id = p.get("reference_import_id")
     try:
         report = ingest(session, p["dataset_id"], source, ctx.progress)
         session.commit()
-    except Exception:
+        if imp_id:
+            from ..datasets import refpackage
+
+            refpackage.finish(session, imp_id, p["dataset_id"], ctx.log)
+    except Exception as exc:
         session.rollback()
         ds = session.get(Dataset, p["dataset_id"])
         if ds is not None:
             ds.status = "failed"
             session.commit()
+        if imp_id:
+            from ..datasets import refpackage
+
+            refpackage.fail(session, imp_id, str(exc))
         raise
     if p.get("cleanup") and source.is_relative_to(paths.data_root() / "uploads"):
         shutil.rmtree(source, ignore_errors=True)

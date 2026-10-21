@@ -14,7 +14,10 @@ Writes fixtures/generated/:
   dataset/truth.json
   refs/<format>/   the same references in every supported format
   malformed/       broken annotation files for parser tests
-  templates/       downloadable annotation templates for the upload page
+  templates/       downloadable annotation templates for the upload page, and reference_package.zip
+                   (a reference package, CONTRACTS.md §2) for the import page
+
+    python fixtures/synth/make.py --templates-only   # rewrite templates/ from the files above, no TTS
 """
 
 from __future__ import annotations
@@ -27,6 +30,7 @@ import json
 import shutil
 import subprocess
 import sys
+import zipfile
 from pathlib import Path
 
 import numpy as np
@@ -256,6 +260,73 @@ def write_templates(d: Path, example: dict) -> None:
          "sentences": [{"speaker": t["speaker"], "start_time": t["start"], "end_time": t["end"], "text": t["text"]}
                        for t in turns]}, indent=1) + "\n")
     (d / "README.md").write_text(TEMPLATE_README)
+    write_reference_template(d / "reference_package.zip", TEMPLATE_PACKAGE_FILE)
+
+
+TEMPLATE_PACKAGE_FILE = "d04"  # the smallest dialogue keeps the template download small
+
+
+def write_reference_template(dest: Path, stem: str) -> None:
+    """A reference package (CONTRACTS.md §2) written by hand: manifest without a source, files.csv,
+    audio/, one references file. Byte-identical between runs (fixed zip timestamps)."""
+    files = json.loads((OUT / "dataset" / "truth.json").read_text())
+    f = files[stem]
+    audio = OUT / "dataset" / "audio" / f["file"]
+    info = sf.info(audio)
+    turns = f["turns"][:3]
+    top = "reference_package"
+    manifest = {
+        "format": "concord-reference-package", "format_version": 1, "name": "Template reference package",
+        "created_at": "2026-10-22T00:00:00Z", "language": "en", "tags": ["template"],
+        "description": "A reference package made by hand. Replace the audio, files.csv and refs/ with yours.",
+        "scope": "complete", "label_types": ["asr", "diar"],
+        "counts": {"files": 1, "segments": len(turns), "hours": round(f["duration"] / 3600, 6)},
+        "audio_included": "all",
+    }
+    files_csv = io.StringIO()
+    w = csv.writer(files_csv, lineterminator="\n")
+    w.writerow(["path", "sha256", "duration", "sample_rate"])
+    w.writerow([f["file"], hashlib.sha256(audio.read_bytes()).hexdigest(), f["duration"], info.samplerate])
+    seglst = [{"session_id": stem, "speaker": t["speaker"], "start_time": t["start"], "end_time": t["end"],
+               "words": t["text"]} for t in turns]
+    entries = {
+        "manifest.json": (json.dumps(manifest, indent=1) + "\n").encode(),
+        "files.csv": files_csv.getvalue().encode(),
+        f"audio/{f['file']}": audio.read_bytes(),
+        "refs/segments.seglst.json": (json.dumps(seglst, indent=1) + "\n").encode(),
+        "README.md": REFERENCE_TEMPLATE_README.encode(),
+    }
+    with zipfile.ZipFile(dest, "w", zipfile.ZIP_DEFLATED) as zf:
+        for name, data in entries.items():
+            zi = zipfile.ZipInfo(f"{top}/{name}", date_time=(2026, 10, 22, 0, 0, 0))
+            zi.compress_type = zipfile.ZIP_DEFLATED
+            zi.external_attr = 0o644 << 16
+            zf.writestr(zi, data)
+
+
+REFERENCE_TEMPLATE_README = """# Reference package template
+
+A reference package hands finished references to Concord Bench (Datasets -> Import reference package).
+Concord Label writes them; you can also make one by hand or with another tool. Zip the folder (or upload
+the folder itself).
+
+    reference_package/
+      manifest.json      format "concord-reference-package", format_version 1, name, created_at,
+                         label_types (asr and/or diar), counts {files, segments, hours},
+                         audio_included (all | partial | none); optional language, tags, description,
+                         scope, review, models, normaliser
+      files.csv          path,sha256,duration,sample_rate - one row per audio file
+      audio/<path>       the audio; a file Concord Bench already has (same sha256) may be left out
+      refs/<one file>    the references, in any format the annotated upload reads (see the other
+                         templates), matched to the audio by file name without the extension
+
+Add `"source": {"app", "install_id", "dataset_uid", "dataset_name"}` and `"export_version": 1, 2, ...`
+to the manifest when the same dataset will be sent again: a package from the same source becomes a new
+version of the dataset (scored references are never changed). A folder without manifest.json is read
+like an annotated upload.
+
+The full format is in CONTRACTS.md section 2 of the Concord Bench repository.
+"""
 
 
 TEMPLATE_README = """# Concord annotation templates
@@ -277,6 +348,7 @@ Times are seconds from the start of the file.
 | nemo_manifest.json | ASR | NVIDIA NeMo manifest: one JSON object per line with `audio_filepath`, `duration`, `text` (optional `offset`). `.json` or `.jsonl`. |
 | nemo_diarisation_manifest.json | Diarisation | NeMo diarisation manifest. Speaker labels come from the RTTM named by `rttm_filepath`, so upload those RTTM files too (matched by file name; the folder in the path does not matter). |
 | nemo_diarisation_output.json | ASR + diarisation + cpWER | NeMo diarisation output: `session_id` plus `sentences` of `{speaker, start_time, end_time, text}` (or only `words` of `{word, start_time, end_time, speaker}`). |
+| reference_package.zip | Import reference package | A reference package (manifest, files.csv, audio, one references file) for Datasets -> Import reference package. Its README.md explains the layout. |
 
 cpWER needs speaker-attributed transcripts (STM, SegLST, JSON/JSONL segments with text, or NeMo
 diarisation output). An RTTM plus per-file text gives WER and DER, but not cpWER.
@@ -293,7 +365,14 @@ def corrupt_bytes(seed: str, n: int = 48000) -> bytes:
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--service", default="kokoro-tts")
+    ap.add_argument("--templates-only", action="store_true",
+                    help="rewrite templates/ from the existing generated files (no TTS)")
     args = ap.parse_args(argv)
+    if args.templates_only:
+        files = json.loads((OUT / "dataset" / "truth.json").read_text())
+        write_templates(OUT / "templates", files["d01"])
+        print(f"wrote {OUT / 'templates'}")
+        return 0
     spec = yaml.safe_load((HERE / "dialogues.yaml").read_text())
 
     try:

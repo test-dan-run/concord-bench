@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .. import APP, CONTRACT_VERSION, __version__
+from .. import APP, CONTRACT_VERSION, __version__, peer
 from ..core.db import get_session
 from ..core.models import Dataset, Model
 from ..core.settings import get_settings
@@ -33,8 +33,8 @@ def get_config() -> dict[str, Any]:
         "app": APP,
         "version": __version__,
         "contract_version": CONTRACT_VERSION,
-        # Concord Label (CONTRACTS.md §1). Linking to it comes later (SPLIT_PLAN.md §5); until then no peer.
-        "peer": {"url": None, "reachable": False, "contract_version": None},
+        # Concord Label at LABEL_URL (CONTRACTS.md §1): links and pushes need reachable + the same contract version.
+        "peer": peer.status(),
         "tasks": TASKS,
         "default_normaliser": normalisers.DEFAULT,
         "default_collar": DEFAULT_COLLAR,

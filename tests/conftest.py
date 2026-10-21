@@ -34,13 +34,15 @@ def no_platform_tools(request, monkeypatch):
 
 @pytest.fixture
 def data_dir(tmp_path, monkeypatch):
+    from concord_bench import peer
     from concord_bench.core import db
     from concord_bench.core.settings import reset_settings
 
     monkeypatch.setenv("CONCORD_DATA", str(tmp_path / "data"))
-    for var in ("REPLAY_DIR", "RECORD_DIR", "NO_EVICT"):
+    for var in ("REPLAY_DIR", "RECORD_DIR", "NO_EVICT", "LABEL_URL"):
         monkeypatch.delenv(var, raising=False)
     reset_settings()
+    peer.clear_cache()
     db.reset_engines()
     db.migrate()
     yield tmp_path / "data"

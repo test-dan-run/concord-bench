@@ -1,0 +1,604 @@
+"""Reference packages (CONTRACTS.md §2, SPLIT_PLAN.md §4.3): received from Concord Label, another tool or
+a person, staged with a preview, then accepted into a new dataset through the normal ingest job.
+
+- `find_root` / `read_package` locate and validate a package in an upload (a folder, or a `.zip` whose
+  root or only top-level directory is the package). An unknown `format_version` is refused with the
+  versions this app reads.
+- `preview` is what the import page shows before anything is stored.
+- `accept` builds the ingest source from `audio/` (or Bench's own originals, by sha256) plus the one
+  references file, so the manifest, `files.csv`, `uids.jsonl` and `outputs/` are never read as
+  annotations. A package without a manifest is ingested as it is, like an annotated upload.
+- `finish` runs after the ingest: provenance, Label's segment uids (for flags back, §3) and seg-model
+  outputs imported into the output cache when the image tag is the one Bench would use (§2.5).
+
+References that have been scored are never changed: a package from the same source as an earlier
+dataset (`source.install_id` + `source.dataset_uid`) becomes a new dataset, `<name> v<N>`, linked to
+the earlier versions.
+"""
+
+from __future__ import annotations
+
+import contextlib
+import csv
+import json
+import os
+import shutil
+import zipfile
+from dataclasses import dataclass, field
+from pathlib import Path, PurePosixPath
+from typing import Any
+
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session
+
+from ..core import paths
+from ..core.models import AudioFile, Dataset, Job, Model, ModelOutput, ReferenceImport, Segment, utcnow
+from . import audio as audio_mod
+from .ingest import NO_REFERENCES, SKIP_DIRS, extract_zips, inspect_source
+from .parsers import ANNOTATION_EXTS, parse_file
+
+FORMAT = "concord-reference-package"
+KNOWN_FORMAT_VERSIONS = (1,)
+MANIFEST_REQUIRED = ("format", "format_version", "name", "created_at", "label_types", "counts", "audio_included")
+SOURCE_FIELDS = ("app", "install_id", "dataset_uid", "dataset_name")
+FILES_HEADER = ["path", "sha256", "duration", "sample_rate"]
+# Where the references file goes in the ingest source, beside the audio at its dataset paths.
+REFS_DIR = "_references"
+UID_TOLERANCE = 0.01  # CONTRACTS.md §2.4
+BENCH_SAMPLE_RATE = 16000  # every model call sends 16 kHz mono
+
+
+class PackageError(ValueError):
+    """The package does not follow the contract; the message is shown to the sender."""
+
+
+@dataclass
+class Package:
+    root: Path
+    manifest: dict[str, Any] | None
+    files: list[dict[str, Any]] = field(default_factory=list)  # files.csv rows
+    refs: Path | None = None
+    uids: list[dict[str, Any]] = field(default_factory=list)
+    outputs: list[dict[str, Any]] = field(default_factory=list)
+    outputs_invalid: int = 0
+
+    @property
+    def source(self) -> dict[str, Any] | None:
+        return (self.manifest or {}).get("source") or None
+
+    @property
+    def export_version(self) -> int | None:
+        return (self.manifest or {}).get("export_version") if self.source else None
+
+    @property
+    def name(self) -> str:
+        if self.manifest:
+            return str(self.manifest["name"])
+        return self.root.name.replace("_", " ").replace("-", " ").strip() or "Reference package"
+
+    def audio_path(self, row: dict[str, Any]) -> Path:
+        return self.root / "audio" / row["path"]
+
+
+def source_key(source: dict[str, Any] | None) -> str | None:
+    if not source or not source.get("install_id") or not source.get("dataset_uid"):
+        return None
+    return f"{source['install_id']}/{source['dataset_uid']}"
+
+
+# ---------------------------------------------------------------- reading
+
+def _visible(p: Path) -> bool:
+    return not p.name.startswith(".") and p.name not in SKIP_DIRS
+
+
+def find_root(upload: Path) -> Path:
+    """The package folder in an upload: zips are unpacked, then single top-level folders are entered
+    until one holds `manifest.json` (or holds more than one thing)."""
+    try:
+        extract_zips(upload)
+    except (ValueError, OSError, zipfile.BadZipFile) as exc:
+        raise PackageError(f"cannot unpack the upload: {exc}") from None
+    d = upload
+    while not (d / "manifest.json").is_file():
+        entries = [p for p in d.iterdir() if _visible(p)]
+        dirs = [p for p in entries if p.is_dir()]
+        files = [p for p in entries if p.is_file() and p.suffix.lower() != ".zip"]
+        if len(dirs) == 1 and not files:
+            d = dirs[0]
+            continue
+        break
+    return d
+
+
+def _rel_ok(rel: str) -> bool:
+    p = PurePosixPath(rel)
+    return bool(rel) and not p.is_absolute() and ".." not in p.parts and "\\" not in rel
+
+
+def _read_jsonl(path: Path) -> tuple[list[dict[str, Any]], int]:
+    good, bad = [], 0
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        try:
+            rec = json.loads(line)
+        except ValueError:
+            bad += 1
+            continue
+        if isinstance(rec, dict):
+            good.append(rec)
+        else:
+            bad += 1
+    return good, bad
+
+
+def read_manifest(root: Path) -> dict[str, Any]:
+    try:
+        m = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
+    except (ValueError, UnicodeDecodeError) as exc:
+        raise PackageError(f"manifest.json is not JSON: {exc}") from None
+    if not isinstance(m, dict) or m.get("format") != FORMAT:
+        raise PackageError(f"manifest.json: format must be {FORMAT!r} (got {m.get('format') if isinstance(m, dict) else m!r})")
+    v = m.get("format_version")
+    if v not in KNOWN_FORMAT_VERSIONS:
+        known = ", ".join(str(k) for k in KNOWN_FORMAT_VERSIONS)
+        raise PackageError(f"reference package format_version {v!r} is not supported: this Concord Bench reads "
+                           f"format version {known}")
+    return m
+
+
+def read_package(root: Path, *, check_audio: bool = True) -> Package:
+    """Validate a package folder (CONTRACTS.md §2). Raises PackageError listing what is wrong."""
+    if not (root / "manifest.json").is_file():
+        try:
+            found = inspect_source(root)
+        except ValueError as exc:
+            raise PackageError(str(exc)) from None
+        if not found["audio_files"]:
+            raise PackageError("no manifest.json and no audio: a package without a manifest is read like an "
+                               "annotated upload, so it needs the audio files and an annotation file")
+        if len(found["audio_without_labels"]) == found["audio_files"]:
+            raise PackageError(NO_REFERENCES)
+        return Package(root, None)
+
+    m = read_manifest(root)
+    problems: list[str] = [f"manifest.json: missing {k}" for k in MANIFEST_REQUIRED if k not in m]
+    lt = m.get("label_types")
+    if not isinstance(lt, list) or not lt or not set(lt) <= {"asr", "diar"}:
+        problems.append(f"manifest.json: label_types must be a non-empty subset of asr, diar (got {lt!r})")
+    if m.get("audio_included") not in ("all", "partial", "none"):
+        problems.append(f"manifest.json: audio_included {m.get('audio_included')!r}")
+    if m.get("scope") not in (None, "complete", "any"):
+        problems.append(f"manifest.json: scope {m.get('scope')!r}")
+    src = m.get("source")
+    if src is not None:
+        if not isinstance(src, dict):
+            problems.append("manifest.json: source must be an object")
+        else:
+            problems += [f"manifest.json: source.{k} missing" for k in SOURCE_FIELDS if not src.get(k)]
+        ev = m.get("export_version")
+        if not isinstance(ev, int) or isinstance(ev, bool) or ev < 1:
+            problems.append("manifest.json: export_version must be 1, 2, ... when source is given")
+
+    pkg = Package(root, m)
+    fpath = root / "files.csv"
+    if not fpath.is_file():
+        problems.append("files.csv missing (required with a manifest)")
+    else:
+        with open(fpath, newline="", encoding="utf-8-sig") as fh:
+            reader = csv.DictReader(fh)
+            if reader.fieldnames != FILES_HEADER:
+                problems.append(f"files.csv: header must be {','.join(FILES_HEADER)} (got {reader.fieldnames})")
+            rows = list(reader)
+        stems: dict[str, str] = {}
+        for r in rows:
+            rel = (r.get("path") or "").strip()
+            if not _rel_ok(rel):
+                problems.append(f"files.csv: bad path {rel!r}")
+                continue
+            stem = PurePosixPath(rel).stem.lower()
+            if stem in stems:
+                problems.append(f"files.csv: the stem of {rel} repeats {stems[stem]}")
+            stems[stem] = rel
+            sha = (r.get("sha256") or "").strip().lower()
+            if len(sha) != 64 or any(c not in "0123456789abcdef" for c in sha):
+                problems.append(f"files.csv: sha256 of {rel} is not a hex SHA-256")
+            try:
+                duration = float(r["duration"]) if r.get("duration") not in (None, "") else None
+                sr = int(float(r["sample_rate"])) if r.get("sample_rate") not in (None, "") else None
+            except ValueError:
+                problems.append(f"files.csv: duration / sample_rate of {rel} are not numbers")
+                duration = sr = None
+            pkg.files.append({"path": rel, "sha256": sha, "duration": duration, "sample_rate": sr})
+        if not pkg.files and not problems:
+            problems.append("files.csv lists no files")
+
+    refs_dir = root / "refs"
+    refs = sorted(p for p in refs_dir.iterdir() if p.is_file() and p.name != "uids.jsonl" and _visible(p)) \
+        if refs_dir.is_dir() else []
+    if len(refs) != 1:
+        problems.append(f"refs/ must hold exactly one references file besides uids.jsonl (found {len(refs)})")
+    elif refs[0].suffix.lower() not in ANNOTATION_EXTS:
+        problems.append(f"refs/{refs[0].name}: not a references format Bench reads "
+                        f"({', '.join(sorted(ANNOTATION_EXTS))})")
+    else:
+        pkg.refs = refs[0]
+    if (refs_dir / "uids.jsonl").is_file():
+        uids, bad = _read_jsonl(refs_dir / "uids.jsonl")
+        known = {f["path"] for f in pkg.files}
+        for n, rec in enumerate(uids, 1):
+            if not {"file", "start", "end", "uid"} <= rec.keys() or rec["file"] not in known:
+                problems.append(f"refs/uids.jsonl record {n}: needs file (a files.csv path), start, end, uid")
+                break
+        if bad:
+            problems.append(f"refs/uids.jsonl: {bad} line(s) are not JSON objects")
+        pkg.uids = uids
+    if (root / "outputs" / "seg.jsonl").is_file():
+        pkg.outputs, pkg.outputs_invalid = _read_jsonl(root / "outputs" / "seg.jsonl")
+
+    if problems:
+        raise PackageError("; ".join(problems[:12]) + (f" (and {len(problems) - 12} more)" if len(problems) > 12 else ""))
+    if check_audio:
+        bad_audio = [f"audio/{f['path']}" for f in pkg.files
+                     if pkg.audio_path(f).is_file() and audio_mod.sha256_file(pkg.audio_path(f)) != f["sha256"]]
+        if bad_audio:
+            raise PackageError(f"bytes do not match their sha256 in files.csv: {', '.join(bad_audio[:20])}")
+    return pkg
+
+
+# ---------------------------------------------------------------- what Bench already has
+
+def stored_original(session: Session, sha256: str, ext_hint: str | None = None) -> Path | None:
+    """Bench's stored original with this sha256, whichever dataset brought it."""
+    exts = [ext_hint] if ext_hint else []
+    exts += list(session.scalars(select(AudioFile.ext).where(AudioFile.sha256 == sha256).distinct()))
+    for ext in dict.fromkeys(e for e in exts if e):
+        p = paths.original(sha256, ext)
+        if p.is_file():
+            return p
+    return None
+
+
+def missing_originals(session: Session, sha256s: list[str]) -> list[str]:
+    """The sha256s Bench has no stored original for (POST /api/fingerprints/missing)."""
+    out = []
+    for sha in dict.fromkeys(s.strip().lower() for s in sha256s):
+        if stored_original(session, sha) is None:
+            out.append(sha)
+    return out
+
+
+def missing_files(session: Session, pkg: Package) -> list[str]:
+    """files.csv paths neither in audio/ nor already stored by Bench (CONTRACTS.md §2.2)."""
+    return [f["path"] for f in pkg.files if not pkg.audio_path(f).is_file()
+            and stored_original(session, f["sha256"], PurePosixPath(f["path"]).suffix.lower()) is None]
+
+
+# ---------------------------------------------------------------- versions
+
+def versions_of(session: Session, key: str | None) -> list[Dataset]:
+    """Datasets from one source, oldest version first (failed ingests left out)."""
+    if not key:
+        return []
+    rows = session.scalars(select(Dataset).where(Dataset.source_key == key, Dataset.status != "failed")).all()
+    return sorted(rows, key=lambda d: (d.export_version or 0, d.id))
+
+
+def previous_version(session: Session, pkg: Package) -> Dataset | None:
+    """The newest earlier version of the package's dataset (below its export_version when there is one)."""
+    vs = versions_of(session, source_key(pkg.source))
+    ev = pkg.export_version
+    earlier = [d for d in vs if ev is None or (d.export_version or 0) < ev] or vs
+    return earlier[-1] if earlier else None
+
+
+def dataset_name_for(session: Session, pkg: Package) -> str:
+    """`<name>` for the first dataset from a source, `<name> v<export_version>` for the later ones."""
+    if pkg.source and pkg.export_version and versions_of(session, source_key(pkg.source)):
+        return f"{pkg.name} v{pkg.export_version}"
+    return pkg.name
+
+
+# ---------------------------------------------------------------- preview
+
+def _count_refs(pkg: Package) -> tuple[int, list[str]]:
+    if pkg.refs is None:
+        found = inspect_source(pkg.root)
+        tasks = found["tasks"]
+        records = sum(t["records"] for t in tasks.values())
+    else:
+        res = parse_file(pkg.refs, f"refs/{pkg.refs.name}")
+        if res.errors and not res.records:
+            raise PackageError(f"refs/{pkg.refs.name}: " + "; ".join(res.errors[:5]))
+        stems = {PurePosixPath(f["path"]).stem.lower() for f in pkg.files}
+        recs = [r for r in res.records if r.stem.lower() in stems]
+        if not recs:
+            raise PackageError(f"refs/{pkg.refs.name}: no reference matches a file in files.csv (matched by stem)")
+        tasks = {r.kind for r in recs}
+        records = len(recs)
+    kinds = set(tasks)
+    labels = [t for t, need in (("asr", {"asr", "spk_asr"}), ("diar", {"diar", "spk_asr"})) if kinds & need]
+    return records, labels
+
+
+def preview(session: Session, pkg: Package) -> dict[str, Any]:
+    """What the import page shows (CONTRACTS.md §4 sample `bench.reference-imports.response.json`)."""
+    m = pkg.manifest or {}
+    segments, found_labels = _count_refs(pkg)
+    if pkg.manifest is not None:
+        shas = [f["sha256"] for f in pkg.files]
+        n_files = len(pkg.files)
+        hours = (m.get("counts") or {}).get("hours")
+        if hours is None:
+            hours = sum(f["duration"] or 0 for f in pkg.files) / 3600
+        label_types = list(m.get("label_types") or found_labels)
+    else:
+        audio = [p for p in pkg.root.rglob("*") if p.is_file() and p.suffix.lower() in audio_mod.AUDIO_EXTS
+                 and all(_visible(Path(x)) for x in p.relative_to(pkg.root).parts)]
+        shas = [audio_mod.sha256_file(p) for p in audio]
+        n_files = len(audio)
+        seconds = 0.0
+        for p in audio:
+            with contextlib.suppress(audio_mod.DecodeError, ValueError):  # reported at ingest
+                seconds += audio_mod.probe(p).duration or 0.0
+        hours = seconds / 3600
+        label_types = found_labels
+    prev = previous_version(session, pkg)
+    out: dict[str, Any] = {
+        "name": pkg.name,
+        "source": pkg.source,
+        "export_version": pkg.export_version,
+        "files": n_files,
+        "new_files": len(missing_originals(session, shas)),
+        "hours": round(float(hours), 6),
+        "segments": segments,
+        "label_types": label_types,
+        "previous_version": None,
+        # Beyond the contract's sample: what the page also shows.
+        "has_manifest": pkg.manifest is not None,
+        "dataset_name": dataset_name_for(session, pkg),
+        "scope": m.get("scope"), "language": m.get("language"), "description": m.get("description"),
+        "tags": list(m.get("tags") or []), "created_at": m.get("created_at"), "review": m.get("review"),
+        "models": m.get("models"), "normaliser": m.get("normaliser"), "audio_included": m.get("audio_included"),
+        "refs_file": f"refs/{pkg.refs.name}" if pkg.refs else None, "uids": len(pkg.uids),
+        "outputs": len(pkg.outputs), "missing_files": missing_files(session, pkg) if pkg.manifest else [],
+    }
+    if prev is not None:
+        prev_shas = set(session.scalars(select(AudioFile.sha256).where(AudioFile.dataset_id == prev.id)))
+        prev_segments = session.scalar(select(func.count(Segment.id)).join(AudioFile)
+                                       .where(AudioFile.dataset_id == prev.id))
+        mine = set(shas)
+        out["previous_version"] = {"dataset_id": prev.id, "name": prev.name, "export_version": prev.export_version}
+        out["changes"] = {"files_added": len(mine - prev_shas), "files_removed": len(prev_shas - mine),
+                          "segments_before": prev_segments or 0, "segments_now": segments}
+    return out
+
+
+# ---------------------------------------------------------------- staging
+
+def stage(session: Session, upload_id: str, upload_dir: Path) -> ReferenceImport:
+    root = find_root(upload_dir)
+    pkg = read_package(root)
+    prev = preview(session, pkg)
+    if prev["missing_files"]:
+        raise PackageError(_missing_message(prev["missing_files"]))
+    imp = ReferenceImport(status="staged", name=pkg.name[:200], upload_id=upload_id, path=str(root),
+                          manifest=pkg.manifest, preview=prev)
+    session.add(imp)
+    session.flush()
+    return imp
+
+
+def _missing_message(missing: list[str]) -> str:
+    return (f"{len(missing)} file(s) are listed in files.csv but are neither in audio/ nor already stored in "
+            f"Concord Bench: {', '.join(missing[:20])}" + (" ..." if len(missing) > 20 else ""))
+
+
+def import_json(imp: ReferenceImport) -> dict[str, Any]:
+    return {"id": imp.id, "status": imp.status, "name": imp.name, "preview": imp.preview, "result": imp.result,
+            "error": imp.error, "dataset_id": imp.dataset_id, "job_id": imp.job_id,
+            "created_at": imp.created_at.isoformat(), "decided_at": imp.decided_at.isoformat() if imp.decided_at
+            else None}
+
+
+def discard_files(imp: ReferenceImport) -> None:
+    """Delete the received package and the ingest source built from it."""
+    shutil.rmtree(paths.reference_import(imp.id), ignore_errors=True)
+    if imp.upload_id:
+        up = paths.uploads(imp.upload_id)
+        if up.is_dir() and up.resolve().is_relative_to((paths.data_root() / "uploads").resolve()):
+            shutil.rmtree(up, ignore_errors=True)
+
+
+def reject(session: Session, imp: ReferenceImport) -> None:
+    imp.status, imp.decided_at = "rejected", utcnow()
+    discard_files(imp)
+
+
+# ---------------------------------------------------------------- accepting
+
+def _link(src: Path, dest: Path) -> None:
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    if dest.exists() or dest.is_symlink():
+        dest.unlink()
+    try:
+        os.symlink(src.resolve(), dest)
+    except OSError:
+        shutil.copyfile(src, dest)
+
+
+def build_source(session: Session, imp: ReferenceImport, pkg: Package) -> Path:
+    """The folder the ingest job reads: each file at its dataset path (from audio/ or Bench's stored
+    original) plus the one references file. Nothing else of the package is in it."""
+    if pkg.manifest is None:
+        return pkg.root
+    missing = missing_files(session, pkg)
+    if missing:
+        raise PackageError(_missing_message(missing))
+    src = paths.reference_import(imp.id) / "source"
+    if src.exists():
+        shutil.rmtree(src)
+    for f in pkg.files:
+        audio = pkg.audio_path(f)
+        if not audio.is_file():
+            audio = stored_original(session, f["sha256"], PurePosixPath(f["path"]).suffix.lower())
+            assert audio is not None
+        _link(audio, src / f["path"])
+    assert pkg.refs is not None
+    _link(pkg.refs, src / REFS_DIR / pkg.refs.name)
+    return src
+
+
+def accept(session: Session, imp: ReferenceImport, *, name: str | None = None, tags: list[str] | None = None,
+           language: str | None = None, plan: dict[str, Any] | None = None) -> tuple[Dataset, Job]:
+    """A new dataset from a staged package, filled by the ingest job; `finish` completes it."""
+    from ..runs import jobs
+
+    pkg = read_package(Path(imp.path))
+    source = build_source(session, imp, pkg)
+    m = pkg.manifest or {}
+    prev = previous_version(session, pkg)
+    provenance: dict[str, Any] = {}
+    if pkg.manifest is not None:
+        provenance = {
+            "import_id": imp.id, "package_name": pkg.name, "source": pkg.source,
+            "export_version": pkg.export_version, "scope": m.get("scope"), "created_at": m.get("created_at"),
+            "label_types": m.get("label_types"), "counts": m.get("counts"), "audio_included": m.get("audio_included"),
+            "review": m.get("review"), "models": m.get("models"), "normaliser": m.get("normaliser"),
+        }
+    ds = Dataset(name=(name or "").strip()[:200] or dataset_name_for(session, pkg),
+                 language=((language if language is not None else m.get("language")) or "").strip() or None,
+                 description=m.get("description"), tags=list(tags if tags is not None else m.get("tags") or []),
+                 status="ingesting", provenance=provenance, source_key=source_key(pkg.source),
+                 export_version=pkg.export_version, previous_version_id=prev.id if prev else None)
+    session.add(ds)
+    session.flush()
+    job = jobs.enqueue(session, "ingest", {"dataset_id": ds.id, "source": str(source), "cleanup": False,
+                                           "plan": plan, "reference_import_id": imp.id})
+    imp.status, imp.dataset_id, imp.job_id, imp.error = "accepting", ds.id, job.id, None
+    return ds, job
+
+
+def finish(session: Session, import_id: int, dataset_id: int, log=print) -> dict[str, Any]:
+    """After the ingest: Label's segment uids and seg-model outputs; the import is accepted."""
+    imp = session.get(ReferenceImport, import_id)
+    ds = session.get(Dataset, dataset_id)
+    if imp is None or ds is None:
+        return {}
+    result: dict[str, Any] = {}
+    root = Path(imp.path)
+    if imp.manifest is not None and root.is_dir():
+        pkg = read_package(root, check_audio=False)
+        result["uids"] = assign_uids(session, ds, pkg.uids)
+        result["outputs"] = import_outputs(session, ds, pkg)
+        log(f"reference package: {result['uids']['matched']} of {len(pkg.uids)} segment uids matched; "
+            f"outputs imported {result['outputs']['imported']}, skipped {sum(result['outputs']['skipped'].values())}")
+    imp.status, imp.result, imp.decided_at = "accepted", result, utcnow()
+    session.commit()
+    discard_files(imp)
+    return result
+
+
+def fail(session: Session, import_id: int, error: str) -> None:
+    imp = session.get(ReferenceImport, import_id)
+    if imp is not None:
+        imp.status, imp.error, imp.decided_at = "failed", error[:2000], utcnow()
+        session.commit()
+        discard_files(imp)
+
+
+def assign_uids(session: Session, ds: Dataset, uids: list[dict[str, Any]]) -> dict[str, int]:
+    """Give segments the sender's uid (CONTRACTS.md §2.4), matched by file and times within 0.01 s."""
+    files = {f.rel_path: f for f in session.scalars(select(AudioFile).where(AudioFile.dataset_id == ds.id))}
+    taken: set[int] = set()
+    matched = 0
+    for rec in uids:
+        f = files.get(rec.get("file"))
+        try:
+            s, e = float(rec["start"]), float(rec["end"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if f is None:
+            continue
+        cands = [seg for seg in f.segments if seg.id not in taken and abs(seg.start - s) <= UID_TOLERANCE + 1e-9
+                 and abs(seg.end - e) <= UID_TOLERANCE + 1e-9]
+        if not cands:
+            continue
+        seg = min(cands, key=lambda x: abs(x.start - s) + abs(x.end - e))
+        seg.uid = str(rec["uid"])
+        seg.meta = {**(seg.meta or {}), "source_uid": True}
+        taken.add(seg.id)
+        matched += 1
+    session.flush()
+    return {"matched": matched, "unmatched": len(uids) - matched}
+
+
+def _params_match(adapter, rec_params: dict[str, Any]) -> bool:
+    """The package's call params (written out in full) against Bench's own call for that model."""
+    own = {k: v for k, v in adapter.params.items() if k not in ("adapter", "image")}
+    own.setdefault("sample_rate", BENCH_SAMPLE_RATE)
+    theirs = dict(rec_params or {})
+    if theirs.pop("adapter", type(adapter).__name__) != type(adapter).__name__:
+        return False
+    theirs.pop("image", None)
+    return all(k in own and own[k] == v for k, v in theirs.items())
+
+
+def import_outputs(session: Session, ds: Dataset, pkg: Package) -> dict[str, Any]:
+    """outputs/seg.jsonl rows into the output cache, keyed the way `runs.cache.get_or_run` keys a
+    whole-file call of that model, when the model is registered and the image tag is the one Bench
+    would use now (CONTRACTS.md §2.5). Others are skipped and counted."""
+    from .. import adapters
+    from ..runs import cache
+
+    skipped = {"not_registered": 0, "image_differs": 0, "params_differ": 0, "not_in_dataset": 0, "invalid":
+               pkg.outputs_invalid}
+    imported = cached = 0
+    shas = set(session.scalars(select(AudioFile.sha256).where(AudioFile.dataset_id == ds.id)))
+    by_model: dict[str, Any] = {}
+    for rec in pkg.outputs:
+        out = rec.get("output") or {}
+        if not {"model", "image", "sha256", "params"} <= rec.keys() or not isinstance(out.get("segments"), list):
+            skipped["invalid"] += 1
+            continue
+        if rec["sha256"] not in shas:
+            skipped["not_in_dataset"] += 1
+            continue
+        name = rec["model"]
+        if name not in by_model:
+            model = session.scalar(select(Model).where(Model.registry_name == name))
+            try:
+                by_model[name] = adapters.for_model(model) if model is not None and model.is_seg else None
+            except adapters.AdapterError:
+                by_model[name] = None
+        adapter = by_model[name]
+        if adapter is None or adapter.kind != "seg":
+            skipped["not_registered"] += 1
+            continue
+        if rec["image"] != adapter.options.get("image"):
+            skipped["image_differs"] += 1
+            continue
+        if not isinstance(rec["params"], dict) or not _params_match(adapter, rec["params"]):
+            skipped["params_differ"] += 1
+            continue
+        s, e = cache._span(0.0, cache.WHOLE)
+        phash = adapter.params_hash
+        if cache.lookup(session, adapter.service, rec["sha256"], s, e, phash) is not None:
+            cached += 1
+            continue
+        try:
+            segs = [[float(a), float(b)] for a, b in out["segments"]]
+            spk = out.get("speakers")
+            if spk is not None and len(spk) != len(segs):
+                raise ValueError("speakers and segments differ in length")
+        except (TypeError, ValueError):
+            skipped["invalid"] += 1
+            continue
+        session.add(ModelOutput(model_name=adapter.service, audio_sha256=rec["sha256"], span_start=s, span_end=e,
+                                params_hash=phash, output={"segments": segs, "speakers": spk},
+                                latency_s=float(rec.get("latency_s") or 0.0), image=rec["image"]))
+        session.flush()
+        imported += 1
+    return {"lines": len(pkg.outputs) + pkg.outputs_invalid, "imported": imported, "already_cached": cached,
+            "skipped": skipped}

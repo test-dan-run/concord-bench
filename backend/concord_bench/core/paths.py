@@ -32,6 +32,11 @@ def uploads(upload_id: str) -> Path:
     return data_root() / "uploads" / upload_id
 
 
+def reference_import(import_id: int) -> Path:
+    """Working folder of an accepted reference package: the ingest source built from it."""
+    return data_root() / "imports" / str(import_id)
+
+
 def offline_kits() -> Path:
     """Default destination of offline kits (the export form can name any folder)."""
     return data_root() / "offline"

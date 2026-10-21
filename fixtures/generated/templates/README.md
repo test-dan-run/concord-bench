@@ -17,6 +17,7 @@ Times are seconds from the start of the file.
 | nemo_manifest.json | ASR | NVIDIA NeMo manifest: one JSON object per line with `audio_filepath`, `duration`, `text` (optional `offset`). `.json` or `.jsonl`. |
 | nemo_diarisation_manifest.json | Diarisation | NeMo diarisation manifest. Speaker labels come from the RTTM named by `rttm_filepath`, so upload those RTTM files too (matched by file name; the folder in the path does not matter). |
 | nemo_diarisation_output.json | ASR + diarisation + cpWER | NeMo diarisation output: `session_id` plus `sentences` of `{speaker, start_time, end_time, text}` (or only `words` of `{word, start_time, end_time, speaker}`). |
+| reference_package.zip | Import reference package | A reference package (manifest, files.csv, audio, one references file) for Datasets -> Import reference package. Its README.md explains the layout. |
 
 cpWER needs speaker-attributed transcripts (STM, SegLST, JSON/JSONL segments with text, or NeMo
 diarisation output). An RTTM plus per-file text gives WER and DER, but not cpWER.

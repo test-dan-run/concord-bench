@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy import Float, and_, func, or_, select
 from sqlalchemy.orm import Session
 
+from .. import peer
 from ..analysis import asr as asr_an
 from ..analysis import diar as diar_an
 from ..core.db import get_session
@@ -142,6 +143,7 @@ def asr_utterance(result_id: int, session: Session = Depends(get_session)) -> di
     d["timed"] = bool((r.alignment or {}).get("timed"))
     d["segments"] = (r.alignment or {}).get("segments")
     d["flag_note"] = seg.flag_note if seg else None
+    d["label_url"] = peer.file_link_for(session, r.audio_file_id, r.start)
     # Other models on the same utterance: latest done ASR run per model on this dataset, same normaliser.
     others = []
     runs = session.scalars(select(Run).where(Run.task == RunTask.asr, Run.dataset_id == sc.run.dataset_id,
@@ -223,7 +225,7 @@ def diar_file(result_id: int, session: Session = Depends(get_session)) -> dict[s
     return {**_file_json(r), "ref": al.get("ref", []),
             "hyp": [[s, e, mapping.get(k, k), k] for s, e, k in al.get("hyp", [])], "mapping": mapping,
             "errors": al.get("errors", []), "overlaps": al.get("overlaps", []),
-            "largest": diar_an.largest_errors(al)}
+            "largest": diar_an.largest_errors(al), "label_url": peer.file_link_for(session, r.audio_file_id)}
 
 
 # ---------------------------------------------------------------- pipelines
@@ -304,7 +306,8 @@ def pipeline_file(result_id: int, session: Session = Depends(get_session)) -> di
             "ref_segments": [{"start": s.start, "end": s.end, "speaker": s.speaker, "text": s.text} for s in ref_segs],
             "hyp_segments": al.get("hyp_segments", []), "assignment": cp.get("assignment", []),
             "pairs": cp.get("pairs", []), "wrong_speaker_words": cp.get("wrong_speaker_words", []),
-            "ref_norm": al.get("ref_norm"), "hyp_norm": al.get("hyp_norm")}
+            "ref_norm": al.get("ref_norm"), "hyp_norm": al.get("hyp_norm"),
+            "label_url": peer.file_link_for(session, r.audio_file_id)}
 
 
 @router.get("/runs")

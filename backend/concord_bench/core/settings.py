@@ -40,6 +40,8 @@ class Settings(BaseSettings):
     services_timeout_s: int = 20 * 60
     # The Concord Bench image a full offline kit carries unless the export form picks another (Q3).
     concord_image: str = "concord-bench:0.2.0"
+    # Concord Label's base URL (SPLIT_PLAN.md §5): "Open in Label" and "Send flags to Label". Unset: no links.
+    label_url: str | None = None
     # Built frontend served by FastAPI; absent in development (Vite serves it).
     frontend_dist: Path = Field(default=REPO_ROOT / "frontend" / "dist")
 

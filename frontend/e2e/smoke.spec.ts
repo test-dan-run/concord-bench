@@ -137,7 +137,7 @@ test("bring-your-own screens load; Bench has no Label or Training pages", async 
   await expect(page.getByRole("heading", { name: "Jobs" })).toBeVisible();
   const nav = page.getByRole("navigation", { name: "Primary" });
   await expect(nav.getByText("Concord Bench")).toBeVisible();
-  for (const name of ["Benchmarks", "Error analysis", "Datasets", "Import reference package", "Models", "Export for offline"]) {
+  for (const name of ["Benchmarks", "Error analysis", "Datasets", "Import references", "Models", "Export for offline"]) {
     await expect(nav.getByRole("link", { name, exact: true })).toBeVisible();
   }
   for (const name of ["Training", "Review console", "Pseudo-label", "Annotate", "Live evaluation", "Import / export"]) {

@@ -228,15 +228,17 @@ def _copy_complete(tmp_path: Path) -> Path:
     return dest
 
 
-def test_unknown_format_version_is_refused_naming_the_known_ones(client, tmp_path):
+def test_unknown_format_version_is_refused_naming_the_known_ones(client, tmp_path, data_dir):
     pkg = _copy_complete(tmp_path)
     m = json.loads((pkg / "manifest.json").read_text())
     m["format_version"] = 2
     (pkg / "manifest.json").write_text(json.dumps(m))
-    r = client.post("/api/reference-imports", json={"upload_id": upload_zip(client, zip_folder(pkg))})
+    upload_id = upload_zip(client, zip_folder(pkg))
+    r = client.post("/api/reference-imports", json={"upload_id": upload_id})
     assert r.status_code == 400
     assert "format_version 2" in r.json()["detail"] and "format version 1" in r.json()["detail"]
     assert client.get("/api/reference-imports").json() == []
+    assert not (data_dir / "uploads" / upload_id).exists()  # a refused upload is not kept
 
 
 def test_audio_that_does_not_match_its_sha256_is_refused(client, tmp_path):

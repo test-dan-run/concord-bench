@@ -81,7 +81,7 @@ export function ImportReference() {
             ))}
           </Panel>
         </div>
-        <aside className="w-full xl:w-[380px] shrink-0 flex flex-col gap-4">
+        <aside className="w-full xl:w-[380px] shrink-0 flex flex-col gap-4 order-first xl:order-last">
           <Panel title="Upload a package">
             <div
               onDragOver={(e) => {

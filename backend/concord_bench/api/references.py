@@ -3,6 +3,7 @@ fingerprints, staged imports (accept / reject), and the latest scores of a sourc
 
 from __future__ import annotations
 
+import shutil
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -44,6 +45,7 @@ def stage_import(body: ImportIn, session: Session = Depends(get_session)) -> dic
         imp = refpackage.stage(session, body.upload_id, d)
     except PackageError as exc:
         session.rollback()
+        shutil.rmtree(d, ignore_errors=True)  # a corrected package comes as a new upload
         raise HTTPException(400, str(exc)) from None
     session.commit()
     return {"id": imp.id, "status": imp.status, "preview": imp.preview}

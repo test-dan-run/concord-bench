@@ -5,19 +5,21 @@ Planned 2026-10-21, not built. Kept apart from [PLAN.md](PLAN.md) (Phases 1–3)
 "OFFLINE_EXPORT_PLAN.md §N". Section numbers without a file name are in this document.
 
 Concord today is one app with two jobs: benchmarking models on labelled data (Phase 1) and producing
-labels with pseudo-labelling and review (Phase 2). This plan splits it into two applications:
+labels with pseudo-labelling and review (Phase 2). This plan splits it into two applications in two
+repositories:
 
 - **Concord Bench**: benchmark models on reference datasets and analyse their errors.
 - **Concord Label**: pseudo-label audio, review it, and hand finished references to Bench.
 
 Annotation output from Label must reach Bench in a few clicks, on the same machine or on another one.
+The owner's decisions are in §12.
 
 ---
 
 ## 1. Where the code splits today
 
 The backend already divides along this line. `label/` imports only shared layers, and the benchmark side
-reaches into labelling in two places.
+reaches into labelling in two places (the job dispatcher and the API router).
 
 | Area | Today | After the split |
 |---|---|---|
@@ -32,7 +34,7 @@ reaches into labelling in two places.
 | `runs/` executor, scoring; `analysis/`; `api/benchmarks.py`, `api/errors.py`, `api/runs.py` | | **Bench** |
 | `label/` pseudo, fusion, edit, console, live, sync; `api/label.py`, `api/sync.py` | | **Label** |
 | `label/promote.py` | copies confirmed segments into a new dataset in the same database | **replaced** by the reference package (§4) |
-| `concord_improve` (Phase 3, on hold) | reads `segment`, `dataset`, `model` | **Label** (it trains from labels; Q3) |
+| `concord_improve` (Phase 3) | placeholder router, in `concord-full` only | **Label**, still on hold, in no image (§3.2) |
 
 Couplings that do not survive separate databases:
 
@@ -48,45 +50,56 @@ Couplings that do not survive separate databases:
 
 ---
 
-## 2. Repository and packaging
+## 2. Repositories and packaging
 
-One repository with three Python packages and three frontend packages. Changes to the shared core
-land in both apps in one commit, and one `just test` covers everything.
+Two repositories, side by side under `dev/apps/`:
 
 ```
-Concord/
-├── SPLIT_PLAN.md, PLAN.md, OFFLINE_EXPORT_PLAN.md, README.md
-├── pyproject.toml              # uv workspace: core, bench, label
-├── Justfile                    # dev-bench, dev-label, dev (both), test, lint, build-bench, build-label
-├── Dockerfile                  # targets: bench, label, label-full
-├── packages/core/              # concord_core: settings base, paths, db, shared tables, datasets, registry,
-│                               #   platform, adapters, cache, cuts, metrics, jobs framework, offline kits
-├── apps/bench/                 # concord_bench: runs, scoring, analysis, reference-package import, API
-├── apps/label/                 # concord_label: pseudo, fusion, edit, console, live, sync, reference export, API
-├── apps/label/improve/         # concord_improve (label-full only)
-├── frontend/                   # npm workspaces
-│   ├── shared/                 # components (AudioPlayer, Timeline, SortableTable, DiffText, MetricTile, TagInput,
-│   │                           #   icons, ui), lib (api, format, colors, upload), tokens (index.css),
-│   │                           #   shared pages (Models, Add model, Contract, Jobs, Upload, Offline export)
-│   ├── bench/                  # Vite app
-│   └── label/                  # Vite app
-├── fixtures/
-└── tests/{core,bench,label,e2e}
+dev/apps/
+├── Concord/                    # becomes Concord Bench; keeps the git history
+│   ├── packages/core/          # concord-core (Python): settings base, paths, db, shared tables + Alembic
+│   │                           #   core branch, datasets, registry, platform, adapters, cache, cuts, metrics,
+│   │                           #   jobs framework, offline kits, reference-package format (§4.1)
+│   ├── packages/ui/            # @concord/ui (React): AudioPlayer, Timeline, SortableTable, DiffText,
+│   │                           #   MetricTile, TagInput, icons, ui, lib (api, format, colors, upload),
+│   │                           #   tokens (index.css), shared pages (Models, Add model, Contract, Jobs,
+│   │                           #   Upload, Offline export)
+│   ├── backend/concord_bench/  # runs, scoring, analysis, reference-package import, API
+│   ├── frontend/               # Bench's Vite app
+│   ├── fixtures/               # the synthesised fixture set and recordings (Label uses them by path)
+│   └── tests/{core,bench}
+└── concord-label/              # new repository
+    ├── backend/concord_label/  # pseudo, fusion, edit, console, live, sync, reference export, API
+    ├── backend/concord_improve/  # Phase 3 placeholder, on hold
+    ├── frontend/               # Label's Vite app
+    └── tests/
 ```
 
-- **import-linter**: `concord_core` imports neither app; `concord_bench` and `concord_label` never import
-  each other; `concord_improve` stays out of everything except Label's app factory (as today).
-- **Images**: `concord-bench`, `concord-label`, `concord-label-full`. Lite/full only applies to Label once
-  Improve moves there (Q3). Each image runs its own API and worker.
+- **Where core lives.** The shared packages stay in the Bench repository, as their own versioned packages.
+  Label depends on them by relative path, the same way Concord depends on the platform's `aicore` today:
+  - `pyproject.toml`: `concord-core = { path = "../Concord/packages/core", editable = true }`;
+  - `package.json`: `"@concord/ui": "file:../Concord/packages/ui"`;
+  - Label's Docker build gets the Bench repository as a named build context
+    (`--build-context bench=../Concord`), like `platform` today.
+- **Versions.** `concord-core` and `@concord/ui` carry their own version. Label's `/api/config` reports the
+  core version it runs on, and Bench refuses a reference package whose format version it does not know.
+- **Directory name.** The Bench repository can be renamed (for example to `concord-bench`) later. Only
+  Label's path dependencies and Docker build context name it.
+- **History.** The Label repository starts with one commit that copies the label code over. Its earlier
+  history stays readable in the Bench repository.
+- **import-linter**: in the Bench repository, `concord_core` never imports `concord_bench`. In the Label
+  repository, `concord_label` never imports `concord_improve`.
+- **Images**: `concord-bench` and `concord-label`. Each image runs its own API and worker. `concord-lite`,
+  `concord-full` and `FEATURE_IMPROVE` go away from Bench.
 - **Ports**: Bench 8600 (unchanged), Label 8610. Development: Vite 5173 (Bench) and 5174 (Label).
-- **Data**: separate data directories and databases: `BENCH_DATA` (default `data/bench`) and
-  `LABEL_DATA` (default `data/label`). Nothing is shared on disk, so the two can run on different machines.
+- **Data**: each app has its own data directory and database (`CONCORD_DATA` in each repo's `.env`). Nothing
+  is shared on disk, so the two can run on different machines.
 
 ### 2.1 Database migrations
 
-Shared tables are defined once in core. Alembic gets one branch per package (`version_locations`): a
-`core` branch and an app branch, applied together by each app's `migrate`. A change to a shared table
-is written once and reaches both apps.
+Shared tables are defined once in `concord-core`, which ships its own Alembic branch. Each app's
+`migrate` applies the core branch and its own (`version_locations`), so a change to a shared table is
+written once and reaches both apps when they move to that core version.
 
 | Owner | Tables |
 |---|---|
@@ -95,6 +108,7 @@ is written once and reaches both apps.
 | Label | `run` (label task), `sync_package` (snapshots stay files under the data directory), new `reference_export` |
 
 `run` exists in both apps with different task sets. It stays app-owned so each app can change it on its own.
+Both apps start with empty databases (§8), so there is no migration from today's schema.
 
 ---
 
@@ -108,7 +122,7 @@ For: benchmarking models on reference datasets and reading their errors.
 |---|---|---|
 | Benchmarks | ASR, Diarisation, Pipelines tabs; Run cells; normaliser and collar selectors | unchanged |
 | Errors | ASR, diarisation, pipeline error pages | "Open in annotator" becomes "Open in Label" (§5.2) |
-| Datasets | list, upload (annotated only), detail, **Import from Label** | audio-only upload removed; import added (§4.3); a dataset shows where its references came from and its version |
+| Datasets | list, upload (annotated only), detail, **Import reference package** | audio-only upload removed; import added (§4.3); a dataset shows where its references came from and its version |
 | Models | registry, Add model, contract page | shared page |
 | Jobs | queue, logs | shared page |
 | Offline export | kit builder | shared page (§7) |
@@ -127,9 +141,13 @@ For: turning audio into reviewed references.
 | Annotate | timeline, segment grid, shortcuts | flags lane also shows flags returned from Bench (§4.5) |
 | Live evaluation | WER vs confirmed count, CIs, DER card | "locked score" comes from Bench when linked (§5.3); **Promote** becomes **Send to Bench** (§4) |
 | Datasets | upload audio (with or without partial annotations), list, detail | the dataset detail page gets the Send to Bench history |
-| Sync | label packages between Label installs | unchanged (PLAN.md §6.5) |
+| Sync | label packages between Label installs | unchanged (PLAN.md §6, Import / export) |
 | Models, Jobs, Offline export | | shared pages |
-| Training | | label-full only (Q3) |
+
+**Improve (Phase 3) stays on hold.** The `concord_improve` placeholder moves to the Label repository with
+its import-linter contract. It is not installed in `concord-label`, there is no Training nav, and the
+disabled "Use for retraining" button is removed. When Phase 3 is scoped (PLAN.md Q5), Label gets a
+`concord-label-full` image and the feature flag back.
 
 ---
 
@@ -138,7 +156,8 @@ For: turning audio into reviewed references.
 ### 4.1 Format
 
 A reference package is a folder or zip that Bench's **existing** ingest can read, plus a manifest. No new
-parser is needed in Bench, and a person can open one with any tool that reads SegLST or RTTM.
+parser is needed in Bench. The format is defined in `concord-core` (`concord_core.refpkg`: writer,
+reader, validation), so Label's writer and Bench's reader cannot drift apart.
 
 ```
 <dataset>-refs-v<N>/
@@ -154,7 +173,13 @@ parser is needed in Bench, and a person can open one with any tool that reads Se
   outputs/           optional: seg-model outputs on whole files (§4.4)
 ```
 
-What goes in follows today's promotion rules (PLAN.md §6.6):
+**Packages from other sources.** Bench accepts a package written by hand or by another tool. Only `audio/`
+(or files Bench already has) and one file under `refs/` are required. A manifest without a `source` makes a
+dataset with no provenance, so it has no Label links and no flags round trip. Without a manifest at all,
+Bench treats the folder like an annotated upload. A template package is generated with the other
+templates (`fixtures/generated/templates`).
+
+What Label puts in follows today's promotion rules (PLAN.md §6.6):
 - only **confirmed** segments; auto-accepted segments never become references;
 - scope `complete` (default): fully reviewed files only, so DER is meaningful;
 - scope `any`: every file with a confirmed segment, ASR only;
@@ -174,12 +199,12 @@ Every send is recorded (`reference_export`): version, scope, counts, destination
 
 ### 4.3 Receiving (Bench)
 
-- Pushed packages and uploaded zips both arrive in **Datasets → Import from Label** as staged imports with a
-  preview: source, version, files, hours, label types, how many files are new, and differences from the
-  previous version.
+- Pushed packages and uploaded zips or folders both arrive in **Datasets → Import reference package** as
+  staged imports with a preview: source, version, files, hours, label types, how many files are new, and
+  differences from the previous version.
 - **Accept** runs the normal ingest job on the package folder, then stores the provenance on the dataset.
 - **Versions.** References that have been scored are never changed, so benchmark numbers stay reproducible.
-  A package from the same Label dataset becomes a new dataset (`<name> v2`) linked to the earlier versions.
+  A package from the same source becomes a new dataset (`<name> v2`) linked to the earlier versions.
   Accepting offers "Run the models benchmarked on v1 against v2" (the existing benchmark-plan panel,
   pre-ticked).
 - Audio files Bench already has (same sha256) are not stored again; derived files and the cache are reused.
@@ -247,58 +272,61 @@ Bench job is using mid-run.
 
 ## 7. Offline export after the split
 
-The offline kit (OFFLINE_EXPORT_PLAN.md) moves to core, and the export page is shared, so either app can
-write a kit. A full kit holds the app images that are ticked: Bench, Label, or both, with one
-`concord/compose.yml` that starts what is in the kit and sets `BENCH_URL` / `LABEL_URL` between them. Model
-kits are unchanged.
+The offline kit code (OFFLINE_EXPORT_PLAN.md) moves to `concord-core`, and the export page to `@concord/ui`,
+so either app can write a kit. A full kit holds the app images that are ticked: Bench, Label, or both, with
+one `concord/compose.yml` that starts what is in the kit and sets `BENCH_URL` / `LABEL_URL` between them.
+Model kits are unchanged. The air-gap test (`just test-offline`) stays in the Bench repository and gains a
+variant with both images.
 
 ---
 
-## 8. Moving existing data
+## 8. Starting empty
 
-The current install has data (756 MB in the main checkout). A one-off command splits it:
+Both apps start with empty data directories and databases. Nothing is migrated from today's
+`data/concord.db`.
 
-`python -m concord_core.split --from data --bench data/bench --label data/label`
-
-- **Bench gets**: datasets with references; their `run`, `score`, `result`, `pipeline` rows; models; the
-  output cache.
-- **Label gets**: audio-only datasets and every dataset with label work (pseudo or edited segments); label
-  runs; sync tables; models; the output cache.
-- A dataset made by Promote goes to Bench, with provenance pointing at its Label dataset (export version 1).
-- Audio, derived files and peaks are hardlinked when both targets are on the same filesystem, else copied.
-- The old database is left untouched. The command is safe to re-run into empty targets.
-
-Starting fresh is the alternative (Q5).
+- Today's data stays where it is, untouched. The last single-app commit is tagged (`concord-single-app`) so
+  the old app can still be run against it.
+- Datasets are uploaded again: annotated ones to Bench, audio for labelling to Label. Models are registered
+  again in each app (no typed fields, PLAN.md §5 M3).
+- Labelling work in progress can be carried over with today's label package export before the switch, then
+  imported into Label (PLAN.md §6, Import / export). The package format is unchanged, so this needs no new code.
 
 ---
 
 ## 9. Milestones
 
-Each one ends with `just test`, `just lint` and the e2e tests green.
+Each one ends with `just test`, `just lint` and the e2e tests green in the repository it touches.
 
-| # | Work | Exit | Size |
-|---|---|---|---|
-| S1 | Workspace layout: uv and npm workspaces, move code into `packages/core`, `apps/bench`, `apps/label` with no behaviour change; one app still serves everything | Every existing test passes from the new layout | 2–3 d |
-| S2 | Core extraction: shared tables and the Alembic core branch; job framework with handler registration; `cuts` into core; import-linter contracts | Core has no import of either app | 3–4 d |
-| S3 | Bench app: own app factory, settings, database, nav and routes; audio-only upload and label routes removed | Bench runs alone; Phase 1 acceptance test and smoke e2e pass | 3–4 d |
-| S4 | Label app: own app factory, settings, database, nav and routes; promote removed | Label runs alone; label tests and label e2e pass | 3–4 d |
-| S5 | Reference package: export (download, push), Bench import with preview and versions, optional outputs | Round trip on the fixture set (§10) | 4–5 d |
-| S6 | Links: `BENCH_URL` / `LABEL_URL`, locked score, Open in Label, flags back | Both links work with the other app up, and hide with it down | 2–3 d |
-| S7 | GPU leases and `stack.py --keep` | Orchestration tests (§10) | 2 d |
-| S8 | Images, offline kit with both apps, data split command, README | Both images build; split command run on a copy of the current data | 3 d |
+| # | Repo | Work | Exit | Size |
+|---|---|---|---|---|
+| S1 | Bench | Tag `concord-single-app`. Move shared code into `packages/core` and shared React into `packages/ui` with no behaviour change; the one app still serves everything | Every existing test passes from the new layout | 2–3 d |
+| S2 | Bench | Core extraction: shared tables and the Alembic core branch; job framework with handler registration; `cuts` into core; `concord_core.refpkg`; import-linter contracts | Core has no import of app code | 3–4 d |
+| S3 | Label | New repository: copy the label code and `concord_improve`; path dependencies on core and ui; own app factory, settings, database, nav and routes; promote removed; Dockerfile with the `bench` build context | Label runs alone; label tests and label e2e pass | 3–4 d |
+| S4 | Bench | Remove label code, audio-only upload, `concord_improve`, the lite/full split; own nav and routes | Bench runs alone; Phase 1 acceptance test and smoke e2e pass | 2–3 d |
+| S5 | both | Reference package: Label export (download, push), Bench import with preview, versions, optional outputs, hand-made packages and template | Round trip on the fixture set (§10) | 4–5 d |
+| S6 | both | Links: `BENCH_URL` / `LABEL_URL`, locked score, Open in Label, flags back | Both links work with the other app up, and hide with it down | 2–3 d |
+| S7 | Bench + platform | GPU leases in core and `stack.py up --keep` | Orchestration tests (§10) | 2 d |
+| S8 | both | Images, offline kit with both apps, READMEs | Both images build; air-gap test with both images passes | 2–3 d |
 
-About 4–5 weeks for one developer. S5 can start once S2 is done, alongside S3 and S4.
+About 4 weeks for one developer. S5 can start once S2 is done, alongside S3 and S4.
 
 ---
 
 ## 10. Testing
 
-- **Moved tests**: today's tests go to `tests/core`, `tests/bench` and `tests/label` unchanged in substance.
-- **Round trip** (the main new test, on the fixture set with recorded responses):
+- **Moved tests**: today's tests go to `tests/core` and `tests/bench` in the Bench repository and to
+  `tests/` in the Label repository, unchanged in substance. Label's tests use the fixture set from the
+  Bench repository by path.
+- **Reference package format** (in core): a package written by `refpkg` reads back through Bench's ingest
+  with the same segments; a hand-made package (refs only, no manifest) and the template both import; an
+  unknown format version is refused.
+- **Round trip** (Label repository, `just e2e-handoff`, both images on one Docker network, recorded
+  responses):
   - pseudo-label and confirm in Label;
   - send to Bench, both as a downloaded zip and as a push;
   - accept in Bench and benchmark one ASR model;
-  - the WER must equal what today's Promote path gives;
+  - the WER must equal what today's Promote path gives on the same confirmed segments;
   - send a second version, and check that v1's scores are unchanged and v2 is a new dataset.
 - **Missing-audio push**: Bench already has every file, so the package carries no audio and the import
   still succeeds.
@@ -306,10 +334,8 @@ About 4–5 weeks for one developer. S5 can start once S2 is done, alongside S3 
   sent from Bench show in Label's flags lane.
 - **Leases**: `ensure_services` with `stack.py` mocked; a Label job does not evict a service leased by
   Bench and ends up `blocked`.
-- **Architecture**: import-linter contracts from §2; each image starts with only its own routes.
-- **e2e**: the current smoke and label Playwright specs, split across the two apps, plus one spec for Send
-  to Bench → Import from Label.
-- **Data split**: on a copy of the current data, row counts per table match the rules in §8.
+- **Architecture**: the import-linter contracts from §2; each image starts with only its own routes.
+- **e2e**: today's smoke spec in Bench and label spec in Label, plus the handoff spec above.
 
 ---
 
@@ -319,19 +345,20 @@ About 4–5 weeks for one developer. S5 can start once S2 is done, alongside S3 
 |---|---|
 | Two workers evict each other's services | Leases and `stack.py up --keep` (§6). |
 | Benchmark numbers change when references are re-sent | A new package from the same source is a new dataset version; scored references are never edited (§4.3). |
+| A core change in the Bench repository breaks Label | Label's `/api/config` reports its core version; Label's tests run against the core checkout it points at; core changes that touch Label are made together with the Label change. If this gets awkward, `packages/` can move to a third repository later; only the path dependencies change. |
 | Losing cache reuse between benchmarking and pseudo-labelling costs GPU time | Seg-model outputs travel in the package (§4.4); Label's own cache still serves re-fusing. |
-| Shared-table changes drift between apps | One Alembic core branch used by both apps (§2.1); one test run covers both. |
-| The workspace move breaks imports and paths (`CONCORD_HOME`, fixtures, `frontend/dist`) | S1 moves code only and must pass every existing test before anything else changes. |
+| Re-uploading datasets and re-registering models after the switch (§8) | Upload and Add model need no typed fields; labelling in progress moves with a label package. |
+| The S1 move breaks imports and paths (`CONCORD_HOME`, fixtures, `frontend/dist`) | S1 moves code only and must pass every existing test before anything else changes. |
 
 ---
 
-## 12. Still open
+## 12. Decisions (owner, 2026-10-21)
 
-| # | Question | Default meanwhile |
+| # | Question | Decision |
 |---|---|---|
-| Q1 | Names and ports. | Concord Bench on 8600, Concord Label on 8610. |
-| Q2 | One repository with shared core, or two repositories? | One repository (§2). |
-| Q3 | Does Improve (Phase 3, on hold) go with Label? | Yes: it trains from labels. `concord-label-full` replaces `concord-full`. |
-| Q4 | Offline export: in both apps, with a kit holding either or both images? | Yes (§7). |
-| Q5 | Split the existing data, or start both apps empty? | Provide the split command (§8). |
-| Q6 | Should Bench accept a reference package from any source, such as one written by hand, without a Label install? | Yes: the format is plain SegLST/RTTM/JSONL plus a manifest; provenance is optional. |
+| Q1 | Names and ports | Concord Bench on 8600, Concord Label on 8610. |
+| Q2 | One repository or two | Two. Shared code stays in the Bench repository as `concord-core` and `@concord/ui`, used by Label through path dependencies (§2). |
+| Q3 | Where Improve goes | Label, and it stays on hold: the placeholder moves, but no image installs it (§3.2). |
+| Q4 | Offline export after the split | Both apps can write a kit; a full kit holds either app or both (§7). |
+| Q5 | Existing data | Start both apps empty; no data migration (§8). |
+| Q6 | Reference packages from other sources | Accepted, including hand-made ones; provenance is optional (§4.1). |

@@ -15,7 +15,6 @@ from sqlalchemy.orm import Session
 from ..core import paths
 from ..core.db import get_session
 from ..core.models import Job, Model, OfflineExport
-from ..core.settings import get_settings
 from ..offline import export
 from ..runs import jobs
 from .datasets import job_brief
@@ -33,8 +32,21 @@ def _names(services: str) -> list[str]:
     return [n.strip() for n in services.split(",") if n.strip()]
 
 
+def _apps(apps: str | None) -> dict[str, str | None] | None:
+    """`concord-bench=concord-bench:0.2.0,concord-label` -> {app: image or None (its default)}; absent: None."""
+    if apps is None:
+        return None
+    out: dict[str, str | None] = {}
+    for part in (p.strip() for p in apps.split(",")):
+        if part:
+            app, _, image = part.partition("=")
+            out[app.strip()] = image.strip() or None
+    return out
+
+
 def export_json(rec: OfflineExport, job: Job | None = None) -> dict[str, Any]:
     return {"id": rec.id, "kind": rec.kind, "services": rec.services, "concord_image": rec.concord_image,
+            "app_images": rec.concord_image.split(", ") if rec.concord_image else [],
             "dest": rec.dest, "name": rec.name, "status": rec.status, "path": rec.path, "bytes": rec.bytes,
             "error": rec.error, "job_id": rec.job_id, "job": job_brief(job) if job else None,
             "created_at": rec.created_at.isoformat(),
@@ -53,44 +65,48 @@ def services_table(session: Session = Depends(get_session)) -> dict[str, Any]:
     for r in rep["services"]:
         m = registered.get(r["name"])
         rows.append({**r, "model_id": m.id if m else None, "display_name": m.display_name if m else None})
-    images = []
-    for ref in export.concord_images():
-        facts = export.image_facts(ref)
-        images.append({"image": ref, "present": facts is not None, "bytes": facts["bytes"] if facts else None})
-    return {"services": rows, "platform": rep["platform"], "warnings": rep["warnings"], "concord_images": images,
-            "default_image": get_settings().concord_image, "default_dest": str(paths.offline_kits())}
+    return {"services": rows, "platform": rep["platform"], "warnings": rep["warnings"], "apps": export.app_choices(),
+            "default_dest": str(paths.offline_kits())}
+
+
+def _preview(services: list[str], kind: str, dest: Path, apps: dict[str, str | None] | None,
+             name: str | None) -> dict[str, Any]:
+    try:
+        return export.preview(services, kind, dest, apps, name)
+    except export.ExportError as exc:
+        raise HTTPException(422, str(exc)) from None
 
 
 @router.get("/preview")
-def preview(services: str, kind: str = "full", dest: str | None = None, concord_image: str | None = None,
+def preview(services: str, kind: str = "full", dest: str | None = None, apps: str | None = None,
             name: str | None = None) -> dict[str, Any]:
-    try:
-        return export.preview(_names(services), kind, _dest(dest), concord_image, name)
-    except export.ExportError as exc:
-        raise HTTPException(422, str(exc)) from None
+    """`apps`: the apps of a full kit as `app=image` (or a bare app name for its default image), comma-separated;
+    absent: this app only."""
+    return _preview(_names(services), kind, _dest(dest), _apps(apps), name)
 
 
 class ExportIn(BaseModel):
     services: list[str] = Field(min_length=1)
     kind: str = "full"  # full | models
     dest: str | None = None
-    concord_image: str | None = None
+    # The apps of a full kit and their images (null image: the app's default); absent: this app only.
+    apps: dict[str, str | None] | None = None
     name: str | None = Field(default=None, pattern=NAME_PATTERN)
 
 
 @router.post("/exports", status_code=202)
 def create_export(body: ExportIn, session: Session = Depends(get_session)) -> dict[str, Any]:
     dest = _dest(body.dest)
-    pv = preview(",".join(body.services), body.kind, str(dest), body.concord_image, body.name)
+    pv = _preview(body.services, body.kind, dest, body.apps, body.name)
     if pv["problems"]:
         raise HTTPException(422, "; ".join(pv["problems"]))
-    image = pv["concord"]["image"] if pv["concord"] else None
-    rec = OfflineExport(kind=body.kind, services=list(dict.fromkeys(body.services)), concord_image=image,
-                        dest=str(dest), name=body.name)
+    apps = {a["app"]: a["image"] for a in pv["apps"]}
+    rec = OfflineExport(kind=body.kind, services=list(dict.fromkeys(body.services)),
+                        concord_image=", ".join(apps.values()) or None, dest=str(dest), name=body.name)
     session.add(rec)
     session.flush()
     job = jobs.enqueue(session, "export", {"export_id": rec.id, "services": rec.services, "kind": rec.kind,
-                                           "dest": rec.dest, "concord_image": image, "name": rec.name})
+                                           "dest": rec.dest, "apps": apps, "name": rec.name})
     rec.job_id = job.id
     session.commit()
     return {"export": export_json(rec, job), "preview": pv}

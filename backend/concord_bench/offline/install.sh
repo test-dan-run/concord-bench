@@ -3,8 +3,9 @@
 #
 #   ./install.sh [--internal] [--skip-verify]
 #       Full kit: this folder becomes the install. Loads the images, writes platform/.env and
-#       concord/.env, creates the platform's Docker network (--internal: no outside access) and
-#       starts Concord. CONCORD_PORT (8600) and CONCORD_PROJECT (concord) can be set in the environment.
+#       concord/.env, creates the platform's Docker network (--internal: no outside access) and starts
+#       the apps in the kit (Concord Bench on 8600, Concord Label on 8620). CONCORD_PROJECT (concord)
+#       can be set in the environment.
 #   ./install.sh --add INSTALL [--replace] [--skip-verify]
 #       Model kit: merges these models into INSTALL, the folder a full kit was installed from.
 #       A service INSTALL already has with a different image is refused unless --replace is given.
@@ -12,8 +13,10 @@ set -euo pipefail
 
 KIT_KIND="@KIND@"
 KIT_NAME="@NAME@"
-CONCORD_IMAGE="@CONCORD_IMAGE@"
+BENCH_IMAGE="@BENCH_IMAGE@"
+LABEL_IMAGE="@LABEL_IMAGE@"
 GPU_SERVICES="@GPU_SERVICES@"
+THIS_MODULE="@THIS_MODULE@"
 
 KIT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ADD="" REPLACE=0 INTERNAL=0 VERIFY=1
@@ -23,7 +26,7 @@ while [ $# -gt 0 ]; do
     --replace) REPLACE=1; shift ;;
     --internal) INTERNAL=1; shift ;;
     --skip-verify) VERIFY=0; shift ;;
-    -h|--help) sed -n '2,11p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,12p' "$0"; exit 0 ;;
     *) echo "unknown option: $1 (see --help)" >&2; exit 2 ;;
   esac
 done
@@ -34,6 +37,8 @@ die() { printf 'error: %s\n' "$*" >&2; exit 1; }
 
 # A top-level `key: value` of a YAML file (config.yaml has no nesting).
 config_value() { sed -n "s/^$2:[[:space:]]*\([^#[:space:]]*\).*/\1/p" "$1" | head -n 1; }
+# A KEY=value line of an .env file.
+env_value() { sed -n "s/^$2=//p" "$1" | head -n 1; }
 
 check_docker() {
   command -v docker >/dev/null || die "docker is not installed"
@@ -68,25 +73,30 @@ verify() {
 
 install_full() {
   [ "$KIT_KIND" = full ] || die "$KIT_NAME is a model kit: run ./install.sh --add /path/to/install"
-  local net port project
+  [ -n "$BENCH_IMAGE$LABEL_IMAGE" ] || die "$KIT_NAME holds no app image"
+  local net project tar
   net="$(config_value "$KIT/platform/config.yaml" network)"
-  port="${CONCORD_PORT:-8600}"
   project="${CONCORD_PROJECT:-concord}"
   if [ -f "$KIT/concord/.env" ]; then
     say "already installed here: skipping checksums and docker load"
   else
     verify
     say "loading images (this can take a while)"
-    docker load -i "$KIT/images/concord.tar"
-    docker load -i "$KIT/images/platform.tar"
+    for tar in "$KIT/images/concord-bench.tar" "$KIT/images/concord-label.tar" "$KIT/images/platform.tar"; do
+      if [ -f "$tar" ]; then docker load -i "$tar"; fi
+    done
   fi
   check_gpu "$KIT/platform/config.yaml"
 
   say "writing platform/.env and concord/.env"
-  mkdir -p "$KIT/assets/hf-cache"  # engine services mount it; Concord sees assets/ read-only
+  mkdir -p "$KIT/assets/hf-cache"  # engine services mount it; the apps see assets/ read-only
   printf 'AI_ASSETS=%s\nHF_HUB_OFFLINE=1\n' "$KIT/assets" > "$KIT/platform/.env"
-  printf 'KIT_DIR=%s\nCONCORD_IMAGE=%s\nCONCORD_PORT=%s\nCONCORD_PROJECT=%s\nAI_NETWORK=%s\n' \
-    "$KIT" "$CONCORD_IMAGE" "$port" "$project" "$net" > "$KIT/concord/.env"
+  {
+    printf 'KIT_DIR=%s\n' "$KIT"
+    if [ -n "$BENCH_IMAGE" ]; then printf 'BENCH_IMAGE=%s\n' "$BENCH_IMAGE"; fi
+    if [ -n "$LABEL_IMAGE" ]; then printf 'LABEL_IMAGE=%s\n' "$LABEL_IMAGE"; fi
+    printf 'CONCORD_PROJECT=%s\nAI_NETWORK=%s\n' "$project" "$net"
+  } > "$KIT/concord/.env"
 
   if ! docker network inspect "$net" >/dev/null 2>&1; then
     if [ "$INTERNAL" = 1 ]; then
@@ -97,27 +107,34 @@ install_full() {
       docker network create "$net" >/dev/null
     fi
   fi
-  say "starting Concord"
+  say "starting the apps"
   docker compose --env-file "$KIT/concord/.env" -f "$KIT/concord/compose.yml" up -d
-  echo "Concord: http://127.0.0.1:$port. Register each model with Add model."
+  if [ -n "$BENCH_IMAGE" ]; then echo "Concord Bench: http://127.0.0.1:8600"; fi
+  if [ -n "$LABEL_IMAGE" ]; then echo "Concord Label: http://127.0.0.1:8620"; fi
+  echo "Register each model with Add model."
 }
 
 install_add() {
   [ "$KIT_KIND" = models ] || warn "$KIT_NAME is a full kit; merging only its models"
   [ -d "$ADD" ] || die "no folder $ADD"
-  local inst image replace=()
+  local inst image module replace=()
   inst="$(cd "$ADD" && pwd)"
   [ -f "$inst/platform/config.yaml" ] && [ -f "$inst/concord/.env" ] ||
     die "$inst is not an offline install (no platform/config.yaml or concord/.env); install a full kit there first"
-  image="$(sed -n 's/^CONCORD_IMAGE=//p' "$inst/concord/.env")"
-  docker image inspect "$image" >/dev/null 2>&1 || die "the install's Concord image $image is not loaded"
+  # The merge runs in an app image the install has: Concord Bench's, else Concord Label's, else the
+  # CONCORD_IMAGE of an install written before both apps could share a kit.
+  image="$(env_value "$inst/concord/.env" BENCH_IMAGE)" module=concord_bench
+  if [ -z "$image" ]; then image="$(env_value "$inst/concord/.env" LABEL_IMAGE)" module=concord_label; fi
+  if [ -z "$image" ]; then image="$(env_value "$inst/concord/.env" CONCORD_IMAGE)" module="$THIS_MODULE"; fi
+  [ -n "$image" ] || die "$inst/concord/.env names no app image"
+  docker image inspect "$image" >/dev/null 2>&1 || die "the install's app image $image is not loaded"
   [ "$REPLACE" = 1 ] && replace=(--replace)
 
-  # The merge rules live in Concord: run them in its image. It runs as root, because Concord's platform
+  # The merge rules live in the apps: run them in the image. It runs as root, because the platform
   # renders files as root, and gives what it touches back to the owner of the install folder.
   merge() {
     docker run --rm --network none -e UV_OFFLINE=1 -v "$KIT:$KIT:ro" -v "$inst:$inst" "$image" \
-      python -m concord_bench.cli add-kit "$KIT" "$inst" ${replace[@]+"${replace[@]}"} "$@"
+      python -m "$module.cli" add-kit "$KIT" "$inst" ${replace[@]+"${replace[@]}"} "$@"
   }
   verify
   check_gpu "$inst/platform/config.yaml"
@@ -127,7 +144,7 @@ install_add() {
   docker load -i "$KIT/images/platform.tar"
   say "merging into $inst"
   merge
-  echo "Done. Register the new models in Concord with Add model."
+  echo "Done. Register the new models with Add model in the apps that use them."
 }
 
 check_docker

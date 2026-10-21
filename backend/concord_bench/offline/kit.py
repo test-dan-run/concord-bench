@@ -4,13 +4,16 @@ Concord writes beside the platform's bundle.
 ```
 concord-offline-<name>-<date>/
   README.md  manifest.json  SHA256SUMS  install.sh
-  images/concord.tar        full kit only
+  images/concord-bench.tar  full kit with Concord Bench
+  images/concord-label.tar  full kit with Concord Label
   images/platform.tar       every chosen model's image, one docker save
   platform/                 trimmed platform tree (the platform's bundle.py --platform-tree)
   assets/                   weights in AI_ASSETS layout
-  concord/compose.yml       full kit only
+  concord/compose.yml       full kit only: one service per app in the kit (CONTRACTS.md §6)
   bundle.json               the platform's report: services, image ids, weight paths, sizes
 ```
+
+A full kit holds one or both apps; `manifest.json` lists them as `"apps": [{"app", "image", "tar"}]`.
 
 `manifest.json` lists the sha256 of every other file; `SHA256SUMS` holds the same checksums (plus
 the manifest's) in `sha256sum -c` format, so `install.sh` can verify a kit before Concord is loaded.
@@ -125,39 +128,82 @@ def verify(kit: Path, progress: Progress | None = None) -> list[str]:
 
 # ---------------------------------------------------------------- files Concord writes into a kit
 
-COMPOSE = """\
-# Concord on the offline machine. Written by Concord's offline export; install.sh writes .env beside it.
-# platform/ and assets/ are mounted at the same absolute path they have on the host: Concord runs
-# `docker compose` for the platform against the host's Docker daemon, which resolves the platform's
-# ${AI_ASSETS} bind mounts on the host.
+# How each app runs in a kit (CONTRACTS.md §6), so either app can write the compose entry for the other.
+# `url_env` is the variable the other app gets, pointing at this one, when both are in the kit.
+APPS: dict[str, dict[str, Any]] = {
+    "concord-bench": {"title": "Concord Bench", "port": 8600, "image_env": "BENCH_IMAGE", "volume": "bench-data",
+                      "url_env": "BENCH_URL", "module": "concord_bench"},
+    "concord-label": {"title": "Concord Label", "port": 8620, "image_env": "LABEL_IMAGE", "volume": "label-data",
+                      "url_env": "LABEL_URL", "module": "concord_label"},
+}
+
+
+def app_tar(app: str) -> str:
+    """An app's image tar, relative to the kit."""
+    return f"images/{app}.tar"
+
+
+def app_url(app: str, host: str | None = None) -> str:
+    return f"http://{host or app}:{APPS[app]['port']}"
+
+
+COMPOSE_HEAD = """\
+# Concord on the offline machine (CONTRACTS.md §6). Written by Concord's offline export; install.sh writes
+# KIT_DIR and the image tags into concord/.env beside it. platform/ and assets/ are mounted at the same
+# absolute path they have on the host: the apps run `docker compose` for the platform against the host's
+# Docker daemon, which resolves the platform's ${AI_ASSETS} bind mounts on the host.
 name: ${CONCORD_PROJECT:-concord}
 services:
-  concord:
-    image: ${CONCORD_IMAGE:?install.sh writes CONCORD_IMAGE into concord/.env}
+"""
+
+COMPOSE_SERVICE = """\
+  {app}:
+    image: ${{{image_env}:?install.sh writes {image_env} into concord/.env}}
+    hostname: {app}
     restart: unless-stopped
     networks: [platform]
-    ports: ["127.0.0.1:${CONCORD_PORT:-8600}:8600"]
+    ports: ["127.0.0.1:{port}:{port}"]
     environment:
-      PLATFORM_DIR: ${KIT_DIR}/platform
-      AICORE_ENDPOINTS: ${KIT_DIR}/platform/clients/aicore/src/aicore/endpoints.generated.yaml
+      PLATFORM_DIR: ${{KIT_DIR}}/platform
+      AICORE_ENDPOINTS: ${{KIT_DIR}}/platform/clients/aicore/src/aicore/endpoints.generated.yaml
       UV_OFFLINE: "1"
-    volumes:
+{peers}    volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - ${KIT_DIR:?install.sh writes KIT_DIR into concord/.env}/platform:${KIT_DIR}/platform
-      - ${KIT_DIR}/assets:${KIT_DIR}/assets:ro
-      - data:/data
+      - {platform}:${{KIT_DIR}}/platform
+      - ${{KIT_DIR}}/assets:${{KIT_DIR}}/assets:ro
+      - {volume}:/data
+"""
+
+COMPOSE_TAIL = """\
 networks:
   platform:
     name: ${AI_NETWORK:-ai-net}
     external: true
 volumes:
-  data: {}
 """
 
 
-def install_script(kind: str, name: str, concord_image: str | None, gpu_services: list[str]) -> str:
-    values = {"@KIND@": kind, "@NAME@": name, "@CONCORD_IMAGE@": concord_image or "",
-              "@GPU_SERVICES@": " ".join(gpu_services)}
+def compose(apps: list[str]) -> str:
+    """concord/compose.yml for these apps: one service each, and the peer URLs only when both are in the kit."""
+    apps = [a for a in APPS if a in apps]
+    if not apps:
+        raise KitError("a full kit needs at least one app")
+    text = COMPOSE_HEAD
+    for i, app in enumerate(apps):
+        a = APPS[app]
+        peers = "".join(f"      {APPS[o]['url_env']}: {app_url(o)}\n" for o in apps if o != app)
+        platform = "${KIT_DIR:?install.sh writes KIT_DIR into concord/.env}/platform" if i == 0 else "${KIT_DIR}/platform"
+        text += COMPOSE_SERVICE.format(app=app, image_env=a["image_env"], port=a["port"], peers=peers,
+                                       platform=platform, volume=a["volume"])
+    return text + COMPOSE_TAIL + "".join(f"  {APPS[a]['volume']}: {{}}\n" for a in apps)
+
+
+def install_script(kind: str, name: str, apps: dict[str, str], gpu_services: list[str], this_app: str) -> str:
+    """install.sh from its template. `apps` maps each app in the kit to its image (empty for a model kit);
+    `this_app` wrote the kit: its CLI merges a model kit into an install whose concord/.env predates S7."""
+    values = {"@KIND@": kind, "@NAME@": name, "@BENCH_IMAGE@": apps.get("concord-bench", ""),
+              "@LABEL_IMAGE@": apps.get("concord-label", ""), "@GPU_SERVICES@": " ".join(gpu_services),
+              "@THIS_MODULE@": APPS[this_app]["module"]}
     text = INSTALL_SH.read_text()
     for k, v in values.items():
         text = text.replace(k, v)
@@ -182,15 +228,30 @@ def readme(manifest: dict[str, Any]) -> str:
     services = manifest["services"]
     gpu = [s for s in services if s["gpu"]]
     total = sum(s["gpu_fraction"] for s in services)
+    apps = manifest.get("apps") or []
+    writer = APPS[manifest["concord"]["app"]]
+    titles = " and ".join(APPS[a["app"]]["title"] for a in apps)
     lines = [
         f"# Concord offline kit: `{name}`",
         "",
-        ("A **full kit**: Concord, a trimmed platform and the models below. Use it once, to set up a machine "
+        (f"A **full kit**: {titles}, a trimmed platform and the models below. Use it once, to set up a machine "
          "without internet access." if kind == "full" else
          "A **model kit**: the models below only. It adds them to a machine that already has a full kit installed."),
-        f"Written {manifest['created_at'][:10]} by Concord {manifest['concord']['version']}"
-        + (f" (`{manifest['concord']['image']}`)" if kind == "full" else "") + ".",
+        f"Written {manifest['created_at'][:10]} by {writer['title']} {manifest['concord']['version']}.",
         "",
+    ]
+    if apps:
+        lines += [
+            "| app | image | tar | address after install |",
+            "|---|---|---|---|",
+            *[f"| {APPS[a['app']]['title']} | `{a['image']}` | `{a['tar']}` | http://127.0.0.1:{APPS[a['app']]['port']} |"
+              for a in apps],
+            "",
+        ]
+        if len(apps) > 1:
+            lines += ["Both apps run from one `concord/compose.yml` and know each other's address (`BENCH_URL`, "
+                      "`LABEL_URL`), so Send to Bench and Open in Label work between them.", ""]
+    lines += [
         "| service | kind | engine | tasks | image | image size | weights | GPU |",
         "|---|---|---|---|---|---|---|---|",
         *[_service_row(s) for s in services],
@@ -218,14 +279,16 @@ def readme(manifest: dict[str, Any]) -> str:
         lines += [
             "1. Copy this folder to the offline machine, to where it should live: it becomes the install, and "
             "its path is written into `platform/.env` and `concord/.env` (to move it later, run `./install.sh` again).",
-            "2. `./install.sh` checks every file against `SHA256SUMS`, loads `images/concord.tar` and "
-            "`images/platform.tar`, writes `platform/.env` (`AI_ASSETS=<this folder>/assets`, `HF_HUB_OFFLINE=1`) "
-            "and `concord/.env`, creates the platform's Docker network and starts Concord from `concord/compose.yml`. "
-            "`--internal` creates the network with no outside access; `CONCORD_PORT` (default 8600) picks the port.",
-            "3. Open http://127.0.0.1:8600 and register each model with **Add model**: the compatibility check "
-            "runs on this machine's hardware and images. No registrations, scores or datasets come with the kit.",
+            "2. `./install.sh` checks every file against `SHA256SUMS`, loads "
+            + ", ".join(f"`{a['tar']}`" for a in apps) + " and `images/platform.tar`, writes `platform/.env` "
+            "(`AI_ASSETS=<this folder>/assets`, `HF_HUB_OFFLINE=1`) and `concord/.env`, creates the platform's Docker "
+            f"network and starts {titles} from `concord/compose.yml`. `--internal` creates the network with no "
+            "outside access.",
+            "3. Open " + " and ".join(f"http://127.0.0.1:{APPS[a['app']]['port']}" for a in apps) + " and register "
+            "each model with **Add model**: the compatibility check runs on this machine's hardware and images. "
+            "No registrations, scores or datasets come with the kit.",
             "",
-            "Concord mounts `platform/` and `assets/` at the same absolute path as on the host, because the "
+            "The apps mount `platform/` and `assets/` at the same absolute path as on the host, because the "
             "platform's `docker compose` runs on the host's daemon.",
         ]
     else:
@@ -235,14 +298,14 @@ def readme(manifest: dict[str, Any]) -> str:
             "checksums, refuses a service the install already has with a different image unless `--replace` "
             "is given, loads `images/platform.tar`, copies `assets/`, `services/*.yaml` and `custom/<name>/` into "
             "the install and validates its platform.",
-            "3. Register the new models in Concord with **Add model**.",
+            "3. Register the new models with **Add model** in the apps that use them.",
         ]
     lines += [
         "",
         "## Verify",
         "",
-        "`sha256sum -c SHA256SUMS` from this folder, or `python -m concord_bench.cli verify-kit <this folder>` "
-        "with Concord. `install.sh` does this first.",
+        f"`sha256sum -c SHA256SUMS` from this folder, or `python -m {writer['module']}.cli verify-kit <this folder>` "
+        f"with {writer['title']}. `install.sh` does this first.",
         "",
     ]
     return "\n".join(lines)

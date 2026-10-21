@@ -78,15 +78,20 @@ class FakeBundle:
         return types.SimpleNamespace(stdout=io.StringIO("\n".join(out) + "\n"), wait=lambda: self.code)
 
 
+THIS, PEER = "concord-bench", "concord-label"
+SAMPLE_COMPOSE = Path(__file__).resolve().parents[1] / "contracts" / "samples" / "kit" / "compose.yml"
+
+
 @pytest.fixture
 def docker(monkeypatch):
-    """Concord images present; `docker save` of the Concord image writes a placeholder."""
+    """Both apps' images present locally (`docker images` lists <app>:0.2.0); `docker save` writes a placeholder."""
     saved = []
     monkeypatch.setattr(export, "image_facts", lambda ref: {"id": f"sha256:{ref}", "bytes": 1_800_000_000})
+    monkeypatch.setattr(export, "local_tags", lambda repo: [f"{repo}:0.2.0"])
 
     def save(ref, dest):
         saved.append(ref)
-        dest.write_bytes(b"concord image")
+        dest.write_bytes(b"app image " + ref.encode())
 
     monkeypatch.setattr(export, "save_image", save)
     return saved
@@ -97,21 +102,23 @@ def docker(monkeypatch):
 def test_full_kit_layout_and_manifest(tmp_path, docker):
     bundle = FakeBundle(rows=(SILERO, WHISPER))
     marks = []
-    out = export.export(["silero-vad", "whisper-large-v3"], "full", tmp_path, "concord-bench:0.2.0",
+    out = export.export(["silero-vad", "whisper-large-v3"], "full", tmp_path, {THIS: f"{THIS}:0.2.0"},
                         log=lambda m: None, progress=lambda p, m: marks.append(p), runner=bundle)
     k = Path(out["path"])
     assert k.parent == tmp_path and k.name.startswith("concord-offline-silero-vad-whisper-large-v3-")
     cmd = bundle.cmd[bundle.cmd.index("tools/bundle.py") + 1:]
     assert cmd == ["silero-vad", "whisper-large-v3", "--dir", str(k), "--with-images", "--with-weights", "--platform-tree"]
-    for rel in ("README.md", "manifest.json", "SHA256SUMS", "install.sh", "images/concord.tar", "images/platform.tar",
+    for rel in ("README.md", "manifest.json", "SHA256SUMS", "install.sh", f"images/{THIS}.tar", "images/platform.tar",
                 "platform/config.yaml", "assets/whisper-large-v3/model.bin", "concord/compose.yml", "bundle.json"):
         assert (k / rel).is_file(), rel
-    assert docker == ["concord-bench:0.2.0"]
+    assert not (k / "images" / "concord.tar").exists() and not (k / "images" / f"{PEER}.tar").exists()
+    assert docker == [f"{THIS}:0.2.0"]
     m = json.loads((k / "manifest.json").read_text())
     assert m["kind"] == "full" and m["format"] == 1 and m["name"] == k.name
-    assert m["concord"] == {"version": "0.2.0", "image": "concord-bench:0.2.0", "image_id": "sha256:concord-bench:0.2.0"}
+    assert m["concord"] == {"app": THIS, "version": "0.2.0"}
+    assert m["apps"] == [{"app": THIS, "image": f"{THIS}:0.2.0", "tar": f"images/{THIS}.tar"}]
     assert m["images"] == {"platform.tar": ["ghcr.io/owner/silero-vad:0.1.0", "vllm/vllm-openai:v0.31.0"],
-                           "concord.tar": ["concord-bench:0.2.0"]}
+                           f"{THIS}.tar": [f"{THIS}:0.2.0"]}
     assert [s["name"] for s in m["services"]] == ["silero-vad", "whisper-large-v3"]
     assert m["services"][1]["weights"] == {"kind": "local", "path": "whisper-large-v3", "bytes": 3_090_000_000,
                                            "revision": None}
@@ -121,25 +128,94 @@ def test_full_kit_layout_and_manifest(tmp_path, docker):
     assert out["bytes"] == sum(f.stat().st_size for f in k.rglob("*") if f.is_file())
     script = (k / "install.sh").read_text()
     assert os.access(k / "install.sh", os.X_OK) and "@" not in script.split("set -euo pipefail")[1].split("KIT=")[0]
-    assert 'KIT_KIND="full"' in script and 'CONCORD_IMAGE="concord-bench:0.2.0"' in script
+    assert 'KIT_KIND="full"' in script and f'{ENV[THIS]}="{THIS}:0.2.0"' in script
+    assert f'{ENV[PEER]}=""' in script and f'THIS_MODULE="{THIS.replace("-", "_")}"' in script
     assert 'GPU_SERVICES="whisper-large-v3"' in script
     readme = (k / "README.md").read_text()
     assert "full kit" in readme and "| whisper-large-v3 | model | vllm |" in readme and "driver >= 580" in readme
+    assert f"`images/{THIS}.tar`" in readme and f"http://127.0.0.1:{PORT[THIS]}" in readme
     compose = yaml.safe_load((k / "concord" / "compose.yml").read_text())
-    vols = compose["services"]["concord"]["volumes"]
-    assert "${KIT_DIR}/assets:${KIT_DIR}/assets:ro" in vols and any(v.endswith("/platform:${KIT_DIR}/platform") for v in vols)
-    assert compose["services"]["concord"]["environment"]["UV_OFFLINE"] == "1"
+    assert compose == one_app_sample(THIS)  # the sample's service for this app, with no peer URL
     assert kit.verify(k) == []
 
 
-def test_model_kit_has_no_concord(tmp_path, docker):
-    out = export.export(["whisper-large-v3"], "models", tmp_path, log=lambda m: None,
+ENV = {"concord-bench": "BENCH_IMAGE", "concord-label": "LABEL_IMAGE"}
+PORT = {"concord-bench": 8600, "concord-label": 8620}
+
+
+def one_app_sample(app: str) -> dict:
+    """contracts/samples/kit/compose.yml cut down to one app, as CONTRACTS.md §6 describes a one-app kit."""
+    sample = yaml.safe_load(SAMPLE_COMPOSE.read_text())
+    svc = sample["services"][app]
+    for key in ("BENCH_URL", "LABEL_URL"):
+        svc["environment"].pop(key, None)
+    svc["volumes"][1] = "${KIT_DIR:?install.sh writes KIT_DIR into concord/.env}/platform:${KIT_DIR}/platform"
+    vol = svc["volumes"][-1].split(":")[0]
+    return {**sample, "services": {app: svc}, "volumes": {vol: {}}}
+
+
+def test_two_app_kit_matches_the_contract_sample(tmp_path, docker):
+    out = export.export(["silero-vad"], "full", tmp_path, {PEER: None, THIS: None}, log=lambda m: None,
+                        runner=FakeBundle())
+    k = Path(out["path"])
+    assert sorted(docker) == ["concord-bench:0.2.0", "concord-label:0.2.0"]  # the other app's by its contract name
+    assert (k / "images" / "concord-bench.tar").read_bytes() == b"app image concord-bench:0.2.0"
+    assert (k / "images" / "concord-label.tar").read_bytes() == b"app image concord-label:0.2.0"
+    m = json.loads((k / "manifest.json").read_text())
+    assert m["apps"] == [{"app": "concord-bench", "image": "concord-bench:0.2.0", "tar": "images/concord-bench.tar"},
+                         {"app": "concord-label", "image": "concord-label:0.2.0", "tar": "images/concord-label.tar"}]
+    assert m["concord"] == {"app": THIS, "version": "0.2.0"}
+    assert m["images"]["concord-bench.tar"] == ["concord-bench:0.2.0"]
+    assert m["images"]["concord-label.tar"] == ["concord-label:0.2.0"]
+    text = (k / "concord" / "compose.yml").read_text()
+    assert yaml.safe_load(text) == yaml.safe_load(SAMPLE_COMPOSE.read_text())
+    script = (k / "install.sh").read_text()
+    assert 'BENCH_IMAGE="concord-bench:0.2.0"' in script and 'LABEL_IMAGE="concord-label:0.2.0"' in script
+    readme = (k / "README.md").read_text()
+    assert "Concord Bench and Concord Label" in readme and "http://127.0.0.1:8600" in readme
+    assert "http://127.0.0.1:8620" in readme and "`images/concord-label.tar`" in readme
+    assert kit.verify(k) == []
+
+
+def test_kit_with_only_the_other_app(tmp_path, docker, monkeypatch):
+    monkeypatch.setattr(export, "local_tags", lambda repo: [f"{repo}:0.1.9", f"{repo}:0.3.0"])
+    k = Path(export.export(["silero-vad"], "full", tmp_path, {PEER: f"{PEER}:0.3.0"}, log=lambda m: None,
+                           runner=FakeBundle())["path"])
+    assert docker == [f"{PEER}:0.3.0"] and not (k / "images" / f"{THIS}.tar").exists()
+    m = json.loads((k / "manifest.json").read_text())
+    assert m["apps"] == [{"app": PEER, "image": f"{PEER}:0.3.0", "tar": f"images/{PEER}.tar"}]
+    assert m["concord"]["app"] == THIS  # this app wrote it, though it is not in it
+    assert yaml.safe_load((k / "concord" / "compose.yml").read_text()) == one_app_sample(PEER)
+    script = (k / "install.sh").read_text()
+    assert f'{ENV[THIS]}=""' in script and f'{ENV[PEER]}="{PEER}:0.3.0"' in script
+    # without a tag, the other app's default is its contract name when present, else the first local tag
+    assert export.default_image(PEER) == f"{PEER}:0.1.9"
+    monkeypatch.setattr(export, "local_tags", lambda repo: [f"{repo}:0.1.9", f"{repo}:0.2.0"])
+    assert export.default_image(PEER) == f"{PEER}:0.2.0"
+
+
+def test_missing_other_app_image_fails_clearly(tmp_path, docker, monkeypatch):
+    monkeypatch.setattr(export, "local_tags", lambda repo: [])
+    title = "Concord Label" if PEER == "concord-label" else "Concord Bench"
+    with pytest.raises(export.ExportError, match=rf"no {title} image \({PEER}:<tag>\) found locally: run `just build` "
+                                                 rf"in the {title} repository"):
+        export.export(["silero-vad"], "full", tmp_path / "out", {THIS: None, PEER: None}, runner=FakeBundle())
+    with pytest.raises(export.ExportError, match="a full kit needs at least one app"):
+        export.export(["silero-vad"], "full", tmp_path / "out", {}, runner=FakeBundle())
+    with pytest.raises(export.ExportError, match="unknown app concord-improve"):
+        export.export(["silero-vad"], "full", tmp_path / "out", {"concord-improve": None}, runner=FakeBundle())
+    assert not (tmp_path / "out").exists()
+
+
+def test_model_kit_has_no_app(tmp_path, docker):
+    out = export.export(["whisper-large-v3"], "models", tmp_path, {THIS: None, PEER: None}, log=lambda m: None,
                         runner=FakeBundle(rows=(WHISPER,)))
     k = Path(out["path"])
     assert k.name.startswith("concord-offline-models-whisper-large-v3-")
-    assert not (k / "images" / "concord.tar").exists() and not (k / "concord").exists() and docker == []
+    assert not list((k / "images").glob("concord*.tar")) and not (k / "concord").exists() and docker == []
     m = json.loads((k / "manifest.json").read_text())
-    assert m["kind"] == "models" and m["concord"] == {"version": "0.2.0"} and "concord.tar" not in m["images"]
+    assert m["kind"] == "models" and m["concord"] == {"app": THIS, "version": "0.2.0"} and m["apps"] == []
+    assert list(m["images"]) == ["platform.tar"]
     assert "install.sh --add" in (k / "README.md").read_text()
     # a second export of the same set does not overwrite the first
     again = export.export(["whisper-large-v3"], "models", tmp_path, log=lambda m: None,
@@ -153,10 +229,10 @@ def test_failed_bundle_removes_the_partial_kit(tmp_path, docker):
     assert list(tmp_path.iterdir()) == []
 
 
-def test_missing_concord_image_fails_before_anything_is_written(tmp_path, monkeypatch):
+def test_missing_app_image_fails_before_anything_is_written(tmp_path, monkeypatch):
     monkeypatch.setattr(export, "image_facts", lambda ref: None)
-    with pytest.raises(export.ExportError, match="Concord image concord-bench:9.9.9 is not present"):
-        export.export(["silero-vad"], "full", tmp_path / "out", "concord-bench:9.9.9", runner=FakeBundle())
+    with pytest.raises(export.ExportError, match=f"image {THIS}:9.9.9 is not present locally: run `just build`"):
+        export.export(["silero-vad"], "full", tmp_path / "out", {THIS: f"{THIS}:9.9.9"}, runner=FakeBundle())
     assert not (tmp_path / "out").exists()
 
 
@@ -187,9 +263,21 @@ def test_cli_verify_kit(tmp_path, docker, capsys):
 
     k = Path(export.export(["silero-vad"], "full", tmp_path, log=lambda m: None, runner=FakeBundle())["path"])
     assert cli.main(["verify-kit", str(k)]) == 0
-    (k / "images" / "concord.tar").write_bytes(b"x")
+    (k / "images" / f"{THIS}.tar").write_bytes(b"x")
     assert cli.main(["verify-kit", str(k)]) == 1
-    assert "size differs: images/concord.tar" in capsys.readouterr().out
+    assert f"size differs: images/{THIS}.tar" in capsys.readouterr().out
+
+
+def test_cli_export_offline_with_both_apps(tmp_path, docker, monkeypatch, capsys):
+    from concord_bench import cli
+
+    seen = {}
+    monkeypatch.setattr(export, "export", lambda names, kind, dest, apps, name: seen.update(apps=apps) or {"path": "k"})
+    assert cli.main(["export-offline", "silero-vad", "--out", str(tmp_path), "--app", THIS,
+                     "--app", f"{PEER}={PEER}:0.3.0"]) == 0
+    assert seen["apps"] == {THIS: None, PEER: f"{PEER}:0.3.0"}
+    assert cli.main(["export-offline", "silero-vad", "--out", str(tmp_path)]) == 0
+    assert seen["apps"] is None  # this app only
 
 
 # ---------------------------------------------------------------- preview
@@ -200,17 +288,31 @@ def test_preview_warnings_and_problems(tmp_path, monkeypatch):
         warnings=["together these need 1.2 of the GPU, over util_limit 0.93; ..."]))
     monkeypatch.setattr(export, "image_facts", lambda ref: None)
     monkeypatch.setattr(export, "free_bytes", lambda dest: 10_000_000_000)
-    pv = export.preview(["silero-vad", "whisper-large-v3"], "full", tmp_path / "kits", "concord-bench:0.2.0")
-    assert pv["problems"][0].startswith("Concord image concord-bench:0.2.0 is not present locally")
+    pv = export.preview(["silero-vad", "whisper-large-v3"], "full", tmp_path / "kits", {THIS: f"{THIS}:0.2.0"})
+    assert pv["problems"][0].endswith(f"image {THIS}:0.2.0 is not present locally: run `just build` in the "
+                                      f"{pv['apps'][0]['title']} repository")
     assert "not found at /a" in pv["problems"][1]
     assert any("over util_limit" in w for w in pv["warnings"])
     assert any("may need up to" in w and "10.0 GB free" in w for w in pv["warnings"])
     assert pv["bytes"] == SILERO["image_bytes"] + WHISPER["image_bytes"] + SILERO["weights_bytes"] + WHISPER["weights_bytes"]
     assert pv["kit"].startswith(str(tmp_path / "kits" / "concord-offline-silero-vad-whisper-large-v3-"))
     rel = export.preview(["silero-vad"], "models", Path("relative/dir"))
-    assert rel["problems"][0] == "destination relative/dir is not an absolute path" and rel["concord"] is None
+    assert rel["problems"][0] == "destination relative/dir is not an absolute path" and rel["apps"] == []
     with pytest.raises(export.ExportError, match="kind must be"):
         export.preview(["silero-vad"], "everything", tmp_path)
+
+
+def test_preview_counts_the_app_images(tmp_path, monkeypatch, docker):
+    monkeypatch.setattr(export, "dry_run", lambda names: report(SILERO))
+    monkeypatch.setattr(export, "free_bytes", lambda dest: 10**13)
+    one = export.preview(["silero-vad"], "full", tmp_path)
+    both = export.preview(["silero-vad"], "full", tmp_path, {THIS: None, PEER: None})
+    assert [a["app"] for a in one["apps"]] == [THIS] and one["apps_bytes"] == 1_800_000_000
+    assert [a["app"] for a in both["apps"]] == ["concord-bench", "concord-label"] and both["problems"] == []
+    assert [a["tar"] for a in both["apps"]] == ["images/concord-bench.tar", "images/concord-label.tar"]
+    assert both["bytes"] == one["bytes"] + 1_800_000_000 == report(SILERO)["bytes"] + 3_600_000_000
+    none = export.preview(["silero-vad"], "full", tmp_path, {})
+    assert none["problems"] == ["a full kit needs at least one app: include Concord Bench, Concord Label or both"]
 
 
 def test_kit_name():
@@ -233,19 +335,32 @@ def test_api_preview_export_job_and_history(client, tmp_path, monkeypatch, docke
                         real(args, log, progress, runner=FakeBundle(rows=(SILERO,))))
     table = client.get("/api/offline/services").json()
     assert [r["name"] for r in table["services"]] == ["silero-vad", "whisper-large-v3"]
-    assert table["services"][0]["model_id"] is None and table["default_image"] == "concord-bench:0.2.0"
-    assert [i["image"] for i in table["concord_images"]] == ["concord-bench:0.2.0"]
+    assert table["services"][0]["model_id"] is None
+    apps = {a["app"]: a for a in table["apps"]}
+    assert list(apps) == ["concord-bench", "concord-label"] and apps[THIS]["own"] and not apps[PEER]["own"]
+    assert apps[THIS]["default_image"] == f"{THIS}:0.2.0" and apps[PEER]["default_image"] == f"{PEER}:0.2.0"
+    assert apps[PEER]["images"] == [{"image": f"{PEER}:0.2.0", "present": True, "bytes": 1_800_000_000}]
+    assert apps["concord-label"]["port"] == 8620
 
     dest = tmp_path / "kits"
     pv = client.get("/api/offline/preview", params={"services": "silero-vad", "kind": "full", "dest": str(dest)})
-    assert pv.status_code == 200 and pv.json()["problems"] == []
+    assert pv.status_code == 200 and pv.json()["problems"] == [] and [a["app"] for a in pv.json()["apps"]] == [THIS]
+    pv = client.get("/api/offline/preview", params={"services": "silero-vad", "kind": "full", "dest": str(dest),
+                                                     "apps": f"{THIS},{PEER}={PEER}:0.2.0"}).json()
+    assert [(a["app"], a["image"]) for a in pv["apps"]] == [("concord-bench", "concord-bench:0.2.0"),
+                                                            ("concord-label", "concord-label:0.2.0")]
+    assert client.get("/api/offline/preview", params={"services": "silero-vad", "apps": "concord-x"}).status_code == 422
     assert client.post("/api/offline/exports", json={"services": ["silero-vad"], "dest": "relative"}).status_code == 422
     assert client.post("/api/offline/exports", json={"services": ["silero-vad"], "name": "../x"}).status_code == 422
+    assert client.post("/api/offline/exports", json={"services": ["silero-vad"], "apps": {}}).status_code == 422
 
-    r = client.post("/api/offline/exports", json={"services": ["silero-vad"], "kind": "full", "dest": str(dest)})
+    r = client.post("/api/offline/exports", json={"services": ["silero-vad"], "kind": "full", "dest": str(dest),
+                                                  "apps": {THIS: None, PEER: f"{PEER}:0.2.0"}})
     assert r.status_code == 202, r.text
     job_id = r.json()["export"]["job_id"]
-    assert r.json()["export"]["status"] == "queued" and r.json()["export"]["concord_image"] == "concord-bench:0.2.0"
+    assert r.json()["export"]["status"] == "queued"
+    assert r.json()["export"]["concord_image"] == "concord-bench:0.2.0, concord-label:0.2.0"
+    assert r.json()["export"]["app_images"] == ["concord-bench:0.2.0", "concord-label:0.2.0"]
     assert jobs.run_pending() == 1
     job = client.get(f"/api/jobs/{job_id}").json()
     assert job["status"] == "done", job
@@ -254,6 +369,7 @@ def test_api_preview_export_job_and_history(client, tmp_path, monkeypatch, docke
     hist = client.get("/api/offline/exports").json()
     assert hist[0]["status"] == "done" and Path(hist[0]["path"]).parent == dest and hist[0]["bytes"] > 0
     assert hist[0]["job"]["status"] == "done"
+    assert (Path(hist[0]["path"]) / "images" / "concord-label.tar").is_file()
 
 
 def test_failed_export_job_is_recorded_and_retried(client, tmp_path, monkeypatch, docker):
@@ -330,7 +446,7 @@ def install(tmp_path):
                                       _svc("whisper-large-v3", 8101, engine="vllm")])
     (root / "assets" / "silero-vad").mkdir(parents=True)
     (root / "concord").mkdir()
-    (root / "concord" / ".env").write_text("CONCORD_IMAGE=concord-bench:0.2.0\n")
+    (root / "concord" / ".env").write_text("KIT_DIR=x\nBENCH_IMAGE=concord-bench:0.2.0\nLABEL_IMAGE=concord-label:0.2.0\n")
     return root
 
 
@@ -432,24 +548,65 @@ def test_install_sh_full_kit_against_a_fake_docker(tmp_path, docker):
     bin_dir.mkdir()
     (bin_dir / "docker").write_text(FAKE_DOCKER)
     (bin_dir / "docker").chmod(stat.S_IRWXU)
-    env = {"PATH": f"{bin_dir}:/usr/bin:/bin", "DOCKER_LOG": str(tmp_path / "docker.log"), "CONCORD_PORT": "8613",
+    env = {"PATH": f"{bin_dir}:/usr/bin:/bin", "DOCKER_LOG": str(tmp_path / "docker.log"),
            "CONCORD_PROJECT": "concord-test"}
     assert subprocess.run(["bash", "-n", str(k / "install.sh")]).returncode == 0
     r = subprocess.run([str(k / "install.sh"), "--internal"], env=env, capture_output=True, text=True)
     assert r.returncode == 0, r.stdout + r.stderr
     calls = (tmp_path / "docker.log").read_text().splitlines()
-    assert calls[:3] == ["info", "compose version", f"load -i {k}/images/concord.tar"]
-    assert f"load -i {k}/images/platform.tar" in calls and "network create --internal ai-net" in calls
+    assert calls[:4] == ["info", "compose version", f"load -i {k}/images/{THIS}.tar", f"load -i {k}/images/platform.tar"]
+    assert "network create --internal ai-net" in calls
     assert calls[-1] == f"compose --env-file {k}/concord/.env -f {k}/concord/compose.yml up -d"
     assert (k / "platform" / ".env").read_text() == f"AI_ASSETS={k}/assets\nHF_HUB_OFFLINE=1\n"
-    assert (k / "concord" / ".env").read_text() == (f"KIT_DIR={k}\nCONCORD_IMAGE=concord-bench:0.2.0\nCONCORD_PORT=8613\n"
+    assert (k / "concord" / ".env").read_text() == (f"KIT_DIR={k}\n{ENV[THIS]}={THIS}:0.2.0\n"
                                                     "CONCORD_PROJECT=concord-test\nAI_NETWORK=ai-net\n")
-    assert (k / "assets" / "hf-cache").is_dir() and "http://127.0.0.1:8613" in r.stdout
+    assert (k / "assets" / "hf-cache").is_dir()
+    assert f"http://127.0.0.1:{PORT[THIS]}" in r.stdout and f"http://127.0.0.1:{PORT[PEER]}" not in r.stdout
     assert "whisper-large-v3 need an NVIDIA GPU" in r.stderr  # no nvidia-smi on this PATH
     # a second run neither re-verifies nor reloads
     (tmp_path / "docker.log").unlink()
     assert subprocess.run([str(k / "install.sh")], env=env, capture_output=True).returncode == 0
     assert not any(c.startswith("load") for c in (tmp_path / "docker.log").read_text().splitlines())
+
+
+def fake_docker(tmp_path: Path) -> dict[str, str]:
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "docker").write_text(FAKE_DOCKER)
+    (bin_dir / "docker").chmod(stat.S_IRWXU)
+    return {"PATH": f"{bin_dir}:/usr/bin:/bin", "DOCKER_LOG": str(tmp_path / "docker.log")}
+
+
+def test_install_sh_two_app_kit_and_add_runs_in_an_app_image(tmp_path, docker):
+    k = Path(export.export(["silero-vad"], "full", tmp_path / "kits", {THIS: None, PEER: None}, log=lambda m: None,
+                           runner=FakeBundle())["path"])
+    env = fake_docker(tmp_path)
+    r = subprocess.run([str(k / "install.sh")], env=env, capture_output=True, text=True)
+    assert r.returncode == 0, r.stdout + r.stderr
+    calls = (tmp_path / "docker.log").read_text().splitlines()
+    assert [c for c in calls if c.startswith("load")] == [f"load -i {k}/images/concord-bench.tar",
+                                                          f"load -i {k}/images/concord-label.tar",
+                                                          f"load -i {k}/images/platform.tar"]
+    assert "network create ai-net" in calls
+    assert (k / "concord" / ".env").read_text() == (f"KIT_DIR={k}\nBENCH_IMAGE=concord-bench:0.2.0\n"
+                                                    "LABEL_IMAGE=concord-label:0.2.0\nCONCORD_PROJECT=concord\n"
+                                                    "AI_NETWORK=ai-net\n")
+    assert "Concord Bench: http://127.0.0.1:8600" in r.stdout and "Concord Label: http://127.0.0.1:8620" in r.stdout
+
+    # a model kit merged in: the merge runs in Concord Bench's image when the install has it, else in Label's
+    mk = Path(export.export(["whisper-large-v3"], "models", tmp_path / "kits", log=lambda m: None,
+                            runner=FakeBundle(rows=(WHISPER,)))["path"])
+    for dotenv, image, module in ((k / "concord" / ".env", "concord-bench:0.2.0", "concord_bench"),
+                                  ("KIT_DIR=x\nLABEL_IMAGE=concord-label:0.3.0\n", "concord-label:0.3.0", "concord_label"),
+                                  (f"CONCORD_IMAGE={THIS}:0.1.0\n", f"{THIS}:0.1.0", THIS.replace("-", "_"))):
+        if isinstance(dotenv, str):
+            (k / "concord" / ".env").write_text(dotenv)
+        (tmp_path / "docker.log").unlink()
+        r = subprocess.run([str(mk / "install.sh"), "--add", str(k)], env=env, capture_output=True, text=True)
+        assert r.returncode == 0, r.stdout + r.stderr
+        runs = [c for c in (tmp_path / "docker.log").read_text().splitlines() if c.startswith("run ")]
+        assert len(runs) == 2 and all(f" {image} python -m {module}.cli add-kit {mk} {k}" in c for c in runs), runs
+        assert runs[0].endswith("--check") and f"load -i {mk}/images/platform.tar" in (tmp_path / "docker.log").read_text()
 
 
 def test_install_sh_refuses_a_damaged_kit_and_the_wrong_mode(tmp_path, docker):

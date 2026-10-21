@@ -327,7 +327,8 @@ class OfflineExport(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     kind: Mapped[str] = mapped_column(String(8))  # full | models
     services: Mapped[list[str]] = mapped_column(default=list)
-    concord_image: Mapped[str | None] = mapped_column(String(300))  # full kits only
+    # Full kits only: the app images in the kit, ", "-separated (CONTRACTS.md §6).
+    concord_image: Mapped[str | None] = mapped_column(String(300))
     dest: Mapped[str] = mapped_column(String(1000))  # the folder the kit is written into
     name: Mapped[str | None] = mapped_column(String(200))
     status: Mapped[str] = mapped_column(String(16), default="queued")  # queued | running | done | failed

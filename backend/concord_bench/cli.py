@@ -23,7 +23,10 @@ def main(argv: list[str] | None = None) -> int:
                     help="full: Concord + platform + models (sets up a machine); models: models only (default full)")
     ex.add_argument("--out", help="folder the kit is written into (default: CONCORD_DATA/offline)")
     ex.add_argument("--name", help="kit name (default: from the services)")
-    ex.add_argument("--concord-image", help="Concord image for a full kit (default: CONCORD_IMAGE, concord-bench)")
+    ex.add_argument("--app", action="append", metavar="APP[=IMAGE]",
+                    help="an app a full kit carries: concord-bench or concord-label, with its image (default: "
+                         "CONCORD_IMAGE for this app, the contract name for the other); repeat for both "
+                         "(default: this app only)")
     vk = sub.add_parser("verify-kit", help="check an offline kit's files against its manifest.json")
     vk.add_argument("kit")
     ak = sub.add_parser("add-kit", help="merge a model kit into an offline install (run by install.sh --add)")
@@ -62,8 +65,14 @@ def offline(args: argparse.Namespace) -> int:
         from .offline.export import ExportError, export
 
         dest = Path(args.out).expanduser().resolve() if args.out else paths.offline_kits()
+        apps = None
+        if args.app:
+            apps = {}
+            for a in args.app:
+                app, _, image = a.partition("=")
+                apps[app] = image or None
         try:
-            out = export(args.names, args.kind, dest, args.concord_image, args.name)
+            out = export(args.names, args.kind, dest, apps, args.name)
         except ExportError as exc:
             print(f"error: {exc}", file=sys.stderr)
             return 1

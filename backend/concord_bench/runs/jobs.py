@@ -218,7 +218,9 @@ def _handle_export(session: Session, job: Job, ctx: JobContext) -> dict[str, Any
     rec.status, rec.error = "running", None
     session.commit()
     try:
-        out = offline.export(p["services"], p["kind"], Path(p["dest"]), p.get("concord_image"), p.get("name"),
+        # jobs queued before kits could carry both apps name one image of this app
+        apps = p["apps"] if "apps" in p else {offline.THIS_APP: p["concord_image"]} if p.get("concord_image") else None
+        out = offline.export(p["services"], p["kind"], Path(p["dest"]), apps, p.get("name"),
                              ctx.log, ctx.progress)
     except Exception as exc:
         session.rollback()

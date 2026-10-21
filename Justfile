@@ -98,7 +98,7 @@ fixtures:
 record:
     {{py}} -m concord_bench.cli record --out {{recorded}}
 
-# offline kit of platform services: just export-offline NAME... [--kind full|models] [--out DIR] [--concord-image IMG]
+# offline kit of platform services: just export-offline NAME... [--kind full|models] [--out DIR] [--app APP[=IMAGE]]...
 export-offline +args:
     {{py}} -m concord_bench.cli export-offline {{args}}
 

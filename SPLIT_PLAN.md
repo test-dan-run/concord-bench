@@ -12,7 +12,7 @@ repositories:
 - **Concord Label**: pseudo-label audio, review it, and hand finished references to Bench.
 
 Annotation output from Label must reach Bench in a few clicks, on the same machine or on another one.
-The owner's decisions are in §12.
+Decisions the owner made on 2026-10-21 are marked "Decided" in the sections they shape.
 
 ---
 
@@ -52,7 +52,8 @@ Couplings that do not survive separate databases:
 
 ## 2. Repositories and packaging
 
-Two repositories, side by side under `dev/apps/`:
+**Decided: two repositories**, side by side under `dev/apps/`. Where the shared code lives is this plan's
+choice (see "Where core lives" below), not part of the decision.
 
 ```
 dev/apps/
@@ -76,7 +77,9 @@ dev/apps/
 ```
 
 - **Where core lives.** The shared packages stay in the Bench repository, as their own versioned packages.
-  Label depends on them by relative path, the same way Concord depends on the platform's `aicore` today:
+  This keeps the count at two repositories; a third repository holding only `packages/` is the
+  alternative (§11). Label depends on them by relative path, the same way Concord depends on the
+  platform's `aicore` today:
   - `pyproject.toml`: `concord-core = { path = "../Concord/packages/core", editable = true }`;
   - `package.json`: `"@concord/ui": "file:../Concord/packages/ui"`;
   - Label's Docker build gets the Bench repository as a named build context
@@ -91,7 +94,8 @@ dev/apps/
   repository, `concord_label` never imports `concord_improve`.
 - **Images**: `concord-bench` and `concord-label`. Each image runs its own API and worker. `concord-lite`,
   `concord-full` and `FEATURE_IMPROVE` go away from Bench.
-- **Ports**: Bench 8600 (unchanged), Label 8610. Development: Vite 5173 (Bench) and 5174 (Label).
+- **Names and ports (decided)**: Concord Bench on 8600 (unchanged), Concord Label on 8610. Development:
+  Vite 5173 (Bench) and 5174 (Label).
 - **Data**: each app has its own data directory and database (`CONCORD_DATA` in each repo's `.env`). Nothing
   is shared on disk, so the two can run on different machines.
 
@@ -144,7 +148,8 @@ For: turning audio into reviewed references.
 | Sync | label packages between Label installs | unchanged (PLAN.md §6, Import / export) |
 | Models, Jobs, Offline export | | shared pages |
 
-**Improve (Phase 3) stays on hold.** The `concord_improve` placeholder moves to the Label repository with
+**Decided: Improve (Phase 3) moves to Label and stays on hold.** It trains from labels, so it belongs
+with Label. The `concord_improve` placeholder moves to the Label repository with
 its import-linter contract. It is not installed in `concord-label`, there is no Training nav, and the
 disabled "Use for retraining" button is removed. When Phase 3 is scoped (PLAN.md Q5), Label gets a
 `concord-label-full` image and the feature flag back.
@@ -173,7 +178,8 @@ reader, validation), so Label's writer and Bench's reader cannot drift apart.
   outputs/           optional: seg-model outputs on whole files (§4.4)
 ```
 
-**Packages from other sources.** Bench accepts a package written by hand or by another tool. Only `audio/`
+**Decided: packages from other sources are accepted.** Bench takes a package written by hand or by
+another tool, not only one sent from Label. Only `audio/`
 (or files Bench already has) and one file under `refs/` are required. A manifest without a `source` makes a
 dataset with no provenance, so it has no Label links and no flags round trip. Without a manifest at all,
 Bench treats the folder like an annotated upload. A template package is generated with the other
@@ -272,9 +278,10 @@ Bench job is using mid-run.
 
 ## 7. Offline export after the split
 
-The offline kit code (OFFLINE_EXPORT_PLAN.md) moves to `concord-core`, and the export page to `@concord/ui`,
-so either app can write a kit. A full kit holds the app images that are ticked: Bench, Label, or both, with
-one `concord/compose.yml` that starts what is in the kit and sets `BENCH_URL` / `LABEL_URL` between them.
+**Decided: both apps can write a kit.** The offline kit code (OFFLINE_EXPORT_PLAN.md) moves to
+`concord-core`, and the export page to `@concord/ui`. A full kit holds the app images that are ticked:
+Bench, Label, or both, with one `concord/compose.yml` that starts what is in the kit and sets `BENCH_URL` /
+`LABEL_URL` between them.
 Model kits are unchanged. The air-gap test (`just test-offline`) stays in the Bench repository and gains a
 variant with both images.
 
@@ -282,8 +289,8 @@ variant with both images.
 
 ## 8. Starting empty
 
-Both apps start with empty data directories and databases. Nothing is migrated from today's
-`data/concord.db`.
+**Decided: both apps start empty**, with new data directories and databases. Nothing is migrated from
+today's `data/concord.db`.
 
 - Today's data stays where it is, untouched. The last single-app commit is tagged (`concord-single-app`) so
   the old app can still be run against it.
@@ -349,16 +356,3 @@ About 4 weeks for one developer. S5 can start once S2 is done, alongside S3 and 
 | Losing cache reuse between benchmarking and pseudo-labelling costs GPU time | Seg-model outputs travel in the package (§4.4); Label's own cache still serves re-fusing. |
 | Re-uploading datasets and re-registering models after the switch (§8) | Upload and Add model need no typed fields; labelling in progress moves with a label package. |
 | The S1 move breaks imports and paths (`CONCORD_HOME`, fixtures, `frontend/dist`) | S1 moves code only and must pass every existing test before anything else changes. |
-
----
-
-## 12. Decisions (owner, 2026-10-21)
-
-| # | Question | Decision |
-|---|---|---|
-| Q1 | Names and ports | Concord Bench on 8600, Concord Label on 8610. |
-| Q2 | One repository or two | Two. Shared code stays in the Bench repository as `concord-core` and `@concord/ui`, used by Label through path dependencies (§2). |
-| Q3 | Where Improve goes | Label, and it stays on hold: the placeholder moves, but no image installs it (§3.2). |
-| Q4 | Offline export after the split | Both apps can write a kit; a full kit holds either app or both (§7). |
-| Q5 | Existing data | Start both apps empty; no data migration (§8). |
-| Q6 | Reference packages from other sources | Accepted, including hand-made ones; provenance is optional (§4.1). |

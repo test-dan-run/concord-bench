@@ -1,8 +1,7 @@
 # Concord — Split into Bench and Label
 
-Planned and built 2026-10-21. Kept apart from [PLAN.md](PLAN.md) (Phases 1–3) and
-[OFFLINE_EXPORT_PLAN.md](OFFLINE_EXPORT_PLAN.md); references to them are written as "PLAN.md §N" and
-"OFFLINE_EXPORT_PLAN.md §N". Section numbers without a file name are in this document.
+Planned and built 2026-10-21. Kept apart from [PLAN.md](PLAN.md) (Phases 1–3); references to it are
+written as "PLAN.md §N". Section numbers without a file name are in this document.
 
 Concord today is one app with two jobs: benchmarking models on labelled data (Phase 1) and producing
 labels with pseudo-labelling and review (Phase 2). This plan splits it into two applications in two
@@ -321,8 +320,8 @@ the apps for this.
 
 ## 7. Offline export after the split
 
-**Decided: both apps can write a kit.** Each app keeps its copy of the offline kit code
-(OFFLINE_EXPORT_PLAN.md) and its export page. A full kit holds the app images that are ticked: this app,
+**Decided: both apps can write a kit.** Each app keeps its copy of the offline kit code (`offline/`)
+and its export page. A full kit holds the app images that are ticked: this app,
 the other app, or both, with one `concord/compose.yml` that starts what is in the kit and sets
 `BENCH_URL` / `LABEL_URL` between them. How to run each app (image, port, environment, mounts) is a
 contract (§2.3), so either app can write the compose entry for the other. Model kits are unchanged. The

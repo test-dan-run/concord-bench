@@ -1,4 +1,4 @@
-"""Export for offline (OFFLINE_EXPORT_PLAN.md §5): the platform registry with sizes, a preview,
+"""Export for offline: the platform registry with sizes, a preview,
 export jobs and their history. Kits are written to a folder on this machine; nothing goes through
 the browser."""
 

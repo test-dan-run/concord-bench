@@ -1,4 +1,4 @@
-"""`install.sh --add`: a model kit merged into an existing offline install (OFFLINE_EXPORT_PLAN.md §6).
+"""`install.sh --add`: a model kit merged into an existing offline install.
 
 Rules, per service of the kit:
 - not in the install: added (its manifest, its `custom/<name>/` folder, its weights);

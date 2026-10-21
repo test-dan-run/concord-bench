@@ -1,4 +1,4 @@
-"""The kit on disk (OFFLINE_EXPORT_PLAN.md §3): manifest, checksums, verification, and the files
+"""The kit on disk: manifest, checksums, verification, and the files
 Concord writes beside the platform's bundle.
 
 ```

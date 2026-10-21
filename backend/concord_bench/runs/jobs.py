@@ -7,7 +7,7 @@ Job types:
 - check   {service}                             compatibility check on the check clip
 - run     {run_id, normalisers?}                inference, then scoring with the default normaliser / collar
 - score   {run_id, normaliser, collar}          rescoring that needs a platform service (text.transform)
-- export  {export_id, services, kind, dest, ...}  an offline kit (OFFLINE_EXPORT_PLAN.md); needs no service
+- export  {export_id, services, kind, dest, ...}  an offline kit; needs no service
 
 Before a job needs services, the worker starts them with the platform's `stack.py`. It batches: the
 services of later queued jobs that fit next to this job's under `util_limit` are started in the

@@ -190,5 +190,6 @@ service per app, as in `samples/kit/compose.yml`:
 
 Both services also get `PLATFORM_DIR=${KIT_DIR}/platform`, `AICORE_ENDPOINTS=${KIT_DIR}/platform/clients/aicore/src/aicore/endpoints.generated.yaml`,
 `UV_OFFLINE=1`, the Docker socket, and `platform/` and `assets/` mounted at the same absolute path they
-have on the host (OFFLINE_EXPORT_PLAN.md §6). The kit's `manifest.json` lists the apps it holds as
+have on the host (the app runs `docker compose` against the host's Docker daemon, which resolves the
+platform's bind mounts on the host). The kit's `manifest.json` lists the apps it holds as
 `"apps": [{"app", "image", "tar"}]`.

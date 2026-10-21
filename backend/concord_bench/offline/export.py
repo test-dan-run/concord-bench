@@ -1,4 +1,4 @@
-"""Writing an offline kit (OFFLINE_EXPORT_PLAN.md §5).
+"""Writing an offline kit.
 
 The platform's `tools/bundle.py --dir --with-images --with-weights --platform-tree` writes the models'
 images, weights and a trimmed platform tree; it is run the way `ensure_services` runs `stack.py`, with

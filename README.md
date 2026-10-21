@@ -187,7 +187,7 @@ In development, run Bench on the host instead.
 ## Offline kits
 
 Concord Bench, Concord Label or both, and chosen models, can go to a machine with no internet access
-([OFFLINE_EXPORT_PLAN.md](OFFLINE_EXPORT_PLAN.md), CONTRACTS.md §6). **Export for offline** lists every
+(CONTRACTS.md §6). **Export for offline** lists every
 platform service with its image and weight sizes; tick the models, pick a kit kind, tick the apps a full
 kit carries ("Include Concord Bench" is ticked; "Include Concord Label" shows Label's local image tag, or
 says to run `just build` in that repository) and a destination folder, and the worker writes the kit

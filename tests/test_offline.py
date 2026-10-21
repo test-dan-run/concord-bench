@@ -1,4 +1,4 @@
-"""Offline kits (OFFLINE_EXPORT_PLAN.md §8, unit): kit layout and manifest, checksum verification,
+"""Offline kits (unit): kit layout and manifest, checksum verification,
 preview warnings, the export job and API, the `install.sh --add` merge rules on a fake install, and
 install.sh itself against a fake `docker`. No real images or weights are copied; the platform's
 bundle.py is replaced by a stand-in that writes what it would."""

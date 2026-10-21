@@ -1,5 +1,5 @@
 """`python -m concord_bench.cli <command>`: migrate, revision, record, and the offline kit commands
-export-offline, verify-kit and add-kit (OFFLINE_EXPORT_PLAN.md)."""
+export-offline, verify-kit and add-kit."""
 
 from __future__ import annotations
 

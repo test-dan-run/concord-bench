@@ -1,4 +1,4 @@
-"""Air-gap test of an offline kit (OFFLINE_EXPORT_PLAN.md §8, SPLIT_PLAN.md §7), `just test-offline`.
+"""Air-gap test of an offline kit (SPLIT_PLAN.md §7), `just test-offline`.
 
 Exports a full kit with `silero-vad` (CPU only: a 434 MB image and 2.3 MB of weights, no GPU), installs
 it with `install.sh --internal` on a Docker network with no outside access, registers the model through

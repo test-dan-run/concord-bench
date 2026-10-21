@@ -320,7 +320,7 @@ class ReferenceImport(Base):
 
 
 class OfflineExport(Base):
-    """One offline kit written by this install (OFFLINE_EXPORT_PLAN.md §5). The kit is a folder on disk;
+    """One offline kit written by this install. The kit is a folder on disk;
     nothing of Concord's own state goes into it."""
 
     __tablename__ = "offline_export"

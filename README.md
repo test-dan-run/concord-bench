@@ -98,7 +98,9 @@ same code in Concord Label.
 - **Datasets.** Upload a folder or zip (chunked), or point at a local folder. Every dataset needs
   references: an upload whose annotations match no audio file is refused (label such audio in Concord
   Label). Originals are copied to `CONCORD_DATA/originals/<sha256>`; models and playback use a derived
-  16 kHz mono FLAC. Files over 5 minutes are flagged and kept out of runs. Annotations are matched to
+  16 kHz mono FLAC. There is no length limit, but each file (or reference segment) goes to a model in one
+  request, so a very long file works only if the model takes it: VAD and diarisation receive the audio as
+  JSON numbers, about 1.25 GB per hour of audio. Annotations are matched to
   audio by file stem: ASR (JSONL, NeMo manifest, CSV, `.txt`), diarisation (RTTM, JSON segments, NeMo
   diarisation manifest plus its RTTMs), and speaker-attributed transcripts for cpWER (JSON or JSONL
   segments, STM, SegLST, NeMo diarisation output JSON). Templates are under

@@ -41,14 +41,14 @@ class RunError(Exception):
     pass
 
 
-def usable_files(session: Session, dataset_id: int, include_long: bool = False) -> list[AudioFile]:
+def usable_files(session: Session, dataset_id: int) -> list[AudioFile]:
     files = session.scalars(select(AudioFile).where(AudioFile.dataset_id == dataset_id)
                             .options(selectinload(AudioFile.segments)).order_by(AudioFile.rel_path)).all()
-    return [f for f in files if f.usable or (include_long and f.status == "too_long")]
+    return [f for f in files if f.usable]
 
 
-def file_refs(session: Session, dataset_id: int, include_long: bool = False) -> list[FileRefs]:
-    return [FileRefs(f, list(f.segments)) for f in usable_files(session, dataset_id, include_long)]
+def file_refs(session: Session, dataset_id: int) -> list[FileRefs]:
+    return [FileRefs(f, list(f.segments)) for f in usable_files(session, dataset_id)]
 
 
 def services_for(run: Run) -> list[str]:
@@ -137,7 +137,7 @@ def _asr_on_spans(session: Session, adapter, f: AudioFile, audio: np.ndarray, sp
 
 def execute(session: Session, run: Run, log: Log, progress: Progress) -> None:
     ds: Dataset = run.dataset
-    refs = file_refs(session, ds.id, include_long=bool(run.params.get("include_long")))
+    refs = file_refs(session, ds.id)
     if not refs:
         raise RunError("the dataset has no usable audio files")
     run.status, run.started_at = "running", utcnow()

@@ -31,7 +31,7 @@ model=<service name>
 response_format=verbose_json | json
 timestamp_granularities[]=word   (word-timed models)
 language=<dataset language, e.g. en>`}</pre>
-          <span className="text-xs text-muted">Expects <span className="num">text</span>, and <span className="num">words[]</span> / <span className="num">segments[]</span> when the model has them. Files are at most 5 minutes, so there is no client-side chunking.</span>
+          <span className="text-xs text-muted">Expects <span className="num">text</span>, and <span className="num">words[]</span> / <span className="num">segments[]</span> when the model has them. Each file (or segment) goes to the model in one request, with no client-side chunking, so very long files work only if the model accepts them.</span>
         </Panel>
         <Panel title="Audio LLM · openai / chat.completions">
           <pre className="m-0 text-[11px] num bg-canvas border border-track rounded-md p-2.5 whitespace-pre-wrap">{`POST /v1/chat/completions

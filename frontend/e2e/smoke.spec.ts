@@ -120,7 +120,8 @@ test("bring-your-own screens load; Bench has no Label or Training pages", async 
   await expect(page.getByRole("link", { name: "Synth fixtures" })).toBeVisible();
   await page.getByRole("link", { name: "Synth fixtures" }).click();
   await expect(page.getByText("Flagged files")).toBeVisible();
-  await expect(page.getByText(/Over the length cap/)).toBeVisible();
+  await expect(page.getByText(/Undecodable/)).toBeVisible();
+  await expect(page.getByText(/Over the length cap/)).toHaveCount(0); // no duration cap
   await expect(page.getByText("Flagged references")).toBeVisible();
   await expect(page.getByRole("link", { name: /Pseudo-label|Open in annotator/ })).toHaveCount(0);
   await page.goto("/datasets/upload");

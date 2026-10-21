@@ -67,7 +67,6 @@ export interface AppConfig {
   default_normaliser: string;
   default_collar: number;
   collars: number[];
-  max_duration_s: number;
   replay: boolean;
   no_evict: boolean;
 }
@@ -224,7 +223,6 @@ export interface DatasetReport {
   duplicate_stems: string[];
   parse_errors: Inspection["parse_errors"];
   has_speaker_text: boolean;
-  max_duration_s: number;
 }
 
 export interface CheckLine {

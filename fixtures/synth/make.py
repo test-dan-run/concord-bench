@@ -10,7 +10,7 @@ so re-running reuses them and gives identical files. Delete a turn file to re-sy
 Writes fixtures/generated/:
   check/           check_clip.wav + check_clip.json (the compatibility-check clip and its truth)
   dataset/audio/   six dialogues plus the ingest edge cases (8 kHz, 44.1 kHz stereo MP3, OGG,
-                   clipped, corrupt, over 5 min)
+                   clipped, corrupt)
   dataset/truth.json
   refs/<format>/   the same references in every supported format
   malformed/       broken annotation files for parser tests
@@ -45,7 +45,6 @@ CACHE = HERE / "turns"  # committed: GPU synthesis is not bit-exact, so the turn
 TTS_SR = 24000
 OUT_SR = 16000
 DEFAULT_GAP = 0.35
-LONG_TARGET_S = 312.0
 
 
 # ---------------------------------------------------------------- synthesis
@@ -408,24 +407,6 @@ def main(argv: list[str] | None = None) -> int:
         files["d07_corrupt"] = {"stem": "d07_corrupt", "file": "d07_corrupt.wav", "duration": None,
                                 "condition": "corrupt", "voices": {}, "output": {"format": "corrupt"},
                                 "turns": [{"speaker": "agent", "start": 0.0, "end": 1.0, "text": "unreadable"}]}
-
-        # over 5 minutes: the dialogues back to back until past LONG_TARGET_S
-        parts, long_turns, offset, k = [], [], 0.0, 0
-        while offset < LONG_TARGET_S:
-            mix, turns, d = mixes[k % len(mixes)]
-            for t in turns:
-                long_turns.append({**t, "speaker": f"{d['id']}_{t['speaker']}", "start": round(t["start"] + offset, 3),
-                                   "end": round(t["end"] + offset, 3)})
-            parts.append(mix)
-            gap = np.zeros(int(1.5 * TTS_SR), dtype=np.float32)
-            parts.append(gap)
-            offset += (len(mix) + len(gap)) / TTS_SR
-            k += 1
-        long_mix = np.concatenate(parts)
-        dst = write_output(long_mix, {"format": "mp3", "sample_rate": 16000, "bitrate": "32k"}, audio_dir, "d08_long")
-        files["d08_long"] = {"stem": "d08_long", "file": dst.name, "duration": round(len(long_mix) / TTS_SR, 3),
-                             "condition": "long", "voices": {}, "output": {"format": "mp3"}, "turns": long_turns}
-        print(f"{dst.name}: {len(long_mix) / TTS_SR:.1f} s (over the 5 min cap)")
 
         (OUT / "dataset" / "truth.json").write_text(json.dumps(files, indent=1) + "\n")
         write_refs(files, OUT / "refs")

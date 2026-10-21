@@ -35,7 +35,7 @@ listed in §1.1.
 | # | Topic | Decision |
 |---|---|---|
 | Q1 | Registry fields | Done in the platform (§1.1). |
-| Q2 | File length and storage | Files are at most **5 minutes**. Longer files are flagged at ingest; nothing longer is tested. Audio, derived files and the database live on **local disk** under `CONCORD_DATA`. No object-store support. |
+| Q2 | File length and storage | Files are at most **5 minutes**. Longer files are flagged at ingest; nothing longer is tested. *(2026-10-22: the cap was removed, for meeting-length recordings.)* Audio, derived files and the database live on **local disk** under `CONCORD_DATA`. No object-store support. |
 | Q3 | Starting services | No profiles. Concord asks the platform for the services each job needs. |
 | Q4 | Variants | **Split**: two images, `concord-lite` and `concord-full`. |
 | Q5 | Phase 3 scope | Not answered yet. Phase 3 stays unscheduled. |

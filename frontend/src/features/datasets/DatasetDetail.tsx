@@ -20,7 +20,7 @@ interface FileRow {
   segments: number;
 }
 
-const FLAG_TITLES: Record<string, string> = { clipped: "Clipped", undecodable: "Undecodable", too_long: "Over the length cap (excluded from runs)" };
+const FLAG_TITLES: Record<string, string> = { clipped: "Clipped", undecodable: "Undecodable" };
 
 export function DatasetDetail() {
   const { id } = useParams();

@@ -12,7 +12,7 @@ import numpy as np
 
 from .base import Adapter, register
 
-TIMEOUT_S = 900.0  # a 5 min file is ~45-50 MB of JSON tensors
+TIMEOUT_S = 900.0  # audio goes as JSON tensors: ~45-50 MB per 5 min, ~1.25 GB per hour
 
 
 @register

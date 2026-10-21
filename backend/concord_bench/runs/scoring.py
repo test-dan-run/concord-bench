@@ -50,7 +50,7 @@ def score_run(session: Session, run: Run, normaliser: str | None = None, collar:
     score = Score(run_id=run.id, normaliser=n_key, collar=c)
     session.add(score)
     session.flush()
-    refs = {str(r.file.id): r for r in file_refs(session, run.dataset_id, include_long=True)}
+    refs = {str(r.file.id): r for r in file_refs(session, run.dataset_id)}
     norm = normalisers.get(n_key) if n_key != NO_NORMALISER else None
     if run.task == RunTask.asr:
         rows, agg = _score_asr(session, run, refs, norm)

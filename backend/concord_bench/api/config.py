@@ -39,7 +39,6 @@ def get_config() -> dict[str, Any]:
         "default_normaliser": normalisers.DEFAULT,
         "default_collar": DEFAULT_COLLAR,
         "collars": [0.0, 0.1, 0.25, 0.5],
-        "max_duration_s": s.max_duration_s,
         "replay": s.replay_dir is not None,
         "no_evict": s.no_evict,
         "links": {"platform_readme": "dev/README.md", "contracts_readme": "platform/contracts/README.md"},

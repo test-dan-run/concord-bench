@@ -5,4 +5,3 @@
 {"audio_filepath": "/data/audio/d05_clipped.wav", "offset": 0, "duration": null, "label": "infer", "text": "-", "num_speakers": 2, "rttm_filepath": "/data/rttm/d05_clipped.rttm", "uem_filepath": null}
 {"audio_filepath": "/data/audio/d06.flac", "offset": 0, "duration": null, "label": "infer", "text": "-", "num_speakers": 3, "rttm_filepath": "/data/rttm/d06.rttm", "uem_filepath": null}
 {"audio_filepath": "/data/audio/d07_corrupt.wav", "offset": 0, "duration": null, "label": "infer", "text": "-", "num_speakers": 1, "rttm_filepath": "/data/rttm/d07_corrupt.rttm", "uem_filepath": null}
-{"audio_filepath": "/data/audio/d08_long.mp3", "offset": 0, "duration": null, "label": "infer", "text": "-", "num_speakers": 14, "rttm_filepath": "/data/rttm/d08_long.rttm", "uem_filepath": null}

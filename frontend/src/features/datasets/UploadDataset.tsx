@@ -153,7 +153,7 @@ export function UploadDataset() {
               >
                 <span className="text-muted"><I.Upload size={22} /></span>
                 <span className="text-[13px]">Drop a folder or .zip of audio and annotations</span>
-                <span className="text-xs text-subtle">WAV, FLAC, MP3, OGG, M4A · any sample rate · originals are kept, models get 16 kHz mono · files over 5 min are flagged</span>
+                <span className="text-xs text-subtle">WAV, FLAC, MP3, OGG, M4A · any sample rate · originals are kept, models get 16 kHz mono · any length</span>
                 <span className="flex gap-2 mt-1">
                   <label className="inline-flex items-center gap-2 min-h-9 px-3 rounded-md border border-line text-[13px] cursor-pointer hover:bg-track">
                     Choose folder

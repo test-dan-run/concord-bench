@@ -24,20 +24,20 @@ def stage(tmp_path, refs: list[str]):
 
 def test_inspect_matches_and_previews(tmp_path):
     rep = inspect_source(stage(tmp_path, ["stm"]))
-    assert rep["audio_files"] == 8
-    assert rep["tasks"]["spk_asr"]["files"] == 8
+    assert rep["audio_files"] == 7
+    assert rep["tasks"]["spk_asr"]["files"] == 7
     assert len(rep["tasks"]["spk_asr"]["preview"]) == 3
     assert rep["unmatched"] == [] and rep["audio_without_labels"] == []
 
 
 def test_inspect_nemo_diarisation_manifest(tmp_path):
     rep = inspect_source(stage(tmp_path, ["nemo-manifest"]))
-    assert rep["tasks"]["diar"]["files"] == 8 and rep["parse_errors"] == []
+    assert rep["tasks"]["diar"]["files"] == 7 and rep["parse_errors"] == []
     shutil.rmtree(tmp_path / "src" / "nemo-manifest" / "rttm")
     rep = inspect_source(tmp_path / "src")
     assert "diar" not in rep["tasks"]
     [err] = rep["parse_errors"]
-    assert err["format"] == "nemo-manifest" and err["count"] == 8 and "d01.rttm is not in the upload" in err["errors"][0]
+    assert err["format"] == "nemo-manifest" and err["count"] == 7 and "d01.rttm is not in the upload" in err["errors"][0]
 
 
 def test_inspect_mixed_formats_and_unmatched(tmp_path):
@@ -56,11 +56,11 @@ def test_ingest_fixture_dataset(session, tmp_path):
     session.flush()
     rep = ingest(session, ds.id, src)
     session.commit()
-    assert (rep["files"], rep["usable_files"]) == (8, 6)
-    assert rep["sample_rates"] == {"8000": 1, "16000": 5, "44100": 1}
+    assert (rep["files"], rep["usable_files"]) == (7, 6)
+    assert rep["sample_rates"] == {"8000": 1, "16000": 4, "44100": 1}
     assert [f["file"] for f in rep["flagged"]["clipped"]] == ["audio/d05_clipped.wav"]
     assert [f["file"] for f in rep["flagged"]["undecodable"]] == ["audio/d07_corrupt.wav"]
-    assert [f["file"] for f in rep["flagged"]["too_long"]] == ["audio/d08_long.mp3"]
+    assert set(rep["flagged"]) == {"clipped", "undecodable"}  # no length cap
     assert ds.label_types == ["asr", "diar"] and rep["has_speaker_text"]
     files = {f.stem: f for f in session.scalars(select(AudioFile))}
     t = truth()

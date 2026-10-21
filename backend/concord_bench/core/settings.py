@@ -30,8 +30,6 @@ class Settings(BaseSettings):
     ai_host: str = "localhost"
     # Refuse to stop running GPU services when starting what a job needs (jobs wait as `blocked`).
     no_evict: bool = False
-    # Files longer than this are flagged at ingest and excluded from runs (Q2).
-    max_duration_s: float = 300.0
     # Serve recorded model responses from this folder instead of calling services (tests, demos).
     replay_dir: Path | None = None
     # Write every live model response into this folder (to refresh recordings).

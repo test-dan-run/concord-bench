@@ -22,7 +22,6 @@ from sqlalchemy.orm import Session
 
 from ..core import paths
 from ..core.models import AudioFile, Dataset, FileStatus, LabelType, Segment, SegmentStatus
-from ..core.settings import get_settings
 from . import audio as audio_mod
 from .parsers import ANNOTATION_EXTS, ParseResult, RefRecord, parse_file
 
@@ -149,7 +148,7 @@ def label_types_for(records: list[RefRecord]) -> list[str]:
     return out
 
 
-def _process_audio(f: AudioFile, src: Path, max_dur: float) -> dict[str, Any]:
+def _process_audio(f: AudioFile, src: Path) -> dict[str, Any]:
     """Copy the original, decode, check clipping, derive 16 kHz mono and peaks. Returns facts for the report."""
     orig = paths.original(f.sha256, f.ext)
     if not orig.exists():
@@ -169,9 +168,7 @@ def _process_audio(f: AudioFile, src: Path, max_dur: float) -> dict[str, Any]:
         mono = audio_mod.to_mono_16k(x, pr.sample_rate)
         audio_mod.write_flac(derived, mono)
         audio_mod.write_peaks(paths.peaks(f.sha256), audio_mod.compute_peaks(mono))
-    if f.duration > max_dur:
-        f.status = FileStatus.too_long
-    elif clip > audio_mod.CLIP_FRACTION:
+    if clip > audio_mod.CLIP_FRACTION:
         f.status = FileStatus.clipped
     else:
         f.status = FileStatus.ok
@@ -180,7 +177,6 @@ def _process_audio(f: AudioFile, src: Path, max_dur: float) -> dict[str, Any]:
 
 def ingest(session: Session, dataset_id: int, source: Path, progress: Progress | None = None) -> dict[str, Any]:
     progress = progress or (lambda p, m: None)
-    max_dur = get_settings().max_duration_s
     ds = session.get(Dataset, dataset_id)
     if ds is None:
         raise ValueError(f"dataset {dataset_id} not found")
@@ -194,14 +190,14 @@ def ingest(session: Session, dataset_id: int, source: Path, progress: Progress |
         raise ValueError(NO_REFERENCES)
     existing = {f.rel_path: f for f in session.scalars(select(AudioFile).where(AudioFile.dataset_id == ds.id))}
     total = len(s.audio)
-    flagged: dict[str, list[dict[str, Any]]] = {"clipped": [], "undecodable": [], "too_long": []}
+    flagged: dict[str, list[dict[str, Any]]] = {"clipped": [], "undecodable": []}
     sr_hist: Counter[int] = Counter()
     seconds = 0.0
     for k, (rel, src) in enumerate(s.audio.items()):
         progress(0.05 + 0.85 * k / total, f"audio {k + 1}/{total}: {rel}")
         f = existing.get(rel) or AudioFile(dataset_id=ds.id, rel_path=rel, ext=src.suffix.lower())
         f.sha256 = audio_mod.sha256_file(src)
-        facts = _process_audio(f, src, max_dur)
+        facts = _process_audio(f, src)
         if f.id is None:
             session.add(f)
         session.flush()
@@ -209,8 +205,6 @@ def ingest(session: Session, dataset_id: int, source: Path, progress: Progress |
             item = {"file": rel, **({"error": facts["error"]} if "error" in facts else {})}
             if f.status == FileStatus.clipped:
                 item["clipped_pct"] = round(100 * facts["clipped_fraction"], 3)
-            if f.status == FileStatus.too_long:
-                item["duration"] = round(f.duration or 0, 1)
             flagged[f.status].append(item)
         if f.orig_sr:
             sr_hist[f.orig_sr] += 1
@@ -243,7 +237,6 @@ def ingest(session: Session, dataset_id: int, source: Path, progress: Progress |
         "audio_without_labels_count": len(m["audio_without_labels"]),
         "duplicate_stems": m["duplicate_stems"], "parse_errors": m["parse_errors"],
         "files_by_format": m["files_by_format"], "has_speaker_text": "spk_asr" in m["tasks"],
-        "max_duration_s": max_dur,
     }
     ds.status = "ready"
     session.flush()

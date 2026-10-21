@@ -12,7 +12,8 @@ import { MetricTile } from "../../components/MetricTile";
 import { ExpandCell, SortableTable } from "../../components/SortableTable";
 import { StageLegend } from "../../components/StageLegend";
 import { ErrorLegend, Timeline } from "../../components/Timeline";
-import { cx, Empty, ErrorNote, PageHeader, Panel, Select, Spinner } from "../../components/ui";
+import * as I from "../../components/icons";
+import { AnchorButton, cx, Empty, ErrorNote, PageHeader, Panel, Select, Spinner } from "../../components/ui";
 import { Crumbs, RunPickers, Switcher, useSwitchLinks } from "./common";
 import { speakerLaneGroups } from "./DiarErrors";
 
@@ -52,6 +53,7 @@ interface FileDetail extends FileRow {
   assignment: [string | null, string | null][];
   pairs: { ref_speaker: string | null; hyp_speaker: string | null; ops: AlignOp[]; errors: number; n: number }[];
   wrong_speaker_words: { word: string; ref_speaker: string; hyp_speaker: string; given_to: string | null }[];
+  label_url: string | null;
 }
 
 const SOURCE_NOTES: Record<string, string> = {
@@ -261,6 +263,11 @@ function PipeFileDetail({ id, modelName }: { id: number; modelName: string }) {
       <div className="flex flex-col gap-3 bg-panel border border-track rounded-md p-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <AudioPlayer ctl={ctl} start={0} end={f.duration} label="Play file" />
+          {f.label_url && (
+            <AnchorButton href={f.label_url} newTab>
+              <I.Pen size={13} /> Open in Label
+            </AnchorButton>
+          )}
         </div>
         <Timeline fileId={f.file_id} t0={0} t1={f.duration} groups={groups} errors={f.errors} overlaps={f.overlaps} time={ctl.time} onSeek={(t) => ctl.play(t)} />
       </div>

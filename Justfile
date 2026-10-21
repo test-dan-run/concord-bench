@@ -78,6 +78,7 @@ e2e: build-web
       sleep 1
     done
     docker run --rm --network concord-e2e --ipc=host -v "$PWD/frontend":/work -w /work \
+      -v "$PWD/contracts":/contracts:ro -e E2E_CONTRACTS=/contracts \
       -e E2E_BASE_URL=http://concord-e2e-api:8611 mcr.microsoft.com/playwright:v1.64.1-noble npx playwright test
 
 # ruff + frontend typecheck

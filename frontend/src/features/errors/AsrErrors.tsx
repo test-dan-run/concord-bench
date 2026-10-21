@@ -12,7 +12,7 @@ import { ExpandCell, SortableTable } from "../../components/SortableTable";
 import { Timeline } from "../../components/Timeline";
 import { viewAround } from "../../components/timelineMath";
 import * as I from "../../components/icons";
-import { Bar, Button, Chip, cx, Empty, ErrorNote, PageHeader, Panel, Select, Spinner } from "../../components/ui";
+import { AnchorButton, Bar, Button, Chip, cx, Empty, ErrorNote, PageHeader, Panel, Select, Spinner } from "../../components/ui";
 import { Crumbs, latestRuns, RunPickers, Switcher, useDoneRuns, useSwitchLinks } from "./common";
 
 interface Summary {
@@ -325,6 +325,11 @@ function UtteranceDetailView({ id, timing }: { id: number; timing: string | null
           <Button variant={u.flagged ? "danger" : "outline"} disabled={!u.segment_id || flag.isPending} onClick={() => flag.mutate(!u.flagged)} aria-pressed={!!u.flagged}>
             <I.Flag size={14} /> {u.flagged ? "Reference flagged — unflag" : "Flag reference as wrong"}
           </Button>
+          {u.label_url && (
+            <AnchorButton href={u.label_url} newTab>
+              <I.Pen size={14} /> Open in Label
+            </AnchorButton>
+          )}
         </div>
         {u.flagged && <span className="text-xs text-warn">Flagged references are listed on the dataset page; scores still use them until the references are corrected.</span>}
         {errs.length === 0 && u.others.length === 0 && <Empty>Nothing more to show.</Empty>}

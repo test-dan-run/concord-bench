@@ -39,6 +39,18 @@ export function planCount(p: PlanValue, labels: string[]): number {
   return (hasDiar ? p.seg_model_ids.length : 0) + (hasAsr ? p.asr_model_ids.length : 0);
 }
 
+/** A preset plan limited to the models still registered and offered for this dataset. */
+export function presetFor(preset: PlanValue, data: Pick<Suggestions, "seg" | "asr" | "oracle_available">): PlanValue {
+  const seg = new Set(data.seg.map((m) => m.model_id));
+  const asr = new Set(data.asr.map((m) => m.model_id));
+  return {
+    ...preset,
+    seg_model_ids: preset.seg_model_ids.filter((i) => seg.has(i)),
+    asr_model_ids: preset.asr_model_ids.filter((i) => asr.has(i)),
+    oracle: preset.oracle && data.oracle_available,
+  };
+}
+
 export function PlanPanel({
   datasetId,
   tags,
@@ -46,6 +58,7 @@ export function PlanPanel({
   language,
   value,
   onChange,
+  preset,
 }: {
   datasetId?: number;
   tags?: string[];
@@ -53,6 +66,8 @@ export function PlanPanel({
   language?: string;
   value: PlanValue;
   onChange: (v: PlanValue) => void;
+  /** Pre-tick these instead of the tag matches (e.g. the models run on a dataset's previous version). */
+  preset?: PlanValue;
 }) {
   const query = datasetId
     ? qs({ dataset_id: datasetId })
@@ -60,9 +75,13 @@ export function PlanPanel({
   const { data } = useQuery({ queryKey: ["suggest-models", query], queryFn: () => api.get<Suggestions>(`/suggestions/models${query}`) });
   const [touched, setTouched] = useState(false);
 
-  // Pre-tick on tag match until the user changes something.
+  // Pre-tick on tag match (or the preset) until the user changes something.
   useEffect(() => {
     if (!data || touched) return;
+    if (preset) {
+      onChange(presetFor(preset, data));
+      return;
+    }
     onChange({
       ...value,
       seg_model_ids: data.seg.filter((m) => m.preselect).map((m) => m.model_id),

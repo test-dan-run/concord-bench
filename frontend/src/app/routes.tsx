@@ -8,6 +8,7 @@ import { PipelineErrors } from "../features/errors/PipelineErrors";
 import { DatasetDetail } from "../features/datasets/DatasetDetail";
 import { DatasetsPage } from "../features/datasets/DatasetsPage";
 import { UploadDataset } from "../features/datasets/UploadDataset";
+import { ImportReference } from "../features/datasets/ImportReference";
 import { AddModel } from "../features/models/AddModel";
 import { ContractPage } from "../features/models/ContractPage";
 import { ModelsPage } from "../features/models/ModelsPage";
@@ -50,6 +51,7 @@ export const router = createBrowserRouter([
       { path: "errors/pipeline/:runId", element: <PipelineErrors /> },
       { path: "datasets", element: <DatasetsPage /> },
       { path: "datasets/upload", element: <UploadDataset /> },
+      { path: "datasets/import", element: <ImportReference /> },
       { path: "datasets/:id", element: <DatasetDetail /> },
       { path: "models", element: <ModelsPage /> },
       { path: "models/add", element: <AddModel /> },

@@ -107,6 +107,87 @@ export interface Dataset {
   report?: DatasetReport;
   runs?: number;
   ingest_job?: Job | null;
+  provenance: Provenance | Record<string, never>;
+  export_version: number | null;
+  previous_version_id: number | null;
+  versions?: { id: number; name: string; export_version: number | null; status: string; created_at: string }[];
+  previous_plan?: PreviousPlan | null;
+}
+
+// ---------------------------------------------------------------- reference packages (CONTRACTS.md §2, §4)
+
+export interface PackageSource {
+  app: string;
+  install_id: string;
+  dataset_uid: string;
+  dataset_name: string;
+}
+
+/** Where a dataset's references came from (an accepted reference package with a manifest). */
+export interface Provenance {
+  import_id: number;
+  package_name: string;
+  source: PackageSource | null;
+  export_version: number | null;
+  scope: "complete" | "any" | null;
+  created_at: string | null;
+  label_types: string[] | null;
+  counts: { files: number; segments: number; hours: number } | null;
+  audio_included: string | null;
+  review: Record<string, unknown> | null;
+  models: string[] | null;
+  normaliser: string | null;
+}
+
+export interface PreviousPlan {
+  previous: { id: number; name: string; export_version: number | null };
+  plan: { seg_model_ids: number[]; asr_model_ids: number[]; oracle: boolean; mode: "grid" | "stages" };
+  models: number;
+  already_run: boolean;
+}
+
+export interface ImportPreview {
+  name: string;
+  source: PackageSource | null;
+  export_version: number | null;
+  files: number;
+  new_files: number;
+  hours: number;
+  segments: number;
+  label_types: string[];
+  previous_version: { dataset_id: number; name: string; export_version: number | null } | null;
+  has_manifest: boolean;
+  dataset_name: string;
+  scope: string | null;
+  language: string | null;
+  description: string | null;
+  tags: string[];
+  created_at: string | null;
+  review: Record<string, unknown> | null;
+  models: string[] | null;
+  normaliser: string | null;
+  audio_included: string | null;
+  refs_file: string | null;
+  uids: number;
+  outputs: number;
+  missing_files: string[];
+  changes?: { files_added: number; files_removed: number; segments_before: number; segments_now: number };
+}
+
+export interface ReferenceImport {
+  id: number;
+  status: "staged" | "accepting" | "accepted" | "rejected" | "failed";
+  name: string;
+  preview: ImportPreview;
+  result: {
+    uids?: { matched: number; unmatched: number };
+    outputs?: { lines: number; imported: number; already_cached: number; skipped: Record<string, number> };
+  };
+  error: string | null;
+  dataset_id: number | null;
+  job_id: number | null;
+  created_at: string;
+  decided_at: string | null;
 }
 
 export interface TaskMatch {
@@ -361,6 +442,7 @@ export interface UtteranceDetail extends Utterance {
   timed: boolean;
   segments: { start: number; end: number; text: string }[] | null;
   flag_note: string | null;
+  label_url: string | null;
   others: { run_id: number; model: string; hyp: string; wer: number | null; ops: AlignOp[] }[];
 }
 

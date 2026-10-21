@@ -18,9 +18,14 @@ export function DatasetsPage() {
         title="Datasets"
         subtitle="Every upload is its own dataset. No train/dev/test splits inside a dataset."
         actions={
-          <LinkButton to="/datasets/upload" variant="primary">
-            <I.Upload /> Upload dataset
-          </LinkButton>
+          <>
+            <LinkButton to="/datasets/import">
+              <I.Download /> Import reference package
+            </LinkButton>
+            <LinkButton to="/datasets/upload" variant="primary">
+              <I.Upload /> Upload dataset
+            </LinkButton>
+          </>
         }
       />
       <Panel>
@@ -53,6 +58,7 @@ export function DatasetsPage() {
                         {d.label_types.includes("asr") && <Chip>ASR</Chip>}
                         {d.label_types.includes("diar") && <Chip>Diarisation</Chip>}
                         {d.has_speaker_text && <Chip tone="info">cpWER</Chip>}
+                        {d.export_version != null && <Chip title="Reference package version">v{d.export_version}</Chip>}
                         {!d.label_types.length && d.status === "ready" && <Chip>audio only</Chip>}
                       </span>
                     </td>

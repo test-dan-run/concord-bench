@@ -95,6 +95,7 @@ export function Nav() {
       </Group>
       <Group title="Bring your own">
         <Item to="/datasets/upload" icon={<I.Upload />}>Upload dataset</Item>
+        <Item to="/datasets/import" icon={<I.Download />}>Import reference package</Item>
         <Item to="/datasets" icon={<I.Database />}>Datasets</Item>
         <Item to="/models/add" icon={<I.Plus />}>Add model</Item>
         <Item to="/models" icon={<I.Cpu />}>Models</Item>

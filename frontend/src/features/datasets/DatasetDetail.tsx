@@ -2,7 +2,10 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { api, type Dataset, type FlaggedReference, type Run } from "../../lib/api";
+import { useConfig } from "../../lib/config";
 import { ago, clock, hours, num } from "../../lib/format";
+import { flagsPushBlocker, fromLabel, provenanceOf } from "../../lib/peer";
+import * as I from "../../components/icons";
 import { TagInput } from "../../components/TagInput";
 import { Button, Chip, Empty, ErrorNote, Fact, JobPill, PageHeader, Panel, Spinner, StatusDot } from "../../components/ui";
 import { PlanPanel, planCount, type PlanValue } from "../benchmarks/PlanPanel";
@@ -46,6 +49,10 @@ export function DatasetDetail() {
     },
   });
   const del = useMutation({ mutationFn: () => api.del(`/datasets/${id}`), onSuccess: () => nav("/datasets") });
+  const { data: cfg } = useConfig();
+  const [rerun, setRerun] = useState<PlanValue>({ seg_model_ids: [], asr_model_ids: [], oracle: false, mode: "stages" });
+  const runRerun = useMutation({ mutationFn: () => api.post("/benchmarks/plan", { dataset_id: Number(id), ...rerun }), onSuccess: () => qc.invalidateQueries() });
+  const sendFlags = useMutation({ mutationFn: () => api.post<{ matched: number; unmatched: number; sent: number }>(`/datasets/${id}/flags/send`) });
 
   if (q.isLoading) return <Spinner />;
   if (q.error || !q.data) return <ErrorNote error={q.error} />;
@@ -54,6 +61,11 @@ export function DatasetDetail() {
   const job = d.ingest_job;
   const n = planCount(plan, d.label_types);
   const maxSr = Math.max(1, ...Object.values(rep?.sample_rates ?? {}));
+  const prov = provenanceOf(d);
+  const prevPlan = d.previous_plan;
+  const nRerun = planCount(rerun, d.label_types);
+  const flagBlocker = flagsPushBlocker(cfg, d);
+  const nFlags = (flags.data ?? []).length;
 
   return (
     <>
@@ -155,7 +167,28 @@ export function DatasetDetail() {
               title="Flagged references"
               subtitle="Marked wrong with “Flag reference as wrong” on the ASR error pages. Scores still use them until the references are corrected."
             >
-              {(flags.data ?? []).length === 0 && <span className="text-[13px] text-muted">No references flagged.</span>}
+              {prov?.source && nFlags > 0 && (
+                <div className="flex flex-col gap-1.5 pb-1">
+                  <span className="flex flex-wrap items-center gap-2">
+                    {fromLabel(d) && (
+                      <Button size="sm" variant="primary" disabled={!!flagBlocker || sendFlags.isPending} title={flagBlocker ?? undefined} onClick={() => sendFlags.mutate()}>
+                        <I.Flag size={13} /> Send flags to Label
+                      </Button>
+                    )}
+                    <a href={`/api/datasets/${d.id}/flags.json`} download className="inline-flex items-center gap-1.5 text-xs">
+                      <I.Download size={12} /> Download flags file
+                    </a>
+                  </span>
+                  {fromLabel(d) && flagBlocker && <span className="text-xs text-muted">{flagBlocker}</span>}
+                  {sendFlags.data && (
+                    <span role="status" className="text-xs text-good">
+                      Sent {sendFlags.data.sent} flag{sendFlags.data.sent === 1 ? "" : "s"}: {sendFlags.data.matched} matched in Concord Label, {sendFlags.data.unmatched} unmatched.
+                    </span>
+                  )}
+                  <ErrorNote error={sendFlags.error} />
+                </div>
+              )}
+              {nFlags === 0 && <span className="text-[13px] text-muted">No references flagged.</span>}
               {(flags.data ?? []).map((f) => (
                 <div key={f.id} className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-[13px] border-b border-track last:border-0 py-1.5">
                   <span className="num text-xs text-muted">{f.path} · {clock(f.start)}–{clock(f.end)}</span>
@@ -185,6 +218,45 @@ export function DatasetDetail() {
             </Panel>
           </div>
           <aside className="w-full xl:w-[360px] shrink-0 flex flex-col gap-4">
+            {prov && (
+              <Panel title="Where the references came from" subtitle="Imported from a reference package. References are never changed; a newer package is a new version.">
+                {prov.source ? (
+                  <>
+                    <Fact k="Source dataset" v={prov.source.dataset_name} />
+                    <Fact k="From" v={prov.source.app === "concord-label" ? "Concord Label" : prov.source.app} />
+                    <Fact k="Install" v={<span title={prov.source.install_id}>{prov.source.install_id.slice(0, 12)}</span>} />
+                    <Fact k="Version" v={`v${d.export_version ?? prov.export_version ?? "?"}`} />
+                  </>
+                ) : (
+                  <Fact k="Source" v="hand-made or another tool" />
+                )}
+                {prov.scope && <Fact k="Scope" v={prov.scope === "complete" ? "complete (fully reviewed files)" : "any confirmed segment"} />}
+                {prov.normaliser && <Fact k="Suggested normaliser" v={prov.normaliser} />}
+                {prov.models && prov.models.length > 0 && <Fact k="Pseudo-label models" v={prov.models.join(", ")} />}
+                {prov.review && <Fact k="Review" v={Object.entries(prov.review).map(([k, v]) => `${v} ${k.replace(/_/g, " ")}`).join(" · ")} />}
+                {(d.versions ?? []).length > 1 && (
+                  <div className="flex flex-col gap-1 pt-1">
+                    <span className="text-[11px] text-muted uppercase tracking-wider">Versions</span>
+                    {(d.versions ?? []).map((v) =>
+                      v.id === d.id ? (
+                        <span key={v.id} className="text-xs">v{v.export_version} · {v.name} (this one)</span>
+                      ) : (
+                        <Link key={v.id} to={`/datasets/${v.id}`} className="text-xs">v{v.export_version} · {v.name}</Link>
+                      ),
+                    )}
+                  </div>
+                )}
+              </Panel>
+            )}
+            {prevPlan && prevPlan.models > 0 && d.label_types.length > 0 && (
+              <Panel title={`Run the models benchmarked on ${prevPlan.previous.name}`} subtitle="Pre-ticked with the models that have finished runs on the previous version.">
+                <PlanPanel datasetId={d.id} value={rerun} onChange={setRerun} preset={prevPlan.plan} />
+                <ErrorNote error={runRerun.error} />
+                <Button variant="primary" disabled={!nRerun || runRerun.isPending} onClick={() => runRerun.mutate()}>
+                  {runRerun.isSuccess ? "Queued" : `Run ${nRerun} on this version`}
+                </Button>
+              </Panel>
+            )}
             <Panel title="Tags" actions={editTags === null ? <Button size="sm" onClick={() => setEditTags(d.tags)}>Edit</Button> : undefined}>
               {editTags === null ? (
                 <span className="flex flex-wrap gap-1">{d.tags.length ? d.tags.map((t) => <Chip key={t}>#{t}</Chip>) : <span className="text-xs text-muted">No tags.</span>}</span>

@@ -50,6 +50,21 @@ export function LinkButton({ to, children, variant = "outline" }: { to: string; 
   );
 }
 
+/** A button-styled link that leaves the app (another app, a download). */
+export function AnchorButton({ href, children, variant = "outline", download, newTab }: { href: string; children: ReactNode; variant?: Variant; download?: boolean; newTab?: boolean }) {
+  return (
+    <a
+      href={href}
+      download={download || undefined}
+      target={newTab ? "_blank" : undefined}
+      rel={newTab ? "noopener noreferrer" : undefined}
+      className={cx("inline-flex items-center gap-2 min-h-10 px-4 rounded-md text-[13px] no-underline", VARIANTS[variant], variant !== "primary" && "!text-fg")}
+    >
+      {children}
+    </a>
+  );
+}
+
 export function Panel({
   title,
   actions,

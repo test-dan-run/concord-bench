@@ -1,4 +1,9 @@
 import { expect, test, type Page } from "@playwright/test";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+// contracts/ of this repository (mounted at /contracts by `just e2e`).
+const CONTRACTS = process.env.E2E_CONTRACTS ?? fileURLToPath(new URL("../../contracts", import.meta.url));
 
 // Acceptance item 3: every error-analysis view loads, sorts, expands and plays audio on the fixture
 // set; plus a load check of every other Concord Bench screen. Console errors fail the test.
@@ -132,7 +137,7 @@ test("bring-your-own screens load; Bench has no Label or Training pages", async 
   await expect(page.getByRole("heading", { name: "Jobs" })).toBeVisible();
   const nav = page.getByRole("navigation", { name: "Primary" });
   await expect(nav.getByText("Concord Bench")).toBeVisible();
-  for (const name of ["Benchmarks", "Error analysis", "Datasets", "Models", "Export for offline"]) {
+  for (const name of ["Benchmarks", "Error analysis", "Datasets", "Import reference package", "Models", "Export for offline"]) {
     await expect(nav.getByRole("link", { name, exact: true })).toBeVisible();
   }
   for (const name of ["Training", "Review console", "Pseudo-label", "Annotate", "Live evaluation", "Import / export"]) {
@@ -161,5 +166,30 @@ test("a reference flagged on the ASR error page is listed on the dataset page", 
   await expect(page.getByRole("button", { name: "Unflag" })).toHaveCount(1);
   await page.getByRole("button", { name: "Unflag" }).click();
   await expect(page.getByText("No references flagged.")).toBeVisible();
+  expect(errors).toEqual([]);
+});
+
+test("the sample reference package imports through the UI and is accepted", async ({ page }) => {
+  const errors = watchErrors(page);
+  await page.goto("/datasets");
+  await page.getByRole("link", { name: "Import reference package" }).first().click();
+  await expect(page.getByRole("heading", { name: "Import reference package" })).toBeVisible();
+  await expect(page.getByRole("link", { name: /Template package/ })).toHaveAttribute("href", "/api/templates/reference_package.zip");
+  await page.getByLabel("Package folder").setInputFiles(join(CONTRACTS, "samples", "reference-package-complete"));
+  const staged = page.getByRole("article", { name: "Staged package Help desk calls" });
+  await expect(staged).toBeVisible();
+  await expect(staged.getByText("Concord Label · Help desk calls · version 1 · install 3f2a9c1e5b7d4a60")).toBeVisible();
+  await expect(staged.getByText("refs/segments.seglst.json")).toBeVisible();
+  await expect(staged.getByLabel("Dataset name")).toHaveValue("Help desk calls");
+  await staged.getByRole("button", { name: "Accept" }).click();
+  await expect(page).toHaveURL(/\/datasets\/\d+$/);
+  await expect(page.getByRole("heading", { name: "Where the references came from" })).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText("Concord Label", { exact: true })).toBeVisible();
+  await expect(page.getByText("v1", { exact: true })).toBeVisible();
+  await expect(page.getByRole("cell", { name: "check_clip.wav" })).toBeVisible();
+  // Accepted: listed in the history, nothing left waiting
+  await page.goto("/datasets/import");
+  await expect(page.getByRole("link", { name: "Help desk calls" })).toBeVisible();
+  await expect(page.getByText("No staged packages.")).toBeVisible();
   expect(errors).toEqual([]);
 });

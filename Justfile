@@ -86,9 +86,9 @@ lint:
     uv run ruff check backend tests fixtures/synth
     cd frontend && npm run lint --silent
 
-# check contracts/samples (CONTRACTS.md) and compare with the other app's repository next to this one
-check-contracts:
-    {{py}} contracts/check.py
+# check contracts/samples (CONTRACTS.md) and compare with the other app's repository: just check-contracts [--peer PATH]
+check-contracts *args:
+    {{py}} contracts/check.py {{args}}
 
 # regenerate fixtures/generated with kokoro-tts (start it first: `just up kokoro-tts` in the platform)
 fixtures:

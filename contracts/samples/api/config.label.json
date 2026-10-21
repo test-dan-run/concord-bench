@@ -1,0 +1,10 @@
+{
+ "app": "concord-label",
+ "version": "0.2.0",
+ "contract_version": 1,
+ "peer": {
+  "url": "http://localhost:8600",
+  "reachable": true,
+  "contract_version": 1
+ }
+}

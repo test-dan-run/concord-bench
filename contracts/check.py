@@ -1,0 +1,216 @@
+"""Check the contract samples, and compare this repository's contracts with the other app's (CONTRACTS.md).
+
+    python contracts/check.py [--peer PATH]
+
+Standard library only, so the same file runs unchanged in Concord Bench and Concord Label. Without
+--peer it looks for the other repository next to this one (../Concord or ../concord-label) and skips the
+comparison when neither is there.
+
+`check_package(path)` is also used by both apps' tests on packages they write or read.
+"""
+
+from __future__ import annotations
+
+import argparse
+import csv
+import filecmp
+import hashlib
+import json
+import sys
+from pathlib import Path, PurePosixPath
+
+CONTRACT_VERSION = 1
+HERE = Path(__file__).resolve().parent
+REPO = HERE.parent
+REF_FORMATS = {".json", ".jsonl", ".csv", ".txt", ".rttm", ".stm", ".tsv"}
+AUDIO_EXTS = {".wav", ".flac", ".mp3", ".ogg", ".m4a", ".opus", ".aac", ".wma", ".webm"}
+MANIFEST_REQUIRED = ("format", "format_version", "name", "created_at", "label_types", "counts", "audio_included")
+SOURCE_FIELDS = ("app", "install_id", "dataset_uid", "dataset_name")
+FLAG_FIELDS = ("uid", "file_sha256", "start", "end", "note")
+
+
+def sha256_file(p: Path) -> str:
+    h = hashlib.sha256()
+    with open(p, "rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _rel_ok(rel: str) -> bool:
+    p = PurePosixPath(rel)
+    return bool(rel) and not p.is_absolute() and ".." not in p.parts
+
+
+def check_package(root: Path) -> list[str]:
+    """Problems with a reference package folder (CONTRACTS.md §2); empty when it follows the contract.
+
+    Audio left out of the package cannot be checked here: the receiver must already have it."""
+    problems: list[str] = []
+    mpath = root / "manifest.json"
+    if not mpath.is_file():
+        audio = [p for p in root.rglob("*") if p.suffix.lower() in AUDIO_EXTS]
+        refs = [p for p in root.rglob("*") if p.suffix.lower() in REF_FORMATS]
+        if not audio:
+            problems.append("no manifest and no audio: a package without a manifest is an annotated upload")
+        if not refs:
+            problems.append("no manifest and no annotation file")
+        return problems
+    try:
+        m = json.loads(mpath.read_text(encoding="utf-8"))
+    except ValueError as exc:
+        return [f"manifest.json is not JSON: {exc}"]
+    for k in MANIFEST_REQUIRED:
+        if k not in m:
+            problems.append(f"manifest.json: missing {k}")
+    if m.get("format") != "concord-reference-package":
+        problems.append(f"manifest.json: format {m.get('format')!r}")
+    if m.get("format_version") != 1:
+        problems.append(f"manifest.json: format_version {m.get('format_version')!r} (known: 1)")
+    if not set(m.get("label_types") or []) <= {"asr", "diar"} or not m.get("label_types"):
+        problems.append(f"manifest.json: label_types {m.get('label_types')!r}")
+    if m.get("audio_included") not in ("all", "partial", "none"):
+        problems.append(f"manifest.json: audio_included {m.get('audio_included')!r}")
+    if m.get("scope") not in (None, "complete", "any"):
+        problems.append(f"manifest.json: scope {m.get('scope')!r}")
+    src = m.get("source")
+    if src is not None:
+        problems += [f"manifest.json: source.{k} missing" for k in SOURCE_FIELDS if not src.get(k)]
+        if not isinstance(m.get("export_version"), int) or m["export_version"] < 1:
+            problems.append("manifest.json: export_version must be 1, 2, ... when source is given")
+
+    fpath = root / "files.csv"
+    rows: list[dict[str, str]] = []
+    if not fpath.is_file():
+        problems.append("files.csv missing")
+    else:
+        with open(fpath, newline="", encoding="utf-8") as fh:
+            reader = csv.DictReader(fh)
+            if reader.fieldnames != ["path", "sha256", "duration", "sample_rate"]:
+                problems.append(f"files.csv: header {reader.fieldnames}")
+            rows = list(reader)
+    stems: dict[str, str] = {}
+    included = 0
+    for r in rows:
+        rel = r.get("path") or ""
+        if not _rel_ok(rel):
+            problems.append(f"files.csv: bad path {rel!r}")
+            continue
+        stem = PurePosixPath(rel).stem.lower()
+        if stem in stems:
+            problems.append(f"files.csv: stem of {rel} repeats {stems[stem]}")
+        stems[stem] = rel
+        if len(r.get("sha256") or "") != 64:
+            problems.append(f"files.csv: sha256 of {rel}")
+        audio = root / "audio" / rel
+        if audio.is_file():
+            included += 1
+            if sha256_file(audio) != r["sha256"]:
+                problems.append(f"audio/{rel}: bytes do not match its sha256")
+    counts = m.get("counts") or {}
+    if rows and counts.get("files") != len(rows):
+        problems.append(f"manifest.json: counts.files {counts.get('files')} but files.csv has {len(rows)} rows")
+    want = {"all": len(rows), "none": 0}.get(m.get("audio_included"))
+    if want is not None and included != want:
+        problems.append(f"audio_included is {m.get('audio_included')!r} but {included} of {len(rows)} files are in audio/")
+    if m.get("audio_included") == "partial" and not 0 < included < len(rows):
+        problems.append("audio_included is 'partial' but audio/ has none or all of the files")
+
+    refs = [p for p in (root / "refs").glob("*") if p.is_file() and p.name != "uids.jsonl"] \
+        if (root / "refs").is_dir() else []
+    if len(refs) != 1:
+        problems.append(f"refs/ must hold exactly one references file besides uids.jsonl (found {len(refs)})")
+    uids = root / "refs" / "uids.jsonl"
+    if uids.is_file():
+        for n, line in enumerate(uids.read_text(encoding="utf-8").splitlines(), 1):
+            if line.strip():
+                rec = json.loads(line)
+                if not {"file", "start", "end", "uid"} <= rec.keys() or rec["file"] not in stems.values():
+                    problems.append(f"refs/uids.jsonl line {n}: needs file (a files.csv path), start, end, uid")
+    outs = root / "outputs" / "seg.jsonl"
+    if outs.is_file():
+        for n, line in enumerate(outs.read_text(encoding="utf-8").splitlines(), 1):
+            if line.strip():
+                rec = json.loads(line)
+                missing = {"model", "image", "sha256", "params", "output"} - rec.keys()
+                if missing or "segments" not in (rec.get("output") or {}):
+                    problems.append(f"outputs/seg.jsonl line {n}: missing {sorted(missing) or ['output.segments']}")
+    return problems
+
+
+def check_flags(path: Path) -> list[str]:
+    f = json.loads(path.read_text(encoding="utf-8"))
+    problems = []
+    if f.get("format") != "concord-flags" or f.get("format_version") != 1:
+        problems.append(f"{path.name}: format/format_version")
+    src = f.get("source") or {}
+    problems += [f"{path.name}: source.{k} missing" for k in SOURCE_FIELDS if not src.get(k)]
+    for n, flag in enumerate(f.get("flags") or [], 1):
+        if set(FLAG_FIELDS) - flag.keys():
+            problems.append(f"{path.name}: flag {n} needs {', '.join(FLAG_FIELDS)}")
+    return problems
+
+
+def check_samples() -> list[str]:
+    s = HERE / "samples"
+    problems = []
+    for pkg in sorted(s.glob("reference-package-*")):
+        problems += [f"{pkg.name}: {p}" for p in check_package(pkg)]
+    problems += check_flags(s / "flags.json")
+    for f in sorted((s / "api").glob("*.json")):
+        try:
+            body = json.loads(f.read_text(encoding="utf-8"))
+        except ValueError as exc:
+            problems.append(f"api/{f.name}: {exc}")
+            continue
+        if f.name.startswith("config.") and body.get("contract_version") != CONTRACT_VERSION:
+            problems.append(f"api/{f.name}: contract_version {body.get('contract_version')}")
+    text = (REPO / "CONTRACTS.md").read_text(encoding="utf-8")
+    if f"**Contract version {CONTRACT_VERSION}.**" not in text:
+        problems.append(f"CONTRACTS.md does not say contract version {CONTRACT_VERSION}")
+    return problems
+
+
+def compare(peer: Path) -> list[str]:
+    """Differences between this repository's CONTRACTS.md + contracts/ and the peer's."""
+    problems = []
+    if not filecmp.cmp(REPO / "CONTRACTS.md", peer / "CONTRACTS.md", shallow=False):
+        problems.append("CONTRACTS.md differs")
+    mine = {p.relative_to(REPO).as_posix() for p in (REPO / "contracts").rglob("*")
+            if p.is_file() and "__pycache__" not in p.parts}
+    theirs = {p.relative_to(peer).as_posix() for p in (peer / "contracts").rglob("*")
+              if p.is_file() and "__pycache__" not in p.parts}
+    problems += [f"only here: {r}" for r in sorted(mine - theirs)]
+    problems += [f"only in {peer.name}: {r}" for r in sorted(theirs - mine)]
+    problems += [f"differs: {r}" for r in sorted(mine & theirs)
+                 if not filecmp.cmp(REPO / r, peer / r, shallow=False)]
+    return problems
+
+
+def find_peer() -> Path | None:
+    for name in ("Concord", "concord-label", "concord-bench"):
+        cand = REPO.parent / name
+        if cand.resolve() != REPO and (cand / "CONTRACTS.md").is_file():
+            return cand
+    return None
+
+
+def main(argv: list[str] | None = None) -> int:
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--peer", type=Path, help="the other app's repository")
+    args = ap.parse_args(argv)
+    problems = check_samples()
+    peer = args.peer or find_peer()
+    if peer is None:
+        print("no other repository found next to this one; comparison skipped")
+    else:
+        problems += [f"vs {peer}: {p}" for p in compare(peer.resolve())]
+    for p in problems:
+        print(f"FAIL {p}")
+    if not problems:
+        print(f"contracts v{CONTRACT_VERSION}: samples ok" + (f", identical to {peer}" if peer else ""))
+    return 1 if problems else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

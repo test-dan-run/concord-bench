@@ -1,0 +1,18 @@
+{
+ "dataset": {
+  "id": 7,
+  "name": "Help desk calls v2",
+  "export_version": 2
+ },
+ "scores": [
+  {
+   "model": "whisper-large-v3",
+   "display_name": "whisper-large-v3",
+   "wer": 0.052,
+   "normaliser": "basic@1",
+   "run_id": 31,
+   "score_id": 58,
+   "created_at": "2026-10-23T11:02:13Z"
+  }
+ ]
+}

@@ -1,0 +1,10 @@
+{
+ "app": "concord-bench",
+ "version": "0.2.0",
+ "contract_version": 1,
+ "peer": {
+  "url": "http://localhost:8610",
+  "reachable": true,
+  "contract_version": 1
+ }
+}

@@ -1,0 +1,41 @@
+{
+ "format": "concord-reference-package",
+ "format_version": 1,
+ "name": "Help desk calls",
+ "created_at": "2026-10-21T09:00:00Z",
+ "language": "en",
+ "tags": [
+  "call-centre",
+  "en"
+ ],
+ "source": {
+  "app": "concord-label",
+  "install_id": "3f2a9c1e5b7d4a60",
+  "dataset_uid": "8d4e2b6a1c9f4e3a9b7c5d1e2f3a4b5c",
+  "dataset_name": "Help desk calls"
+ },
+ "export_version": 1,
+ "scope": "complete",
+ "label_types": [
+  "asr",
+  "diar"
+ ],
+ "counts": {
+  "files": 1,
+  "segments": 3,
+  "hours": 0.002933
+ },
+ "audio_included": "all",
+ "review": {
+  "confirmed": 3,
+  "auto": 0,
+  "needs_review": 0,
+  "rejected": 0
+ },
+ "models": [
+  "pyannote-diarization",
+  "whisper-large-v3",
+  "faster-whisper-large-v3"
+ ],
+ "normaliser": "basic"
+}

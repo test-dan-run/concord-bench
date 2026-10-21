@@ -1,0 +1,21 @@
+{
+ "format": "concord-reference-package",
+ "format_version": 1,
+ "name": "Help desk calls (speakers)",
+ "created_at": "2026-10-21T09:00:00Z",
+ "language": "en",
+ "tags": [
+  "call-centre",
+  "en"
+ ],
+ "scope": "complete",
+ "label_types": [
+  "diar"
+ ],
+ "counts": {
+  "files": 1,
+  "segments": 3,
+  "hours": 0.002933
+ },
+ "audio_included": "none"
+}

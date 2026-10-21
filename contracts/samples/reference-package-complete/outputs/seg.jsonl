@@ -1,0 +1,1 @@
+{"model": "pyannote-diarization", "image": "ghcr.io/owner/pyannote-diarization:0.1.0", "sha256": "36d978579f0dd2ee634aff2674938f2c40089bce9ce624eca26a9a30d1830eea", "params": {"sample_rate": 16000}, "latency_s": 0.84, "output": {"segments": [[0.41, 3.38], [2.93, 6.8], [7.12, 9.94]], "speakers": ["spk0", "spk1", "spk0"]}}

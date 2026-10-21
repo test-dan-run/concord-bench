@@ -85,6 +85,10 @@ lint:
     uv run lint-imports
     cd frontend && npm run lint --silent
 
+# check contracts/samples (CONTRACTS.md) and compare with the other app's repository next to this one
+check-contracts:
+    {{py}} contracts/check.py
+
 # regenerate fixtures/generated with kokoro-tts (start it first: `just up kokoro-tts` in the platform)
 fixtures:
     {{py}} fixtures/synth/make.py

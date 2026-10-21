@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from ..core.models import AudioFile, Segment, SegmentStatus
 from ..metrics.der import Turn
 
-# Reference labels: confirmed segments. Phase 2 pseudo labels never become references by themselves.
+# Reference labels: confirmed segments (the only status Bench writes; Concord Label sends only confirmed ones).
 REFERENCE_STATUSES = (SegmentStatus.confirmed,)
 
 

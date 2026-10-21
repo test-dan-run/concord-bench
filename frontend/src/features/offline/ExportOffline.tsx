@@ -1,9 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { api, qs, type Job, type OfflineExport, type OfflinePreview, type OfflineServices } from "../../lib/api";
+import { api, qs, type Job, type OfflineAppChoice, type OfflineExport, type OfflinePreview, type OfflineServices } from "../../lib/api";
 import { ago, bytes, num, pct } from "../../lib/format";
-import { selectionSummary } from "../../lib/offline";
+import { appImageBytes, appsQuery, initialAppPick, pickedApps, selectionSummary, type AppPick } from "../../lib/offline";
 import * as I from "../../components/icons";
 import { Button, Chip, cx, Empty, ErrorNote, Fact, JobPill, PageHeader, Panel, Select, Spinner, Toggle } from "../../components/ui";
 
@@ -12,7 +12,7 @@ const KINDS = [
   { value: "models", label: "Model kit" },
 ];
 const KIND_NOTE: Record<string, string> = {
-  full: "Concord image, platform and the chosen models. Used once, to set up the offline machine.",
+  full: "The ticked apps, platform and the chosen models. Used once, to set up the offline machine.",
   models: "The chosen models only. Added with install.sh --add to an offline machine that already has a full kit.",
 };
 
@@ -34,26 +34,30 @@ export function ExportOffline() {
   const table = useQuery({ queryKey: ["offline-services"], queryFn: () => api.get<OfflineServices>("/offline/services") });
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [kind, setKind] = useState("full");
-  const [image, setImage] = useState("");
+  const [appPick, setAppPick] = useState<AppPick | null>(null);
   const [dest, setDest] = useState("");
   const [name, setName] = useState("");
   const [q, setQ] = useState("");
   const [started, setStarted] = useState<number | null>(null);
   useEffect(() => {
     if (table.data && !dest) setDest(table.data.default_dest);
-    if (table.data && !image) setImage(table.data.default_image);
-  }, [table.data, dest, image]);
+    if (table.data && !appPick) setAppPick(initialAppPick(table.data.apps));
+  }, [table.data, dest, appPick]);
 
+  const choices = table.data?.apps ?? [];
+  const apps = pickedApps(choices, appPick ?? {});
+  const appsQ = kind === "full" ? appsQuery(apps) : undefined;
+  const noApp = kind === "full" && !!appPick && Object.keys(apps).length === 0;
   const names = useMemo(() => [...picked].sort(), [picked]);
   const destQ = useDebounced(dest);
   const nameQ = useDebounced(name);
   const pv = useQuery({
-    queryKey: ["offline-preview", names.join(","), kind, destQ, image, nameQ],
-    queryFn: () => api.get<OfflinePreview>(`/offline/preview${qs({ services: names.join(","), kind, dest: destQ, concord_image: kind === "full" ? image : undefined, name: nameQ })}`),
-    enabled: names.length > 0 && !!destQ,
+    queryKey: ["offline-preview", names.join(","), kind, destQ, appsQ, nameQ],
+    queryFn: () => api.get<OfflinePreview>(`/offline/preview${qs({ services: names.join(","), kind, dest: destQ, apps: appsQ, name: nameQ })}`),
+    enabled: names.length > 0 && !!destQ && !noApp,
   });
   const go = useMutation({
-    mutationFn: () => api.post<{ export: OfflineExport }>("/offline/exports", { services: names, kind, dest, concord_image: kind === "full" ? image : null, name: name || null }),
+    mutationFn: () => api.post<{ export: OfflineExport }>("/offline/exports", { services: names, kind, dest, apps: kind === "full" ? apps : null, name: name || null }),
     onSuccess: (r) => {
       setStarted(r.export.id);
       void qc.invalidateQueries({ queryKey: ["offline-exports"] });
@@ -77,7 +81,7 @@ export function ExportOffline() {
       <PageHeader
         crumbs="Bring your own"
         title="Export for offline"
-        subtitle="Write a kit for a machine without internet access: the models' images and weights, the platform files that start them, and for a full kit Concord Bench itself. Registrations, scores and datasets stay here."
+        subtitle="Write a kit for a machine without internet access: the models' images and weights, the platform files that start them, and for a full kit Concord Bench, Concord Label or both. Registrations, scores and datasets stay here."
       />
       <div className="flex flex-col xl:flex-row gap-5 items-start">
         <Panel className="flex-1 w-full" title="Platform registry" subtitle="Every service in the platform, registered in Concord or not. Nothing is added automatically, not even the other half of a pipeline.">
@@ -139,11 +143,19 @@ export function ExportOffline() {
               <span className="text-xs text-muted">{KIND_NOTE[kind]}</span>
             </div>
             {kind === "full" && (
-              <Select label="Concord image" value={image} onChange={(e) => setImage(e.target.value)}>
-                {(table.data?.concord_images ?? []).map((c) => (
-                  <option key={c.image} value={c.image}>{c.image}{c.present ? ` · ${size(c.bytes)}` : " · not built"}</option>
+              <fieldset className="flex flex-col gap-2">
+                <legend className="text-xs text-muted mb-1">Apps in the kit</legend>
+                {choices.map((c) => (
+                  <AppChoice
+                    key={c.app}
+                    choice={c}
+                    on={!!appPick?.[c.app]?.on}
+                    image={appPick?.[c.app]?.image ?? null}
+                    onChange={(next) => setAppPick((p) => ({ ...(p ?? {}), [c.app]: next }))}
+                  />
                 ))}
-              </Select>
+                {Object.keys(apps).length === 2 && <span className="text-[11px] text-subtle">Both apps start from one compose file and know each other's address, so Send to Bench and Open in Label work offline.</span>}
+              </fieldset>
             )}
             <label className="flex flex-col gap-1 text-xs text-muted">
               Destination folder (on this machine)
@@ -158,19 +170,20 @@ export function ExportOffline() {
               <Fact k="Services" v={num(quick.services)} />
               <Fact k="Model images" v={p ? `up to ${size(p.images.bytes)}` : quick.services ? `up to ${size(quick.imageBytes)}` : "—"} />
               <Fact k="Weights" v={size(p ? p.weights_bytes : quick.services ? quick.weightsBytes : null)} />
-              {kind === "full" && <Fact k="Concord image" v={size(p?.concord?.bytes ?? table.data?.concord_images.find((c) => c.image === image)?.bytes)} />}
+              {kind === "full" && <Fact k="App images" v={size(p ? p.apps_bytes : appImageBytes(choices, appPick ?? {}))} />}
               <Fact k="Total" v={p ? `up to ${size(p.bytes)}` : "—"} />
               <Fact k="Free at destination" v={size(p?.free_bytes)} />
               <Fact k="VRAM, all together" v={p ? `${pct(p.budget.total_fraction)} of ${pct(p.budget.util_limit, 0)} limit` : quick.services ? pct(quick.gpuFraction) : "—"} />
             </div>
             <span className="text-[11px] text-subtle">Images are counted before shared layers and compression; one docker save stores shared layers once, so the kit is usually smaller.</span>
             {pv.isFetching && <Spinner label="Checking images and weights" />}
+            {noApp && <div className="border border-bad/50 bg-bad/10 rounded-md px-3 py-2 text-xs">A full kit needs at least one app: include Concord Bench, Concord Label or both.</div>}
             <ErrorNote error={pv.error} />
             {p?.problems.map((x) => <div key={x} className="border border-bad/50 bg-bad/10 rounded-md px-3 py-2 text-xs">{x}</div>)}
             {p?.warnings.map((x) => <div key={x} className="border border-warn/50 bg-warn/10 rounded-md px-3 py-2 text-xs">{x}</div>)}
             {p?.kit && !p.problems.length && <span className="text-xs text-muted">Writes <span className="num text-fg break-all">{p.kit}</span></span>}
             <ErrorNote error={go.error} />
-            <Button variant="primary" disabled={!names.length || !p || p.problems.length > 0 || pv.isFetching || go.isPending} onClick={() => go.mutate()}>
+            <Button variant="primary" disabled={!names.length || noApp || !p || p.problems.length > 0 || pv.isFetching || go.isPending} onClick={() => go.mutate()}>
               <I.Download size={14} /> {go.isPending ? "Starting…" : "Export kit"}
             </Button>
           </Panel>
@@ -179,6 +192,32 @@ export function ExportOffline() {
       </div>
       <History />
     </>
+  );
+}
+
+// One app a full kit can carry: a checkbox, and its local image (a choice when `docker images` lists several).
+export function AppChoice({ choice: c, on, image, onChange }: { choice: OfflineAppChoice; on: boolean; image: string | null; onChange: (next: { on: boolean; image: string | null }) => void }) {
+  const present = c.images.filter((i) => i.present);
+  const current = c.images.find((i) => i.image === image);
+  return (
+    <div className="flex flex-col gap-1">
+      <label className="flex items-center gap-2 text-[13px] text-fg">
+        <input type="checkbox" checked={on} disabled={!present.length && !on} onChange={(e) => onChange({ on: e.target.checked, image })} />
+        Include {c.title}
+        <span className="text-[11px] text-subtle">port {c.port}{c.own ? " · this app" : ""}</span>
+      </label>
+      <span className="pl-6 text-xs text-muted">
+        {!present.length || (current && !current.present) ? (
+          <span className="text-warn">{image ? `${image}: ` : ""}image not found — run <span className="num">just build</span> in that repo</span>
+        ) : present.length > 1 ? (
+          <Select aria-label={`${c.title} image`} value={image ?? ""} onChange={(e) => onChange({ on, image: e.target.value })}>
+            {present.map((i) => <option key={i.image} value={i.image}>{i.image} · {size(i.bytes)}</option>)}
+          </Select>
+        ) : (
+          <span className="num">{present[0].image} · {size(present[0].bytes)}</span>
+        )}
+      </span>
+    </div>
   );
 }
 
@@ -235,7 +274,7 @@ function History() {
               {hist.data.map((e) => (
                 <tr key={e.id} className="border-b border-track align-top">
                   <td className="px-2 py-1.5 text-xs text-muted whitespace-nowrap">{ago(e.finished_at ?? e.created_at)}</td>
-                  <td className="px-2 py-1.5 text-xs">{e.kind === "full" ? "Full" : "Models"}{e.concord_image && <span className="text-subtle"> · {e.concord_image}</span>}</td>
+                  <td className="px-2 py-1.5 text-xs">{e.kind === "full" ? "Full" : "Models"}{e.app_images.length > 0 && <span className="text-subtle"> · {e.app_images.join(", ")}</span>}</td>
                   <td className="px-2 py-1.5 text-xs">{e.services.join(", ")}</td>
                   <td className="px-2 py-1.5"><JobPill status={e.job?.status ?? e.status} progress={e.job?.progress} /></td>
                   <td className="px-2 py-1.5 text-xs num break-all">{e.path ?? (e.error ? <span className="text-bad">{e.error}</span> : e.dest)}</td>

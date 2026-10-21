@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
-import type { OfflineService } from "./api";
-import { selectionSummary } from "./offline";
+import type { OfflineAppChoice, OfflineService } from "./api";
+import { appImageBytes, appsQuery, initialAppPick, pickedApps, selectionSummary, type AppPick } from "./offline";
+
+const THIS: string = "concord-bench"; // the app this repository builds
 
 function row(name: string, image: string, image_bytes: number | null, weights_bytes: number, gpu_fraction = 0): OfflineService {
   return {
@@ -29,5 +31,31 @@ describe("selectionSummary", () => {
   });
   it("is empty for no selection", () => {
     expect(selectionSummary(rows, new Set())).toEqual({ services: 0, imageBytes: 0, weightsBytes: 0, gpuFraction: 0, unknownImages: 0 });
+  });
+});
+
+describe("apps in a full kit", () => {
+  const choices: OfflineAppChoice[] = [
+    { app: "concord-bench", title: "Concord Bench", port: 8600, own: THIS === "concord-bench", default_image: "concord-bench:0.2.0",
+      images: [{ image: "concord-bench:0.2.0", present: true, bytes: 1.8e9 }] },
+    { app: "concord-label", title: "Concord Label", port: 8620, own: THIS === "concord-label", default_image: "concord-label:0.2.0",
+      images: [{ image: "concord-label:0.1.0", present: true, bytes: 1.7e9 }, { image: "concord-label:0.2.0", present: true, bytes: 1.9e9 }] },
+  ];
+  it("ticks this app only by default", () => {
+    const pick = initialAppPick(choices);
+    expect(pickedApps(choices, pick)).toEqual({ [THIS]: `${THIS}:0.2.0` });
+    expect(appImageBytes(choices, pick)).toBe(THIS === "concord-bench" ? 1.8e9 : 1.9e9);
+  });
+  it("carries both apps with the picked tags and counts their images", () => {
+    const pick: AppPick = { "concord-bench": { on: true, image: "concord-bench:0.2.0" }, "concord-label": { on: true, image: "concord-label:0.1.0" } };
+    const apps = pickedApps(choices, pick);
+    expect(appsQuery(apps)).toBe("concord-bench=concord-bench:0.2.0,concord-label=concord-label:0.1.0");
+    expect(appImageBytes(choices, pick)).toBeCloseTo(3.5e9);
+  });
+  it("leaves out an app with no image and writes an empty query for none", () => {
+    const missing = [{ ...choices[1], images: [], default_image: null }];
+    expect(initialAppPick(missing)["concord-label"]).toEqual({ on: THIS === "concord-label", image: null });
+    expect(appsQuery({ "concord-label": null })).toBe("concord-label");
+    expect(appsQuery({})).toBe("");
   });
 });

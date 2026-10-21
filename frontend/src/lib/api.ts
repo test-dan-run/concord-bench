@@ -515,9 +515,28 @@ export interface OfflineServices {
   services: OfflineService[];
   platform: { gpu_total_gb: number; util_limit: number; network: string; compose_project: string };
   warnings: string[];
-  concord_images: { image: string; present: boolean; bytes: number | null }[];
-  default_image: string;
+  apps: OfflineAppChoice[];
   default_dest: string;
+}
+
+// An app a full kit can carry (CONTRACTS.md §6): this one, the other one, or both.
+export interface OfflineAppChoice {
+  app: string; // concord-bench | concord-label
+  title: string;
+  port: number;
+  own: boolean;
+  images: { image: string; present: boolean; bytes: number | null }[];
+  default_image: string | null; // null: no local image of the other app
+}
+
+export interface OfflineAppRow {
+  app: string;
+  title: string;
+  image: string | null;
+  tar: string;
+  present: boolean;
+  id: string | null;
+  bytes: number | null;
 }
 
 export interface OfflinePreview {
@@ -526,7 +545,8 @@ export interface OfflinePreview {
   budget: { total_fraction: number; util_limit: number; ok: boolean };
   images: { refs: string[]; bytes: number };
   weights_bytes: number;
-  concord: { image: string; present: boolean; id: string | null; bytes: number | null } | null;
+  apps: OfflineAppRow[];
+  apps_bytes: number;
   bytes: number;
   free_bytes: number | null;
   dest: string;
@@ -540,6 +560,7 @@ export interface OfflineExport {
   kind: "full" | "models";
   services: string[];
   concord_image: string | null;
+  app_images: string[];
   dest: string;
   name: string | null;
   status: "queued" | "running" | "done" | "failed";

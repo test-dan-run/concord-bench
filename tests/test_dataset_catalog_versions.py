@@ -314,7 +314,7 @@ def test_publish_a_new_version_of_an_existing_dataset(client, session, dataset_s
     # the person saw v1 as the latest, but another app published v2 meanwhile
     dataset_store.publish(did, SAMPLES / "reference-package-any", parent=1)
     r = client.post(f"/api/datasets/{ds.id}/publish", json={"catalog_dataset_id": did, "parent": 1})
-    assert r.status_code == 409 and "latest version is now v2" in r.json()["detail"]
+    assert r.status_code == 409 and "latest version is now v2, published by Concord Bench" in r.json()["detail"]
     assert session.get(Dataset, ds.id).catalog_dataset_id is None
     out = publish(client, ds.id, catalog_dataset_id=did, parent=1, force=True)
     assert out["version"]["n"] == 3 and out["version"]["parent_n"] == 1

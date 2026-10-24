@@ -79,7 +79,7 @@ function CatalogVersions({ id }: { id: string }) {
   if (d.error || !d.data) return <ErrorNote error={d.error} />;
   const versions = d.data.versions ?? [];
   return (
-    <div className="flex flex-col gap-2 border-l-2 border-track ml-3 pl-3 py-2">
+    <div className="flex flex-col border-l-2 border-track ml-3 pl-3 py-1">
       {versions.length === 0 && <span className="text-xs text-muted">No versions yet.</span>}
       {versions.map((v) => (
         <VersionRow key={v.n} v={v} pending={stage.isPending && stage.variables === v.n} onPreview={() => stage.mutate(v.n)} />
@@ -91,30 +91,33 @@ function CatalogVersions({ id }: { id: string }) {
 }
 
 function VersionRow({ v, pending, onPreview }: { v: CatalogVersion; pending: boolean; onPreview: () => void }) {
+  const files = v.counts.files;
   return (
-    <div className="flex flex-col gap-1 text-[13px]" aria-label={`Version ${v.n}`}>
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="font-medium num">v{v.n}</span>
-        {typeChips(v.label_types)}
+    <div className="flex items-start gap-3 py-2 border-b border-track last:border-0 text-[13px]" aria-label={`Version ${v.n}`}>
+      <div className="flex-1 min-w-0 flex flex-col gap-1">
+        <span className="flex flex-wrap items-center gap-2">
+          <span className="font-medium num">v{v.n}</span>
+          {typeChips(v.label_types)}
+        </span>
         <span className="text-xs text-muted num">
-          {num(v.counts.files)} files · {hours(v.counts.hours)}
-          {v.label_types.length > 0 && ` · ${num(v.counts.segments)} segments`}
+          {num(files)} file{files === 1 ? "" : "s"} · {hours(v.counts.hours)}
+          {v.label_types.length > 0 && ` · ${num(v.counts.segments)} segment${v.counts.segments === 1 ? "" : "s"}`}
         </span>
-        <Button size="sm" className="ml-auto" disabled={!v.importable || pending} onClick={onPreview}>
-          {pending ? "Staging…" : "Preview"}
-        </Button>
+        <span className="text-xs text-subtle">
+          Published by {appName(v.published_by)} {ago(v.published_at)}
+          {v.parent_n != null && ` · based on v${v.parent_n}${v.parent_deleted ? " (deleted)" : ""}`}
+        </span>
+        {!v.importable && <span className="text-xs text-muted">Audio only: label it in Concord Label and publish a version with references to benchmark it.</span>}
+        {v.bench.map((b) => (
+          <span key={b.id} className="text-xs">
+            {b.published ? "Published from" : "In Bench as"} <Link to={`/datasets/${b.id}`}>{b.name}</Link>
+            {b.status !== "ready" && <span className="text-muted"> ({b.status})</span>}
+          </span>
+        ))}
       </div>
-      <span className="text-xs text-subtle">
-        Published by {appName(v.published_by)} {ago(v.published_at)}
-        {v.parent_n != null && ` · based on v${v.parent_n}${v.parent_deleted ? " (deleted)" : ""}`}
-      </span>
-      {!v.importable && <span className="text-xs text-muted">Audio only: label it in Concord Label and publish a version with references to benchmark it.</span>}
-      {v.bench.map((b) => (
-        <span key={b.id} className="text-xs">
-          {b.published ? "Published from" : "In Bench as"} <Link to={`/datasets/${b.id}`}>{b.name}</Link>
-          {b.status !== "ready" && <span className="text-muted"> ({b.status})</span>}
-        </span>
-      ))}
+      <Button size="sm" disabled={!v.importable || pending} onClick={onPreview}>
+        {pending ? "Staging…" : "Preview"}
+      </Button>
     </div>
   );
 }

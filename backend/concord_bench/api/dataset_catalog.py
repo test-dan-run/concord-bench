@@ -21,6 +21,7 @@ from ..platform import dataset_catalog
 from .datasets import dataset_json
 
 router = APIRouter(tags=["dataset catalog"])
+APP_NAMES = {"concord-label": "Concord Label", "concord-bench": "Concord Bench"}
 
 
 @contextmanager
@@ -76,8 +77,9 @@ def stale_message(exc: dataset_catalog.StaleParent) -> str:
     if not v:
         return dataset_catalog.message(exc)
     when = str(v.get("published_at") or "")[:16].replace("T", " ")
-    return (f"The latest version is now v{v.get('n')}, published by {v.get('published_by')} on {when} UTC, not the "
-            "version this one is based on.")
+    who = APP_NAMES.get(str(v.get("published_by")), v.get("published_by"))
+    return (f"The latest version is now v{v.get('n')}, published by {who} on {when} UTC, not the version this one "
+            "is based on.")
 
 
 class PublishIn(BaseModel):

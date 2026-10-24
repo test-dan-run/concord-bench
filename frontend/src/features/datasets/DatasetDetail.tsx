@@ -4,12 +4,13 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { api, type Dataset, type EnhancedCopy, type FlaggedReference, type Run } from "../../lib/api";
 import { useConfig } from "../../lib/config";
 import { ago, bytes, clock, hours, num, rtf } from "../../lib/format";
-import { flagsPushBlocker, fromLabel, provenanceOf } from "../../lib/peer";
+import { appName, CATALOG_INSTALL, flagsPushBlocker, fromLabel, provenanceOf } from "../../lib/peer";
 import * as I from "../../components/icons";
 import { LabelsTable } from "../../components/LabelsTable";
 import { TagInput } from "../../components/TagInput";
 import { Button, Chip, Empty, EnhChip, ErrorNote, Fact, JobPill, PageHeader, Panel, Spinner, StatusDot } from "../../components/ui";
 import { AddEnhancement } from "./AddEnhancement";
+import { CatalogPanel } from "./CatalogPanel";
 import { EMPTY_PLAN, PlanPanel, planCount, type PlanValue } from "../benchmarks/PlanPanel";
 
 interface FileRow {
@@ -92,7 +93,7 @@ export function DatasetDetail() {
         subtitle={d.description ?? undefined}
         actions={
           <>
-            <Button variant="danger" size="sm" onClick={() => confirm(`Delete dataset “${d.name}” and its runs? Original audio files stay on disk.`) && del.mutate()}>
+            <Button variant="danger" size="sm" onClick={() => confirm(`Delete dataset “${d.name}” and its runs? Original audio files stay ${cfg?.dataset_catalog.enabled ? "in the Dataset Catalog's store" : "on disk"}.`) && del.mutate()}>
               Delete
             </Button>
           </>
@@ -348,7 +349,13 @@ export function DatasetDetail() {
           <aside className="w-full xl:w-[360px] shrink-0 flex flex-col gap-4">
             {prov && (
               <Panel title="Where the references came from" subtitle="Imported from a reference package. References are never changed; a newer package is a new version.">
-                {prov.source ? (
+                {prov.source?.install_id === CATALOG_INSTALL ? (
+                  <>
+                    <Fact k="Source dataset" v={prov.source.dataset_name} />
+                    <Fact k="From" v={`Dataset Catalog, published by ${appName(prov.source.app)}`} />
+                    <Fact k="Version" v={`v${d.export_version ?? prov.export_version ?? "?"}`} />
+                  </>
+                ) : prov.source ? (
                   <>
                     <Fact k="Source dataset" v={prov.source.dataset_name} />
                     <Fact k="From" v={prov.source.app === "concord-label" ? "Concord Label" : prov.source.app} />
@@ -376,6 +383,7 @@ export function DatasetDetail() {
                 )}
               </Panel>
             )}
+            {(cfg?.dataset_catalog.enabled || d.catalog) && <CatalogPanel d={d} />}
             {prevPlan && prevPlan.models > 0 && d.label_types.length > 0 && (
               <Panel title={`Run the models benchmarked on ${prevPlan.previous.name}`} subtitle="Pre-ticked with the models that have finished runs on the previous version.">
                 <PlanPanel datasetId={d.id} value={rerun} onChange={setRerun} preset={prevPlan.plan} />

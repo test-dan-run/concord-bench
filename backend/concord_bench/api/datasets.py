@@ -17,6 +17,7 @@ from ..core import paths
 from ..core.db import get_session
 from ..core.models import AudioFile, Dataset, EnhancedCopy, Job, JobStatus, Model, Run, RunTask, Segment, Slice
 from ..core.settings import REPO_ROOT
+from ..datasets import catalog as catalog_mod
 from ..datasets import refpackage
 from ..datasets.ingest import NO_REFERENCES, inspect_source
 from ..platform import catalog, dataset_catalog
@@ -165,6 +166,11 @@ def dataset_json(session: Session, ds: Dataset, detail: bool = False) -> dict[st
                           "status": v.status, "created_at": v.created_at.isoformat()}
                          for v in refpackage.versions_of(session, key, failed=True)]
         d["previous_plan"] = previous_plan(session, ds)
+        # Publishing (DATASET_CATALOG_PLAN.md §9.3): why not, or else the catalog dataset the previous version is in.
+        d["publish_blocker"] = catalog_mod.publish_blocker(ds)
+        prev = session.get(Dataset, ds.previous_version_id) if ds.previous_version_id else None
+        d["publish_target"] = ({"dataset_id": prev.catalog_dataset_id, "n": prev.catalog_version}
+                               if prev is not None and prev.catalog_dataset_id else None)
         d["report"] = rep
         d["runs"] = session.scalar(select(func.count(Run.id)).where(Run.dataset_id == ds.id))
         job = session.scalar(select(Job).where(Job.type == "ingest").order_by(Job.id.desc())

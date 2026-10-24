@@ -5,8 +5,10 @@ imported as before."""
 
 from __future__ import annotations
 
+import json
 import shutil
 
+import pytest
 from sqlalchemy import select
 
 from concord_bench.core import db, paths
@@ -220,3 +222,151 @@ def test_a_zip_still_imports_with_the_store_set_up(client, dataset_store):
     d = accept(client, staged.json()["id"])
     assert d["catalog"] is None and d["from_catalog"] is False
     assert dataset_store.held() == {CLIP_SHA} and dataset_store.audio(CLIP_SHA) is not None
+
+
+# ---------------------------------------------------------------- publishing from Bench (§9.3)
+
+
+def ingest_refs(session, tmp_path, refs: str, name: str = "fx") -> Dataset:
+    from concord_bench.datasets.ingest import ingest
+    from conftest import GEN
+
+    src = tmp_path / f"src-{name}"
+    shutil.copytree(GEN / "dataset" / "audio", src / "audio")
+    shutil.copytree(GEN / "refs" / refs, src / refs)
+    ds = Dataset(name=name, language="en", tags=["synth"])
+    session.add(ds)
+    session.flush()
+    ingest(session, ds.id, src)
+    session.commit()
+    return ds
+
+
+def references(s, dataset_id: int) -> dict:
+    """Files with their labels, and segments with their uids and labels, by path."""
+    from concord_bench.datasets import labels
+
+    s.expire_all()
+    files = s.scalars(select(AudioFile).where(AudioFile.dataset_id == dataset_id).order_by(AudioFile.rel_path))
+    return {f.rel_path: (f.sha256, f.meta, [(x.start, x.end, x.speaker, x.text, x.uid, labels.of(x.meta))
+                                            for x in sorted(f.segments, key=lambda x: (x.start, x.end, x.speaker or ""))])
+            for f in files if f.usable}
+
+
+def publish(client, dataset_id: int, status: int = 201, **body) -> dict:
+    r = client.post(f"/api/datasets/{dataset_id}/publish", json=body)
+    assert r.status_code == status, r.text
+    return r.json()
+
+
+@pytest.mark.parametrize(("refs", "refs_file", "label_types"), [
+    ("stm", "segments.seglst.json", ["asr", "diar"]),
+    ("asr-jsonl", "segments.jsonl", ["asr"]),
+    ("rttm", "refs.rttm", ["diar"]),
+])
+def test_publish_an_upload_as_v1_and_import_it_back_unchanged(client, session, dataset_store, tmp_path, refs,
+                                                             refs_file, label_types):
+    ds = ingest_refs(session, tmp_path, refs)
+    out = publish(client, ds.id, name="Synth calls")
+    v = out["version"]
+    assert out["created"] and v["n"] == 1 and v["parent_n"] is None and v["label_types"] == label_types
+    did = v["dataset_id"]
+    assert out["dataset"]["catalog"] == {"dataset_id": did, "n": 1, "published": True,
+                                         "url": f"http://127.0.0.1:8700/datasets/{did}/v/1"}
+    cat = dataset_store.dataset(did)
+    assert cat["name"] == "Synth calls" and cat["language"] == "en" and cat["tags"] == ["synth"]
+    folder = dataset_store.version_dir(did, 1)
+    assert sorted(p.name for p in (folder / "refs").iterdir()) == sorted([refs_file, "uids.jsonl"])
+    assert not (folder / "audio").exists() and not (folder / "outputs").exists()
+    manifest = json.loads((folder / "manifest.json").read_text())
+    assert manifest["format_version"] == 2 and manifest["counts"]["files"] == 6  # the undecodable file is left out
+    assert dataset_store.version(did, 1)["uses"][0]["ref"] == str(ds.id)
+    assert dataset_store.held() == {sha for sha, *_ in references(session, ds.id).values()} | {
+        session.scalar(select(AudioFile.sha256).where(AudioFile.status == "undecodable"))}
+    # the version imported again: the same references, uids and labels
+    back = accept(client, stage_version(client, did, 1)["id"])
+    assert back["label_types"] == label_types
+    mine, theirs = references(session, ds.id), references(session, back["id"])
+    assert theirs == mine
+    v1 = client.get(f"/api/dataset-catalog/datasets/{did}").json()["versions"][0]
+    assert [(b["id"], b["published"]) for b in v1["bench"]] == [(ds.id, True), (back["id"], False)]
+
+
+def test_labels_and_uids_from_a_zip_survive_publishing(client, session, dataset_store):
+    staged = client.post("/api/reference-imports", json={"upload_id": upload_zip(client, zip_folder(HELP_DESK))})
+    d = accept(client, staged.json()["id"])
+    did = publish(client, d["id"])["version"]["dataset_id"]
+    folder = dataset_store.version_dir(did, 1)
+    attrs = json.loads((folder / "refs" / "attributes.json").read_text())
+    assert attrs == json.loads((HELP_DESK / "refs" / "attributes.json").read_text())
+    manifest = json.loads((folder / "manifest.json").read_text())
+    assert manifest["scope"] == "complete" and manifest["normaliser"] == "basic"
+    back = accept(client, stage_version(client, did, 1)["id"])
+    assert references(session, back["id"]) == references(session, d["id"])
+    assert [x[4] for x in references(session, back["id"])["check_clip.wav"][2]] == LABEL_UIDS
+    with SessionLocal() as s:
+        assert s.get(Dataset, back["id"]).report["labels"] == s.get(Dataset, d["id"]).report["labels"]
+
+
+def test_publish_a_new_version_of_an_existing_dataset(client, session, dataset_store, tmp_path):
+    did = help_desk(dataset_store, tmp_path)
+    ds = ingest_refs(session, tmp_path, "stm")
+    # the person saw v1 as the latest, but another app published v2 meanwhile
+    dataset_store.publish(did, SAMPLES / "reference-package-any", parent=1)
+    r = client.post(f"/api/datasets/{ds.id}/publish", json={"catalog_dataset_id": did, "parent": 1})
+    assert r.status_code == 409 and "latest version is now v2" in r.json()["detail"]
+    assert session.get(Dataset, ds.id).catalog_dataset_id is None
+    out = publish(client, ds.id, catalog_dataset_id=did, parent=1, force=True)
+    assert out["version"]["n"] == 3 and out["version"]["parent_n"] == 1
+    assert dataset_store.version(did, 3)["published_by"] == "concord-bench"
+    # published once: not again
+    r = client.post(f"/api/datasets/{ds.id}/publish", json={})
+    assert r.status_code == 400 and "already published as v3" in r.json()["detail"]
+
+
+def test_without_a_parent_the_next_version_is_based_on_the_latest(client, session, dataset_store, tmp_path):
+    did = help_desk(dataset_store, tmp_path)
+    ds = ingest_refs(session, tmp_path, "rttm")
+    assert publish(client, ds.id, catalog_dataset_id=did)["version"]["parent_n"] == 1
+
+
+def test_datasets_made_from_catalog_versions_are_published_from_label(client, dataset_store, tmp_path):
+    did = help_desk(dataset_store, tmp_path)
+    d = accept(client, stage_version(client, did, 1)["id"])
+    detail = client.get(f"/api/datasets/{d['id']}").json()
+    assert "Concord Label" in detail["publish_blocker"]
+    r = client.post(f"/api/datasets/{d['id']}/publish", json={})
+    assert r.status_code == 400 and "Concord Label" in r.json()["detail"]
+    # a zip downloaded from the catalog is a catalog version too
+    pkg = tmp_path / "pkg"
+    shutil.copytree(dataset_store.version_dir(did, 1), pkg)
+    shutil.copytree(HELP_DESK / "audio", pkg / "audio")
+    manifest = json.loads((pkg / "manifest.json").read_text())
+    (pkg / "manifest.json").write_text(json.dumps({**manifest, "audio_included": "all"}))
+    z = accept(client, client.post("/api/reference-imports", json={"upload_id": upload_zip(client, zip_folder(pkg))})
+               .json()["id"])
+    assert z["from_catalog"] and z["catalog"] is None
+    assert client.post(f"/api/datasets/{z['id']}/publish", json={}).status_code == 400
+
+
+def test_publish_uploads_originals_from_before_the_store(client, session, tmp_path, monkeypatch):
+    ds = ingest_refs(session, tmp_path, "stm")  # originals in data/originals
+    fake = install_dataset_catalog(monkeypatch, tmp_path / "store")
+    assert not list((tmp_path / "store" / "audio").rglob("*"))
+    did = publish(client, ds.id)["version"]["dataset_id"]
+    assert fake.version(did, 1)["counts"]["files"] == 6
+    assert len([c for c in fake.calls if c[0] == "upload_audio"]) == 6 and len(fake.held()) == 6
+
+
+def test_a_failed_first_publish_leaves_no_empty_dataset(client, session, dataset_store, tmp_path, monkeypatch):
+    from aicore.datasets import InvalidVersion
+
+    ds = ingest_refs(session, tmp_path, "stm")
+
+    def refuse(*a, **k):
+        raise InvalidVersion(422, "the version is invalid: something", "invalid_version", problems=["something"])
+
+    monkeypatch.setattr(dataset_store, "publish", refuse)
+    r = client.post(f"/api/datasets/{ds.id}/publish", json={})
+    assert r.status_code == 422 and "invalid" in r.json()["detail"]
+    assert dataset_store.datasets() == [] and session.get(Dataset, ds.id).catalog_dataset_id is None

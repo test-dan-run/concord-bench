@@ -128,6 +128,10 @@ export interface Dataset {
   catalog: CatalogLink | null;
   /** Made from a catalog version (or a zip of one): published from Concord Label, not from here. */
   from_catalog: boolean;
+  /** Detail: why it can't be published to the Dataset Catalog, or null. */
+  publish_blocker?: string | null;
+  /** Detail: the catalog dataset the previous version is in, suggested as where the next version goes. */
+  publish_target?: { dataset_id: string; n: number } | null;
   previous_plan?: PreviousPlan | null;
   /** Detail: the dataset's enhanced copies; list: a short form of them. */
   enhanced?: EnhancedCopy[] | { enh_model_id: number; display_name: string; status: string; progress: number }[];

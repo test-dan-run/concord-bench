@@ -9,7 +9,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { api, type ReferenceImport } from "../../lib/api";
 import { useConfig } from "../../lib/config";
 import { ago, bytes, hours, num } from "../../lib/format";
-import { skippedSummary, sortImports, sourceLine } from "../../lib/peer";
+import { CATALOG_INSTALL, skippedSummary, sortImports, sourceLine } from "../../lib/peer";
 import { pickedFromDrop, pickedFromInput, uploadFiles, type PickedFile } from "../../lib/upload";
 import * as I from "../../components/icons";
 import { TagInput } from "../../components/TagInput";
@@ -79,6 +79,11 @@ export function ImportReference() {
                     {imp.result.outputs.already_cached ? `, ${imp.result.outputs.already_cached} already cached` : ""}
                     {skippedSummary(imp.result.outputs.skipped) && ` · skipped: ${skippedSummary(imp.result.outputs.skipped)}`}
                   </span>
+                )}
+                {cfg?.dataset_catalog.enabled && imp.status === "accepted" && imp.dataset_id && !imp.preview.catalog && imp.preview.source?.install_id !== CATALOG_INSTALL && (
+                  <Link to={`/datasets/${imp.dataset_id}#publish`} className="text-xs">
+                    Publish to the Dataset Catalog
+                  </Link>
                 )}
                 {imp.error && <span className="w-full text-xs text-bad">{imp.error}</span>}
               </div>

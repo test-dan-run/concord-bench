@@ -34,17 +34,29 @@ def get_or_create_pipeline(session: Session, seg_model_id: int | None, asr_model
     return p
 
 
+PLACEMENTS = ("before", "after")
+
+
 def run_label(run: Run) -> str:
     if run.task == RunTask.pipeline and run.pipeline:
         seg = run.pipeline.seg_model.display_name if run.pipeline.seg_model else "Reference segments + speakers"
-        return f"{seg} → {run.pipeline.asr_model.display_name}"
-    return run.model.display_name if run.model else f"run {run.id}"
+        base = f"{seg} → {run.pipeline.asr_model.display_name}"
+    else:
+        base = run.model.display_name if run.model else f"run {run.id}"
+    if run.enh_model is not None:
+        where = {"before": " before diarisation", "after": " after diarisation"}.get(run.enh_placement or "", "")
+        return f"{run.enh_model.display_name}{where} ▸ {base}" if run.task == RunTask.pipeline else \
+            f"{base} + {run.enh_model.display_name}"
+    return base
 
 
 def _active_run(session: Session, task: str, dataset: Dataset, model: Model | None,
-                pipeline: Pipeline | None) -> tuple[Run, Job] | None:
+                pipeline: Pipeline | None, enh_model: Model | None = None,
+                placement: str | None = None) -> tuple[Run, Job] | None:
     stmt = select(Run).where(Run.task == task, Run.dataset_id == dataset.id, Run.status.in_(ACTIVE))
     stmt = stmt.where(Run.pipeline_id == pipeline.id) if pipeline else stmt.where(Run.model_id == model.id)
+    stmt = stmt.where(Run.enh_model_id == enh_model.id) if enh_model else stmt.where(Run.enh_model_id.is_(None))
+    stmt = stmt.where(Run.enh_placement == placement) if placement else stmt.where(Run.enh_placement.is_(None))
     existing = session.scalar(stmt)
     if existing is not None:
         job = session.scalar(select(Job).where(Job.type == "run", Job.status.in_(ACTIVE))
@@ -55,37 +67,57 @@ def _active_run(session: Session, task: str, dataset: Dataset, model: Model | No
 
 
 def enqueue_run(session: Session, task: str, dataset: Dataset, model: Model | None = None,
-                normalisers_: list[str] | None = None, collar: float | None = None) -> tuple[Run, Job]:
+                normalisers_: list[str] | None = None, collar: float | None = None,
+                enh_model: Model | None = None) -> tuple[Run, Job]:
     """Queue a single-model run unless the same one is already queued or running (then return that).
-    Its job leases the model; pipelines go through `enqueue_pipelines`."""
+    Its job leases the model; with an enhancement model, it reads that model's copy of the dataset and waits
+    for the copy to be built. Pipelines go through `enqueue_pipelines`."""
     if dataset.status != "ready":
         raise HTTPException(409, f"dataset {dataset.name!r} is {dataset.status}")
-    active = _active_run(session, task, dataset, model, None)
+    active = _active_run(session, task, dataset, model, None, enh_model)
     if active is not None:
         return active
-    run = Run(task=task, dataset_id=dataset.id, model_id=model.id, status="queued")
+    after = []
+    if enh_model is not None:
+        _, cj = jobs.copy_job(session, dataset, enh_model)
+        after = [cj.id] if cj is not None else []
+    run = Run(task=task, dataset_id=dataset.id, model_id=model.id, status="queued",
+              enh_model_id=enh_model.id if enh_model else None)
     session.add(run)
     session.flush()
     session.refresh(run)
     job = jobs.enqueue(session, "run", {"run_id": run.id, "normalisers": normalisers_, "collar": collar},
-                       services_for(run))
+                       services_for(run), after)
     return run, job
 
 
 def enqueue_pipelines(session: Session, dataset: Dataset, pipelines: list[Pipeline],
                       normalisers_: list[str] | None = None, collar: float | None = None,
-                      order: list[str] | None = None) -> list[tuple[Run, Job]]:
+                      order: list[str] | None = None, enh_model: Model | None = None,
+                      placement: str | None = None) -> list[tuple[Run, Job]]:
     """Pipelines stage by stage (MODEL_CATALOG_REDESIGN.md, "Job planning"): one seg-stage job per
     segmenter over every file, one ASR-stage job per ASR model over the cuts of every seg source (oracle
     included), then one assemble-and-score run job per pipeline that needs no model. Each stage job leases
     only its own model, so each model loads once. `order` (catalog model ids, from the catalog's plan)
-    decides which stage job of a stage comes first. Pipelines already queued or running are returned as they are."""
+    decides which stage job of a stage comes first. Pipelines already queued or running are returned as they are.
+
+    With an enhancement model, the pipelines read its copy of the dataset (EVALUATE_PLAN.md §5.4): `before`
+    diarisation, both stages hear the copy; `after`, diarisation hears the original and ASR the copy. The
+    oracle has no diarisation, so its placement is None. Every job waits for the copy to be built."""
     if dataset.status != "ready":
         raise HTTPException(409, f"dataset {dataset.name!r} is {dataset.status}")
+    if enh_model is not None and placement not in PLACEMENTS:
+        raise HTTPException(422, f"placement must be one of {', '.join(PLACEMENTS)}")
+    copy_after: list[int] = []
+    if enh_model is not None:
+        _, cj = jobs.copy_job(session, dataset, enh_model)
+        copy_after = [cj.id] if cj is not None else []
+    enh_id = enh_model.id if enh_model else None
     out: list[tuple[Run, Job]] = []
     todo: list[Pipeline] = []
     for p in pipelines:
-        active = _active_run(session, RunTask.pipeline, dataset, None, p)
+        where = placement if enh_model is not None and p.seg_model_id is not None else None
+        active = _active_run(session, RunTask.pipeline, dataset, None, p, enh_model, where)
         if active is not None:
             out.append(active)
         else:
@@ -95,18 +127,23 @@ def enqueue_pipelines(session: Session, dataset: Dataset, pipelines: list[Pipeli
     def by_plan(models: list[Model]) -> list[Model]:
         return sorted(dict.fromkeys(models), key=lambda m: rank.get(m.catalog_id, len(rank)))
 
-    seg_jobs = {m.id: jobs.enqueue_stage(session, "seg_stage", dataset.id, m)
+    seg_enh = enh_id if placement == "before" else None  # the audio diarisation hears
+    seg_jobs = {m.id: jobs.enqueue_stage(session, "seg_stage", dataset.id, m, after=copy_after if seg_enh else None,
+                                         enh_model_id=seg_enh)
                 for m in by_plan([p.seg_model for p in todo if p.seg_model is not None])}
     asr_jobs = {}
     for a in by_plan([p.asr_model for p in todo]):
-        sources = [p.seg_model_id for p in todo if p.asr_model_id == a.id]
+        segs = [p.seg_model_id for p in todo if p.asr_model_id == a.id]
+        sources = [{"seg": s, "seg_enh": seg_enh if s is not None else None} for s in segs]
         asr_jobs[a.id] = jobs.enqueue_stage(session, "asr_stage", dataset.id, a, sources,
-                                            after=[seg_jobs[s].id for s in sources if s is not None])
+                                            after=[seg_jobs[s].id for s in segs if s is not None] + copy_after,
+                                            enh_model_id=enh_id)
     for p in todo:
-        run = Run(task=RunTask.pipeline, dataset_id=dataset.id, pipeline_id=p.id, status="queued")
+        run = Run(task=RunTask.pipeline, dataset_id=dataset.id, pipeline_id=p.id, status="queued", enh_model_id=enh_id,
+                  enh_placement=placement if enh_model is not None and p.seg_model_id is not None else None)
         session.add(run)
         session.flush()
-        after = [asr_jobs[p.asr_model_id].id] + ([seg_jobs[p.seg_model_id].id] if p.seg_model_id else [])
+        after = [asr_jobs[p.asr_model_id].id] + ([seg_jobs[p.seg_model_id].id] if p.seg_model_id else []) + copy_after
         job = jobs.enqueue(session, "run", {"run_id": run.id, "normalisers": normalisers_, "collar": collar,
                                             "assemble": True}, [], after)
         out.append((run, job))
@@ -115,6 +152,9 @@ def enqueue_pipelines(session: Session, dataset: Dataset, pipelines: list[Pipeli
 
 def run_json(run: Run, with_scores: list[Score] | None = None) -> dict[str, Any]:
     d = {"id": run.id, "task": run.task, "label": run_label(run), "model_id": run.model_id,
+         "enh_model_id": run.enh_model_id, "enh_copy_id": run.enh_copy_id, "enh_placement": run.enh_placement,
+         "enhancer": run.enh_model.display_name if run.enh_model else None,
+         "generative": bool(run.enh_model and run.enh_model.generative),
          "pipeline_id": run.pipeline_id, "dataset_id": run.dataset_id, "dataset": run.dataset.name,
          "status": run.status, "error": run.error, "builds": run.builds, "params": run.params,
          "rtf": run.rtf_by_stage, "hardware": run.hardware or {}, "wall_s": run.wall_s,
@@ -190,6 +230,8 @@ class RunIn(BaseModel):
     asr_model_id: int | str | None = None
     oracle: bool = False
     normaliser: str | None = None
+    enh_model_id: int | str | None = None  # read this enhancement model's copy of the dataset
+    placement: str | None = None  # pipelines with an enhancer: before | after diarisation
 
 
 @router.post("/runs", status_code=202)
@@ -198,13 +240,16 @@ def create_run(body: RunIn, session: Session = Depends(get_session)) -> dict[str
     if ds is None:
         raise HTTPException(404, "dataset not found")
     norms = [normalisers.get(body.normaliser).key] if body.normaliser else None
+    enh = resolve_model(session, body.enh_model_id) if body.enh_model_id is not None else None
+    if enh is not None and not enh.is_enh:
+        raise HTTPException(422, f"{enh.display_name} is not a speech enhancement model")
     if body.task in (RunTask.asr, RunTask.seg):
         m = resolve_model(session, body.model_id)
         if body.task == RunTask.asr and not m.is_asr:
             raise HTTPException(422, f"{m.display_name} has no ASR capability")
         if body.task == RunTask.seg and not m.is_seg:
             raise HTTPException(422, f"{m.display_name} has no VAD / diarisation capability")
-        run, job = enqueue_run(session, body.task, ds, model=m, normalisers_=norms)
+        run, job = enqueue_run(session, body.task, ds, model=m, normalisers_=norms, enh_model=enh)
     elif body.task == RunTask.pipeline:
         asr = resolve_model(session, body.asr_model_id)
         if not asr.is_asr:
@@ -218,7 +263,8 @@ def create_run(body: RunIn, session: Session = Depends(get_session)) -> dict[str
         elif "diar" not in (ds.label_types or []):
             raise HTTPException(422, "the oracle stage needs speaker labels in the dataset")
         p = get_or_create_pipeline(session, seg_id, asr.id)
-        run, job = enqueue_pipelines(session, ds, [p], normalisers_=norms)[0]
+        run, job = enqueue_pipelines(session, ds, [p], normalisers_=norms, enh_model=enh,
+                                     placement=(body.placement or "before") if enh else None)[0]
     else:
         raise HTTPException(422, f"unknown task {body.task!r}")
     session.commit()
@@ -301,7 +347,9 @@ def job_label(session: Session, j: Job) -> str:
     if j.type in ("seg_stage", "asr_stage"):
         m, d = session.get(Model, p.get("model_id")), session.get(Dataset, p.get("dataset_id"))
         stage = "seg stage" if j.type == "seg_stage" else "ASR stage"
-        return f"{stage} · {m.display_name if m else 'model'} · {d.name if d else 'dataset'}"
+        e = session.get(Model, p["enh_model_id"]) if p.get("enh_model_id") else None
+        return f"{stage} · {m.display_name if m else 'model'} · {d.name if d else 'dataset'}" + \
+            (f" · {e.display_name} copy" if e else "")
     if j.type == "ingest":
         d = session.get(Dataset, p.get("dataset_id"))
         return f"ingest · {d.name}" if d else "ingest"
@@ -309,6 +357,9 @@ def job_label(session: Session, j: Job) -> str:
         return f"check · {p.get('service')}"
     if j.type == "score":
         return f"rescore · run {p.get('run_id')} · {p.get('normaliser')}"
+    if j.type == "enhance":
+        m, d = session.get(Model, p.get("model_id")), session.get(Dataset, p.get("dataset_id"))
+        return f"enhance · {m.display_name if m else 'model'} · {d.name if d else 'dataset'}"
     return j.type
 
 

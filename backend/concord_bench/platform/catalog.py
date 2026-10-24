@@ -46,7 +46,7 @@ APP = "bench"  # this app's name in the catalog (leases are held by "bench:job-<
 RECORDS_TTL_S = 10.0
 PEER_TIMEOUT_S = 60.0
 # Record fields kept on a Model row (`Model.catalog`): what changes outputs or what pages show, not state.
-SNAPSHOT_KEYS = ("contract", "api", "kind", "engine", "description", "image", "build_key", "parent_id")
+SNAPSHOT_KEYS = ("contract", "api", "kind", "engine", "description", "image", "build_key", "parent_id", "generative")
 
 
 class CatalogUnavailable(Exception):
@@ -130,20 +130,22 @@ def record(model_id: str, refresh: bool = False) -> dict[str, Any] | None:
 
 
 def tasks_of(rec: dict[str, Any]) -> list[str]:
-    """Tasks the verifier observed for the current build: asr, vad, diar."""
+    """Tasks the verifier observed for the current build: asr, vad, diar, enhance."""
     return list((rec.get("capabilities") or {}).get("tasks") or [])
 
 
 def stages_of(rec: dict[str, Any]) -> list[str]:
     t = set(tasks_of(rec))
-    return (["seg"] if t & {"vad", "diar"} else []) + (["asr"] if "asr" in t else [])
+    return ((["enh"] if "enhance" in t else []) + (["seg"] if t & {"vad", "diar"} else [])
+            + (["asr"] if "asr" in t else []))
 
 
 def speech_model(rec: dict[str, Any]) -> bool:
-    """A registered model Bench can benchmark: verified (or awaiting verification) as ASR or a segmenter."""
+    """A registered model Bench can use: verified (or awaiting verification) as ASR, a segmenter or an
+    enhancer (oip-v2 with AUDIO and SAMPLE_RATE in and AUDIO out)."""
     caps = rec.get("capabilities") or {}
     return bool(rec.get("registered", True)) and (bool(stages_of(rec)) or caps.get("usable_as") in
-                                                  ("asr", "chat-audio", "segmenter"))
+                                                  ("asr", "chat-audio", "segmenter", "enhancer"))
 
 
 def unusable_reason(rec: dict[str, Any] | None, model_id: str = "") -> str | None:
@@ -342,8 +344,9 @@ def _usable_as(e: dict[str, Any]) -> str | None:
     if contract == "openai" and api == "chat.completions":
         return "chat-audio"
     inputs = {t.get("name") for t in (e.get("signature") or {}).get("inputs", [])}
+    outputs = {t.get("name") for t in (e.get("signature") or {}).get("outputs", [])}
     if contract == "oip-v2" and api == "infer" and {"AUDIO", "SAMPLE_RATE"} <= inputs:
-        return "segmenter"
+        return "enhancer" if "AUDIO" in outputs else "segmenter"
     return None
 
 

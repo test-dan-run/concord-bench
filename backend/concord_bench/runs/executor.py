@@ -13,6 +13,12 @@ Pipelines run stage by stage (MODEL_CATALOG_REDESIGN.md, "Job planning"), so eac
 Segments are merged (short ones into same-speaker neighbours) and padded before transcription (PLAN §5 M4).
 
 `builds` say which build of each model an output must come from: catalog model id -> {build_key, image}.
+
+Speech enhancement (EVALUATE_PLAN.md §5): a run, stage or pipeline stage can read an enhanced copy of the
+dataset instead of the original audio. `with_copy` points each file's refs at the copy's file, whose own
+sha256 keys the cache, so everything downstream is unchanged. A pipeline enhanced "before" diarisation
+reads the copy in both stages; "after", diarisation reads the original and ASR transcribes the copy cut at
+the diarised segments (the copy has the original's length, so the segment times hold).
 """
 
 from __future__ import annotations
@@ -27,7 +33,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from .. import adapters
 from ..core import paths
-from ..core.models import AudioFile, Dataset, Model, ModelOutput, Run, RunTask, utcnow
+from ..core.models import AudioFile, Dataset, EnhancedCopy, Model, ModelOutput, Run, RunTask, utcnow
 from ..datasets.audio import cut, load_derived
 from . import cache
 from .cache import WHOLE, Key, OutputCache
@@ -62,7 +68,32 @@ def file_refs(session: Session, dataset_id: int) -> list[FileRefs]:
     return [FileRefs(f, list(f.segments)) for f in usable_files(session, dataset_id)]
 
 
+def ready_copy(session: Session, dataset_id: int, enh_model: Model) -> EnhancedCopy:
+    """The enhanced copy a run or stage reads: the newest ready copy of the dataset by that model."""
+    from . import enhance
+
+    c = enhance.find(session, dataset_id, enh_model.id)
+    if c is None:
+        raise RunError(f"no ready {enh_model.display_name} copy of this dataset: build it first")
+    return c
+
+
+def with_copy(session: Session, refs: list[FileRefs], copy: EnhancedCopy | None) -> list[FileRefs]:
+    """The same refs reading the copy's audio (None: the original)."""
+    if copy is None:
+        return refs
+    from . import enhance
+
+    files = enhance.files_of(session, copy)
+    missing = [r.file.rel_path for r in refs if r.file.id not in files]
+    if missing:
+        raise RunError(f"the {copy.model.catalog_id} copy has no file for {len(missing)} usable file(s), e.g. "
+                       f"{missing[0]}; build the copy again")
+    return [FileRefs(r.file, r.segments, files[r.file.id].sha256) for r in refs]
+
+
 def models_of(run: Run) -> list[Model]:
+    """The models whose outputs a run uses (the enhancer's output is the copy, built before)."""
     if run.task == RunTask.pipeline:
         p = run.pipeline
         assert p is not None
@@ -150,16 +181,16 @@ def span_key(r: FileRefs, start: float, end: float) -> Key | None:
     if end - start < MIN_SPAN:
         return None
     if start <= 0.0 and end >= (r.file.duration or 0) - 1e-3:
-        return (r.file.sha256, WHOLE, WHOLE)
-    return cache.key(r.file.sha256, start, end)
+        return (r.sha256, WHOLE, WHOLE)
+    return cache.key(r.sha256, start, end)
 
 
 def seg_work(refs: list[FileRefs]) -> list[tuple[FileRefs, list[Key]]]:
-    return [(r, [(r.file.sha256, WHOLE, WHOLE)]) for r in refs]
+    return [(r, [(r.sha256, WHOLE, WHOLE)]) for r in refs]
 
 
-def _load_audio(f: AudioFile) -> np.ndarray:
-    return load_derived(paths.derived(f.sha256))
+def _load_audio(r: FileRefs) -> np.ndarray:
+    return load_derived(paths.derived(r.sha256))
 
 
 def infer(session: Session, oc: OutputCache, adapter: adapters.Adapter, build: dict[str, Any],
@@ -190,10 +221,10 @@ def infer(session: Session, oc: OutputCache, adapter: adapters.Adapter, build: d
         if mode == "lookup":
             raise MissingOutput(f"{adapter.service} has no stored output for {r.file.rel_path} "
                                 f"({len(missing)} span(s)); run its stage again")
-        audio = _load_audio(r.file)
+        audio = _load_audio(r)
         for k in missing:
             _, s, e = k
-            row, hit = oc.run(adapter, audio if e < 0 else cut(audio, s, e), r.file.sha256, s, e, bk,
+            row, hit = oc.run(adapter, audio if e < 0 else cut(audio, s, e), r.sha256, s, e, bk,
                               build.get("image"))
             rows[k] = row
             stats["hits"] += hit
@@ -223,18 +254,26 @@ def execute(session: Session, run: Run, log: Log, progress: Progress, builds: Bu
     for m in models_of(run):
         _build(builds, m)
     run.status, run.started_at = "running", utcnow()
-    run.builds = {m.catalog_id: {"build_key": builds[m.catalog_id]["build_key"],
-                                 "image": builds[m.catalog_id].get("image")} for m in models_of(run)}
-    run.hardware = {m.catalog_id: builds[m.catalog_id].get("hardware") or {} for m in models_of(run)}
+    used = {m.catalog_id: {"build_key": builds[m.catalog_id]["build_key"], "image": builds[m.catalog_id].get("image")}
+            for m in models_of(run)}
+    hardware = {m.catalog_id: builds[m.catalog_id].get("hardware") or {} for m in models_of(run)}
+    copy = ready_copy(session, ds.id, run.enh_model) if run.enh_model is not None else None
+    if copy is not None:
+        run.enh_copy_id = copy.id
+        used[copy.model.catalog_id] = {"build_key": copy.build_key, "image": copy.image, "copy_id": copy.id}
+        hardware[copy.model.catalog_id] = copy.hardware or {}
+    run.builds, run.hardware = used, hardware  # assigned whole: JSON columns do not track changes inside
     session.commit()
     oc = OutputCache(session, log)
     mode = "run" if infer_missing else "lookup"
     if run.task == RunTask.asr:
-        _run_asr(session, oc, run, refs, builds, log, progress, mode)
+        _run_asr(session, oc, run, with_copy(session, refs, copy), builds, log, progress, mode)
     elif run.task == RunTask.seg:
-        _run_seg(session, oc, run, refs, builds, log, progress, mode)
+        _run_seg(session, oc, run, with_copy(session, refs, copy), builds, log, progress, mode)
     elif run.task == RunTask.pipeline:
-        _run_pipeline(session, oc, run, refs, builds, log, progress, mode)
+        seg_copy = copy if run.enh_placement != "after" else None
+        _run_pipeline(session, oc, run, with_copy(session, refs, seg_copy), with_copy(session, refs, copy), builds,
+                      log, progress, mode)
     else:
         raise RunError(f"task {run.task!r} is not available in this version")
     run.finished_at = utcnow()
@@ -243,6 +282,13 @@ def execute(session: Session, run: Run, log: Log, progress: Progress, builds: Bu
 
 def _rtf(seconds: float, audio_s: float) -> float | None:
     return seconds / audio_s if audio_s else None
+
+
+def _enh_rtf(session: Session, run: Run) -> dict[str, Any]:
+    """The enhancer's RTF, kept apart: the copy is built once per dataset and shared by every run on it,
+    so `total` stays the model's own."""
+    c = session.get(EnhancedCopy, run.enh_copy_id) if run.enh_copy_id else None
+    return {"enh": c.rtf} if c is not None else {}
 
 
 def _run_asr(session: Session, oc: OutputCache, run: Run, refs: list[FileRefs], builds: Builds, log: Log,
@@ -273,7 +319,7 @@ def _run_asr(session: Session, oc: OutputCache, run: Run, refs: list[FileRefs], 
         audio_s += r.duration
     run.outputs = outputs
     rtf = _rtf(seconds, audio_s)
-    run.rtf_by_stage = {"asr": rtf, "total": rtf, "audio_s": audio_s, "processing_s": seconds}
+    run.rtf_by_stage = {"asr": rtf, "total": rtf, "audio_s": audio_s, "processing_s": seconds, **_enh_rtf(session, run)}
     log(f"ASR: {calls} calls, {st['hits']} from cache, RTF {rtf or 0:.3f}")
 
 
@@ -288,18 +334,19 @@ def _run_seg(session: Session, oc: OutputCache, run: Run, refs: list[FileRefs], 
     outputs: dict[str, Any] = {}
     seconds = audio_s = 0.0
     for r in refs:
-        row = rows[(r.file.sha256, WHOLE, WHOLE)]
+        row = rows[(r.sha256, WHOLE, WHOLE)]
         outputs[str(r.file.id)] = {"cache_id": row.id}
         seconds += row.latency_s
         audio_s += r.duration
     run.outputs = outputs
     rtf = _rtf(seconds, audio_s)
-    run.rtf_by_stage = {"seg": rtf, "total": rtf, "audio_s": audio_s, "processing_s": seconds}
+    run.rtf_by_stage = {"seg": rtf, "total": rtf, "audio_s": audio_s, "processing_s": seconds, **_enh_rtf(session, run)}
     log(f"VAD / diarisation: {len(refs)} files, {st['hits']} from cache, RTF {rtf or 0:.3f}")
 
 
-def _run_pipeline(session: Session, oc: OutputCache, run: Run, refs: list[FileRefs], builds: Builds, log: Log,
-                  progress: Progress, mode: str) -> None:
+def _run_pipeline(session: Session, oc: OutputCache, run: Run, refs: list[FileRefs], asr_refs: list[FileRefs],
+                  builds: Builds, log: Log, progress: Progress, mode: str) -> None:
+    """`refs` is the audio diarisation hears, `asr_refs` the audio ASR transcribes (both the same files)."""
     p = run.pipeline
     asr_model, seg_model = p.asr_model, p.seg_model
     if not asr_model.is_asr:
@@ -317,8 +364,10 @@ def _run_pipeline(session: Session, oc: OutputCache, run: Run, refs: list[FileRe
                             lambda f, m: progress(0.3 * f, m), seg_name, mode)
     outputs: dict[str, Any] = {}
     plans = []
-    for r in refs:
-        seg_row = seg_rows.get((r.file.sha256, WHOLE, WHOLE)) if seg is not None else None
+    asr_view = {a.file.id: a for a in asr_refs}
+    for r_seg in refs:
+        r = asr_view[r_seg.file.id]
+        seg_row = seg_rows.get((r_seg.sha256, WHOLE, WHOLE)) if seg is not None else None
         cuts = seg_cuts(r, seg_row) if seg_row is not None else oracle_cuts(r)
         if seg is None and not cuts:
             outputs[str(r.file.id)] = {"skipped": "no reference segments for the oracle stage"}
@@ -360,18 +409,19 @@ def _run_pipeline(session: Session, oc: OutputCache, run: Run, refs: list[FileRe
     rtf = {"seg": seg_s / audio_s if audio_s and seg else (0.0 if audio_s else None),
            "asr": asr_s / audio_s if audio_s else None}
     rtf["total"] = (rtf["seg"] or 0.0) + (rtf["asr"] or 0.0) if audio_s else None
-    run.rtf_by_stage = {**rtf, "audio_s": audio_s, "processing_s": seg_s + asr_s}
+    run.rtf_by_stage = {**rtf, "audio_s": audio_s, "processing_s": seg_s + asr_s, **_enh_rtf(session, run)}
     log(f"pipeline: {calls} ASR calls ({st['hits']} from cache), RTF {rtf['total'] or 0:.3f}")
 
 
 # ---------------------------------------------------------------- stages of a grid
 
 def seg_stage(session: Session, model: Model, ds: Dataset, build: dict[str, Any], log: Log, progress: Progress,
-              mode: str = "run") -> dict[str, Any]:
-    """One segmenter over every usable file of a dataset (whole files). mode `check` only counts what is missing."""
+              mode: str = "run", enh_model: Model | None = None) -> dict[str, Any]:
+    """One segmenter over every usable file of a dataset (whole files), on the original audio or an enhanced
+    copy. mode `check` only counts what is missing."""
     if not model.is_seg:
         raise RunError(f"{model.display_name} has no VAD / diarisation capability")
-    refs = file_refs(session, ds.id)
+    refs = with_copy(session, file_refs(session, ds.id), ready_copy(session, ds.id, enh_model) if enh_model else None)
     rows, st = infer(session, OutputCache(session, log), adapters.for_model(model), build, seg_work(refs), progress,
                      f"{model.display_name} (seg stage)", mode)
     if mode == "run":
@@ -381,13 +431,24 @@ def seg_stage(session: Session, model: Model, ds: Dataset, build: dict[str, Any]
             "hardware": build.get("hardware") or {}, "files": len(refs), **st}
 
 
-def asr_stage(session: Session, model: Model, ds: Dataset, sources: list[Model | None], seg_builds: Builds,
-              build: dict[str, Any], log: Log, progress: Progress, mode: str = "run") -> dict[str, Any]:
+@dataclass(frozen=True)
+class Source:
+    """Where an ASR stage's cuts come from: a segmenter (None = the oracle) and the audio it heard."""
+
+    seg: Model | None
+    seg_enh: Model | None = None
+
+
+def asr_stage(session: Session, model: Model, ds: Dataset, sources: list[Source], seg_builds: Builds,
+              build: dict[str, Any], log: Log, progress: Progress, mode: str = "run",
+              enh_model: Model | None = None) -> dict[str, Any]:
     """One ASR model over the cuts of every seg source (None = the oracle) of a grid, plus the oracle cuts of
-    files with speaker-attributed text (error attribution). Seg outputs must be stored already."""
+    files with speaker-attributed text (error attribution), on the original audio or an enhanced copy. Seg
+    outputs must be stored already."""
     if not model.is_asr:
         raise RunError(f"{model.display_name} has no ASR capability")
-    refs = file_refs(session, ds.id)
+    base = file_refs(session, ds.id)
+    refs = with_copy(session, base, ready_copy(session, ds.id, enh_model) if enh_model else None)
     oc = OutputCache(session, log)
     keys: dict[int, list[Key]] = {r.file.id: [] for r in refs}
 
@@ -395,14 +456,15 @@ def asr_stage(session: Session, model: Model, ds: Dataset, sources: list[Model |
         keys[r.file.id] += [k for c in cuts if (k := span_key(r, c.start, c.end))]
 
     for src in sources:
-        if src is None:
+        if src.seg is None:
             for r in refs:
                 add(r, oracle_cuts(r))
             continue
-        seg_rows, _ = infer(session, oc, adapters.for_model(src), _build(seg_builds, src), seg_work(refs), progress,
-                            src.display_name, "lookup")
-        for r in refs:
-            add(r, seg_cuts(r, seg_rows[(r.file.sha256, WHOLE, WHOLE)]))
+        seg_refs = with_copy(session, base, ready_copy(session, ds.id, src.seg_enh) if src.seg_enh else None)
+        seg_rows, _ = infer(session, oc, adapters.for_model(src.seg), _build(seg_builds, src.seg), seg_work(seg_refs),
+                            progress, src.seg.display_name, "lookup")
+        for r, rs in zip(refs, seg_refs, strict=True):
+            add(r, seg_cuts(r, seg_rows[(rs.sha256, WHOLE, WHOLE)]))
             if r.has_spk_text:
                 add(r, oracle_cuts(r))
     work = [(r, keys[r.file.id]) for r in refs if keys[r.file.id]]

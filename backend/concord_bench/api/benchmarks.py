@@ -15,14 +15,14 @@ from sqlalchemy.orm import Session
 
 from ..analysis.suggest import rank_models
 from ..core.db import get_session
-from ..core.models import Dataset, Job, Model, Pipeline, Run, RunTask, Score
+from ..core.models import Dataset, EnhancedCopy, Job, Model, Pipeline, Run, RunTask, Score
 from ..metrics import cpwer, normalisers, wer
 from ..metrics.der import DEFAULT_COLLAR
 from ..platform import catalog
 from ..runs import executor
 from .datasets import job_brief
 from .models import catalog_listing
-from .runs import enqueue_pipelines, enqueue_run, ensure_score, get_or_create_pipeline, run_label
+from .runs import PLACEMENTS, enqueue_pipelines, enqueue_run, ensure_score, get_or_create_pipeline, run_label
 
 router = APIRouter(tags=["benchmarks"])
 
@@ -35,11 +35,26 @@ def _ds_json(d: Dataset, has_labels: bool) -> dict[str, Any]:
 
 
 def _runs_by_key(session: Session, task: str) -> dict[tuple, list[Run]]:
+    """Runs of a task by (model or pipeline, dataset, enhancement model, placement), oldest first."""
     out: dict[tuple, list[Run]] = {}
     for r in session.scalars(select(Run).where(Run.task == task).order_by(Run.id)):
-        key = (r.pipeline_id, r.dataset_id) if task == RunTask.pipeline else (r.model_id, r.dataset_id)
-        out.setdefault(key, []).append(r)
+        subject = r.pipeline_id if task == RunTask.pipeline else r.model_id
+        out.setdefault((subject, r.dataset_id, r.enh_model_id, r.enh_placement), []).append(r)
     return out
+
+
+def _enh_json(m: Model) -> dict[str, Any]:
+    return {"id": m.id, "display_name": m.display_name, "catalog_id": m.catalog_id, "generative": m.generative}
+
+
+def _copies(session: Session) -> list[dict[str, Any]]:
+    """The newest live copy of each (dataset, enhancement model), for "building copy" cells."""
+    seen: dict[tuple[int, int], EnhancedCopy] = {}
+    for c in session.scalars(select(EnhancedCopy).where(EnhancedCopy.status.in_(("building", "ready", "failed")))
+                             .order_by(EnhancedCopy.id)):
+        seen[(c.dataset_id, c.model_id)] = c
+    return [{"dataset_id": c.dataset_id, "enh_model_id": c.model_id, "copy_id": c.id, "status": c.status,
+             "progress": c.progress, "rtf": c.rtf} for c in seen.values()]
 
 
 ASR_METRICS = {"wer": "WER", "cer": "CER", "mer": "MER", "wil": "WIL", "wip": "WIP"}
@@ -109,37 +124,23 @@ def benchmark_table(tab: str, normaliser: str | None = None, collar: float | Non
     models = [m for m in session.scalars(select(Model).order_by(Model.display_name))
               if (m.is_asr if tab == "asr" else m.is_seg)]
     runs = _runs_by_key(session, run_task)
+    enh_ids = sorted({k[2] for k in runs if k[2] is not None})
+    enhancers = [m for m in (session.get(Model, i) for i in enh_ids) if m is not None]
     cells = []
     for m in models:
         for d in datasets:
-            rs = runs.get((m.id, d.id), [])
-            done = [r for r in rs if r.status == "done"]
-            latest = rs[-1] if rs else None
-            cell: dict[str, Any] = {"model_id": m.id, "dataset_id": d.id, "status": latest.status if latest else None,
-                                    "run_id": None, "value": None, "prev": None, "delta": None}
-            if latest and latest.status in ("failed", "blocked"):
-                cell["error"] = latest.error
-            if done:
-                cur = done[-1]
-                sc, job = ensure_score(session, cur, nkey, collar, skip_overlap=skip_overlap)
-                cell["run_id"] = cur.id
-                if job is not None:
-                    cell["pending_score_job"] = job.id
-                if sc is not None:
-                    v, label_ = _value(tab, sc.aggregates, m.has_speakers, metric)
-                    cell.update({"value": v, "metric": label_, "score_id": sc.id,
-                                 "breakdown": _breakdown(tab, sc.aggregates, label_), **run_compute(cur)})
-                    if tab == "asr":
-                        cell["metrics"] = asr_metrics(sc.aggregates)
-                    if len(done) > 1:
-                        psc, _ = ensure_score(session, done[-2], nkey, collar, queue=False, skip_overlap=skip_overlap)
-                        if psc is not None:
-                            pv, _ = _value(tab, psc.aggregates, m.has_speakers, metric)
-                            cell["prev"] = pv
-                            cell["delta"] = v - pv if v is not None and pv is not None else None
-                if latest is not cur and latest.status in ("queued", "running"):
-                    cell["rerunning"] = True
-            cells.append(cell)
+            plain: float | None = None
+            for e in [None, *enhancers]:
+                rs = runs.get((m.id, d.id, e.id if e else None, None), [])
+                if e is not None and not rs:
+                    continue
+                cell = _cell(session, tab, m, d, rs, nkey, collar, skip_overlap, metric)
+                cell["enh_model_id"] = e.id if e else None
+                if e is None:
+                    plain = cell["value"]
+                elif cell["value"] is not None and plain is not None:
+                    cell["vs_original"] = cell["value"] - plain
+                cells.append(cell)
     recent = list(session.scalars(select(Run).where(Run.task == run_task).order_by(Run.id.desc()).limit(8)))
     return {
         "tab": tab, "normaliser": nkey, "collar": collar, "metric": metric, "skip_overlap": skip_overlap,
@@ -147,16 +148,69 @@ def benchmark_table(tab: str, normaliser: str | None = None, collar: float | Non
         "models": [{"id": m.id, "display_name": m.display_name, "catalog_id": m.catalog_id, "tags": m.tags,
                     "capabilities": m.capabilities, "timing_level": m.timing_level,
                     "kind": "asr" if tab == "asr" else ("diar" if m.has_speakers else "vad")} for m in models],
+        "enhancers": [_enh_json(e) for e in enhancers],
+        "copies": _copies(session),
         "cells": cells,
         "recent_runs": [{"id": r.id, "label": run_label(r), "dataset": r.dataset.name, "status": r.status,
                          "finished_at": r.finished_at.isoformat() if r.finished_at else None} for r in recent],
     }
 
 
+def _cell(session: Session, tab: str, m: Model, d: Dataset, rs: list[Run], nkey: str, collar: float,
+          skip_overlap: bool, metric: str) -> dict[str, Any]:
+    """One leaderboard cell: the latest done run's score, its change against the run before, and its compute."""
+    done = [r for r in rs if r.status == "done"]
+    latest = rs[-1] if rs else None
+    cell: dict[str, Any] = {"model_id": m.id, "dataset_id": d.id, "status": latest.status if latest else None,
+                            "run_id": None, "value": None, "prev": None, "delta": None}
+    if latest and latest.status in ("failed", "blocked"):
+        cell["error"] = latest.error
+    if done:
+        cur = done[-1]
+        sc, job = ensure_score(session, cur, nkey, collar, skip_overlap=skip_overlap)
+        cell["run_id"] = cur.id
+        if job is not None:
+            cell["pending_score_job"] = job.id
+        if sc is not None:
+            v, label_ = _value(tab, sc.aggregates, m.has_speakers, metric)
+            cell.update({"value": v, "metric": label_, "score_id": sc.id,
+                         "breakdown": _breakdown(tab, sc.aggregates, label_), **run_compute(cur)})
+            if tab == "asr":
+                cell["metrics"] = asr_metrics(sc.aggregates)
+            if len(done) > 1:
+                psc, _ = ensure_score(session, done[-2], nkey, collar, queue=False, skip_overlap=skip_overlap)
+                if psc is not None:
+                    pv, _ = _value(tab, psc.aggregates, m.has_speakers, metric)
+                    cell["prev"] = pv
+                    cell["delta"] = v - pv if v is not None and pv is not None else None
+        if latest is not cur and latest.status in ("queued", "waiting", "running"):
+            cell["rerunning"] = True
+    return cell
+
+
+def _pipe_values(session: Session, cur: Run, nkey: str, collar: float, skip_overlap: bool,
+                 tkey: str) -> tuple[Score | None, Job | None, dict[str, Any]]:
+    sc, job = ensure_score(session, cur, nkey, collar, skip_overlap=skip_overlap)
+    if sc is None:
+        return None, job, {}
+    a = sc.aggregates
+    return sc, job, {
+        "score_id": sc.id, "wer": (a.get("wer") or {}).get("wer"),
+        "cpwer": (a.get("cpwer") or {}).get("cpwer") if a.get("cpwer") else None,
+        "tcpwer": ((a.get("tcpwer") or {}).get(tkey) or {}).get("tcpwer"),
+        "der": (a.get("der") or {}).get("der") if a.get("der") else None,
+        **run_compute(cur),
+        "attribution": a.get("attribution"), "wrong_speaker_pairs": a.get("wrong_speaker_pairs"),
+        "label": run_label(cur)}
+
+
 @router.get("/benchmarks-pipelines")
 def pipeline_grid(dataset_id: int | None = None, normaliser: str | None = None, collar: float | None = None,
                   skip_overlap: bool = False, tcp_collar: float = cpwer.DEFAULT_TCP_COLLAR,
                   session: Session = Depends(get_session)) -> dict[str, Any]:
+    """The pipeline grid on original audio (VAD / diarisation x ASR), and the leaderboard of every
+    enhancement x VAD / diarisation x ASR combination run on the dataset, with its change against the same
+    pipeline on original audio."""
     nkey = normalisers.get(normaliser or normalisers.DEFAULT).key
     collar = DEFAULT_COLLAR if collar is None else collar
     datasets = list(session.scalars(select(Dataset).order_by(Dataset.name)))
@@ -175,7 +229,8 @@ def pipeline_grid(dataset_id: int | None = None, normaliser: str | None = None, 
                  [{"seg_model_id": m.id, "name": m.display_name, "oracle": False, "has_speakers": m.has_speakers,
                    "available": True} for m in seg_models]),
         "cols": [{"asr_model_id": m.id, "name": m.display_name, "timing_level": m.timing_level} for m in asr_models],
-        "cells": [], "runs": [],
+        "enhancers": [_enh_json(m) for m in models if m.is_enh],
+        "cells": [], "runs": [], "leaderboard": [], "copies": [],
     }
     if ds is None:
         return out
@@ -184,7 +239,7 @@ def pipeline_grid(dataset_id: int | None = None, normaliser: str | None = None, 
     for row in out["rows"]:
         for col in out["cols"]:
             p = pipes.get((row["seg_model_id"], col["asr_model_id"]))
-            rs = runs.get((p.id, ds.id), []) if p else []
+            rs = runs.get((p.id, ds.id, None, None), []) if p else []
             done = [r for r in rs if r.status == "done"]
             cell: dict[str, Any] = {"seg_model_id": row["seg_model_id"], "asr_model_id": col["asr_model_id"],
                                     "pipeline_id": p.id if p else None, "status": rs[-1].status if rs else None,
@@ -193,28 +248,49 @@ def pipeline_grid(dataset_id: int | None = None, normaliser: str | None = None, 
                 cell["error"] = rs[-1].error
             if done:
                 cur = done[-1]
-                sc, job = ensure_score(session, cur, nkey, collar, skip_overlap=skip_overlap)
+                sc, job, vals = _pipe_values(session, cur, nkey, collar, skip_overlap, tkey)
                 cell["run_id"] = cur.id
                 if job is not None:
                     cell["pending_score_job"] = job.id
-                if sc is not None:
-                    a = sc.aggregates
-                    cell.update({
-                        "score_id": sc.id, "wer": (a.get("wer") or {}).get("wer"),
-                        "cpwer": (a.get("cpwer") or {}).get("cpwer") if a.get("cpwer") else None,
-                        "tcpwer": ((a.get("tcpwer") or {}).get(tkey) or {}).get("tcpwer"),
-                        "der": (a.get("der") or {}).get("der") if a.get("der") else None,
-                        **run_compute(cur),
-                        "attribution": a.get("attribution"), "wrong_speaker_pairs": a.get("wrong_speaker_pairs"),
-                        "label": run_label(cur)})
-                    if len(done) > 1:
-                        psc, _ = ensure_score(session, done[-2], nkey, collar, queue=False, skip_overlap=skip_overlap)
-                        if psc is not None and psc.aggregates.get("cpwer") and cell["cpwer"] is not None:
-                            cell["prev_cpwer"] = psc.aggregates["cpwer"]["cpwer"]
+                cell.update(vals)
+                if sc is not None and len(done) > 1:
+                    psc, _ = ensure_score(session, done[-2], nkey, collar, queue=False, skip_overlap=skip_overlap)
+                    if psc is not None and psc.aggregates.get("cpwer") and cell["cpwer"] is not None:
+                        cell["prev_cpwer"] = psc.aggregates["cpwer"]["cpwer"]
             out["cells"].append(cell)
     ranked = [c for c in out["cells"] if c.get("score_id")]
     ranked.sort(key=lambda c: (c["cpwer"] is None, c["cpwer"] if c["cpwer"] is not None else c["wer"] or 9e9))
     out["runs"] = ranked
+    # every combination run on this dataset, original audio included
+    base = {(c["seg_model_id"], c["asr_model_id"]): c for c in ranked}
+    by_pipe = {p.id: p for p in pipes.values()}
+    lb, queued = [], 0
+    for (pid, did, eid, place), rs in runs.items():
+        if did != ds.id or pid not in by_pipe:
+            continue
+        p = by_pipe[pid]
+        done = [r for r in rs if r.status == "done"]
+        if not done:
+            queued += any(r.status in ("queued", "waiting", "running", "blocked") for r in rs)
+            continue
+        cur = done[-1]
+        _, _, vals = _pipe_values(session, cur, nkey, collar, skip_overlap, tkey)
+        if not vals:
+            continue
+        b = base.get((p.seg_model_id, p.asr_model_id))
+        entry = {"run_id": cur.id, "seg_model_id": p.seg_model_id, "asr_model_id": p.asr_model_id,
+                 "oracle": p.seg_model_id is None, "has_speakers": p.seg_model_id is None or p.seg_model.has_speakers,
+                 "enh_model_id": eid, "placement": place, "generative": bool(cur.enh_model and cur.enh_model.generative),
+                 **vals, "rtf_total": (vals.get("rtf") or 0.0) + ((cur.rtf_by_stage or {}).get("enh") or 0.0)}
+        if eid is not None and b is not None:
+            key = "cpwer" if entry["cpwer"] is not None and b.get("cpwer") is not None else "wer"
+            if entry.get(key) is not None and b.get(key) is not None:
+                entry["vs_original"], entry["vs_metric"] = entry[key] - b[key], key
+        lb.append(entry)
+    lb.sort(key=lambda c: (c["cpwer"] is None, c["cpwer"] if c["cpwer"] is not None else c["wer"] or 9e9))
+    out["leaderboard"] = lb
+    out["queued"] = queued
+    out["copies"] = [c for c in _copies(session) if c["dataset_id"] == ds.id]
     out["dataset"] = _ds_json(ds, ds in eligible)
     return out
 
@@ -229,10 +305,20 @@ class PlanIn(BaseModel):
     asr_model_ids: list[int] = Field(default_factory=list)
     oracle: bool = False
     mode: str = "grid"  # grid: every seg x every ASR as pipelines, stage by stage; stages: each model alone
+    # Speech enhancement ablation (EVALUATE_PLAN.md §5.5): every model also runs on each enhancer's copy;
+    # `include_original` keeps the original audio as the baseline; pipelines place the copy before and / or
+    # after diarisation.
+    enhancers: list[str] = Field(default_factory=list)
+    include_original: bool = True
+    placements: list[str] = Field(default_factory=lambda: ["before"])
 
 
-def plan_size(seg: int, asr: int, oracle: bool, mode: str) -> int:
-    return (seg + int(oracle)) * asr if mode == "grid" else seg + asr
+def plan_size(seg: int, asr: int, oracle: bool, mode: str, enhancers: int = 0, include_original: bool = True,
+              placements: int = 1) -> int:
+    versions = int(include_original) + enhancers
+    if mode == "grid":
+        return seg * asr * (int(include_original) + enhancers * placements) + int(oracle) * asr * versions
+    return (seg + asr) * versions
 
 
 def _plan_models(session: Session, plan: dict[str, Any]) -> tuple[list[Model], list[Model]]:
@@ -247,15 +333,29 @@ def _plan_models(session: Session, plan: dict[str, Any]) -> tuple[list[Model], l
     return seg, asr
 
 
-def catalog_stages(session: Session, ds: Dataset, seg: list[Model], asr: list[Model], mode: str) -> list[dict]:
-    """The plan request for the catalog (POST /api/jobs): the seg stage with its index keys (whole files, so
-    the catalog counts what is stored already), then the ASR stage, whose cuts are unknown until the seg
-    stage has run. "Each stage alone" is two independent stages."""
+def _plan_enhancers(session: Session, plan: dict[str, Any]) -> list[Model]:
+    return [m for m in dict.fromkeys(catalog.ensure_model(session, c) for c in plan.get("enhancers") or []) if m.is_enh]
+
+
+def _placements(plan: dict[str, Any]) -> list[str]:
+    places = [p for p in dict.fromkeys(plan.get("placements") or ["before"]) if p in PLACEMENTS]
+    return places or ["before"]
+
+
+def catalog_stages(session: Session, ds: Dataset, seg: list[Model], asr: list[Model], mode: str,
+                   enhancers: list[Model] | None = None) -> list[dict]:
+    """The plan request for the catalog (POST /api/jobs): enhancers whose copy is not built yet, then the seg
+    stage with its index keys (whole files, so the catalog counts what is stored already), then the ASR
+    stage, whose cuts are unknown until the seg stage has run. "Each stage alone" is two independent stages."""
     from .. import adapters
+    from ..runs import enhance
     from ..runs.cache import WHOLE
 
     shas = [f.sha256 for f in executor.usable_files(session, ds.id)]
     stages = []
+    to_build = [m for m in enhancers or [] if enhance.find(session, ds.id, m.id) is None]
+    if to_build:
+        stages.append({"name": "enh", "models": [m.catalog_id for m in to_build]})
     if seg:
         keys = {}
         for m in seg:
@@ -265,40 +365,56 @@ def catalog_stages(session: Session, ds: Dataset, seg: list[Model], asr: list[Mo
                 continue
             keys[m.catalog_id] = [{"audio_sha256": sha, "span_start": WHOLE, "span_end": WHOLE, "params_hash": ph}
                                   for sha in shas]
-        stages.append({"name": "seg", "models": [m.catalog_id for m in seg], "keys": keys})
+        stages.append({"name": "seg", "models": [m.catalog_id for m in seg], "keys": keys,
+                       **({"after": "enh"} if to_build else {})})
     if asr:
         stages.append({"name": "asr", "models": [m.catalog_id for m in asr],
-                       **({"after": "seg"} if seg and mode == "grid" else {})})
+                       **({"after": "seg"} if seg and mode == "grid" else {"after": "enh"} if to_build else {})})
     return stages
+
+
+def _copy_status(session: Session, ds: Dataset, m: Model) -> dict[str, Any]:
+    from ..runs import enhance
+
+    c = enhance.find(session, ds.id, m.id, ("ready", "building"))
+    return {"model": m.catalog_id, "display_name": m.display_name, "generative": m.generative,
+            "status": c.status if c else "new", "progress": c.progress if c else 0.0, "copy_id": c.id if c else None}
 
 
 def plan_preview(session: Session, ds: Dataset, plan: dict[str, Any]) -> dict[str, Any]:
     seg, asr = _plan_models(session, plan)
+    enh = _plan_enhancers(session, plan)
     labels = set(ds.label_types or [])
     mode = plan.get("mode", "grid")
     oracle = bool(plan.get("oracle")) and "diar" in labels
+    orig = bool(plan.get("include_original", True)) or not enh
+    places = _placements(plan) if enh else ["before"]
     if mode == "grid":
-        runs = (len(seg) + int(oracle)) * len(asr) if "asr" in labels else 0
+        runs = plan_size(len(seg), len(asr), oracle, mode, len(enh), orig, len(places)) if "asr" in labels else 0
     else:
         seg, asr = (seg if "diar" in labels else []), (asr if "asr" in labels else [])
-        runs = len(seg) + len(asr)
-    out: dict[str, Any] = {"runs": runs, "mode": mode, "plan": None, "error": None}
+        runs = plan_size(len(seg), len(asr), False, mode, len(enh), orig)
+    out: dict[str, Any] = {"runs": runs, "mode": mode, "plan": None, "error": None,
+                           "copies": [_copy_status(session, ds, m) for m in enh]}
     if not runs or not (seg or asr):
         return out
     try:
-        out["plan"] = catalog.plan(catalog_stages(session, ds, seg, asr, mode))
+        out["plan"] = catalog.plan(catalog_stages(session, ds, seg, asr, mode, enh))
     except catalog.CatalogUnavailable as exc:
         out["error"] = str(exc)
     return out
 
 
 def enqueue_plan(session: Session, dataset_id: int, plan: dict[str, Any]) -> list[Job]:
-    """Queue a plan: a grid as stage jobs plus one assemble job per pipeline, or each model as a single run.
-    Stage jobs follow the catalog's order (models already running first, then by cold start)."""
+    """Queue a plan: a grid as stage jobs plus one assemble job per pipeline, or each model as a single run,
+    once per audio version (the original, and each enhancer's copy, before and / or after diarisation for
+    pipelines). Stage jobs follow the catalog's order (models already running first, then by cold start)."""
     ds = session.get(Dataset, dataset_id)
     if ds is None or ds.status != "ready":
         return []
     seg, asr = _plan_models(session, plan)
+    enh = _plan_enhancers(session, plan)
+    orig = bool(plan.get("include_original", True)) or not enh
     oracle = bool(plan.get("oracle")) and "diar" in (ds.label_types or [])
     out: list[Job] = []
     if plan.get("mode", "grid") == "grid" and "asr" in (ds.label_types or []):
@@ -306,19 +422,25 @@ def enqueue_plan(session: Session, dataset_id: int, plan: dict[str, Any]) -> lis
         pipes = [get_or_create_pipeline(session, sid, a.id) for sid in seg_ids for a in asr]
         order = None
         try:
-            steps = catalog.plan(catalog_stages(session, ds, seg, asr, "grid")).get("steps") or []
+            steps = catalog.plan(catalog_stages(session, ds, seg, asr, "grid", enh)).get("steps") or []
             order = [st["model"] for st in steps]
         except catalog.CatalogUnavailable:
             pass
-        for _, job in enqueue_pipelines(session, ds, pipes, order=order):
-            out.append(job)
-        stage_ids = {j for job in out for j in job.after}
-        out += [j for j in (session.get(Job, i) for i in sorted(stage_ids)) if j is not None]
+        versions: list[tuple[Model | None, str | None]] = ([(None, None)] if orig else []) + \
+            [(e, place) for e in enh for place in _placements(plan)]
+        for e, place in versions:
+            for _, job in enqueue_pipelines(session, ds, pipes, order=order, enh_model=e, placement=place):
+                out.append(job)
+        dep_ids = {j for job in out for j in job.after}
+        out += [j for j in (session.get(Job, i) for i in sorted(dep_ids)) if j is not None]
     else:
-        if "diar" in (ds.label_types or []):
-            out += [enqueue_run(session, RunTask.seg, ds, model=m)[1] for m in seg]
-        if "asr" in (ds.label_types or []):
-            out += [enqueue_run(session, RunTask.asr, ds, model=m)[1] for m in asr]
+        for e in ([None] if orig else []) + enh:
+            if "diar" in (ds.label_types or []):
+                out += [enqueue_run(session, RunTask.seg, ds, model=m, enh_model=e)[1] for m in seg]
+            if "asr" in (ds.label_types or []):
+                out += [enqueue_run(session, RunTask.asr, ds, model=m, enh_model=e)[1] for m in asr]
+        dep_ids = {j for job in out for j in job.after}
+        out += [j for j in (session.get(Job, i) for i in sorted(dep_ids)) if j is not None]
     session.commit()
     return sorted(set(out), key=lambda j: j.id)
 
@@ -380,6 +502,7 @@ def suggest_models(dataset_id: int | None = None, tags: str = "", language: str 
     return {
         "seg": [entry(r) for r in ranked if "seg" in r["stages"]],
         "asr": [entry(r) for r in ranked if "asr" in r["stages"]],
+        "enh": [entry(r) for r in ranked if "enh" in r["stages"]],
         "oracle_available": "diar" in labels,
         "labels": sorted(labels),
         "catalog": listing["catalog"],

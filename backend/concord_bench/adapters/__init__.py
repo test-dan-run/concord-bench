@@ -22,6 +22,10 @@ def for_model(model: Any, language: str | None = None) -> Adapter:
     model's current build. The build itself is not an adapter option: it is part of the cache key on its
     own (`runs.cache`), so params hash the same in Bench and Label for every build."""
     rec = model.catalog or {}
+    if getattr(model, "is_enh", False):
+        from .enhance import OIPEnhancer
+
+        return OIPEnhancer(model.catalog_id)
     cls = adapter_class(rec.get("contract", ""), rec.get("api", ""))
     if cls is None:
         raise AdapterError(f"{model.catalog_id}: no adapter for {rec.get('contract')} / {rec.get('api')}")

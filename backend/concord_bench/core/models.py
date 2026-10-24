@@ -41,6 +41,7 @@ class Capability(enum.StrEnum):
     vad = "vad"
     diar = "diar"
     kws = "kws"
+    enh = "enhance"  # speech enhancement: audio in, cleaned audio out (the catalog's "enhance" task)
 
 
 class TimingLevel(enum.StrEnum):
@@ -207,6 +208,15 @@ class Model(Base):
     def has_speakers(self) -> bool:
         return Capability.diar in self.capabilities
 
+    @property
+    def is_enh(self) -> bool:
+        return Capability.enh in self.capabilities
+
+    @property
+    def generative(self) -> bool:
+        """The catalog marks the model as able to shift timing or invent speech (platform P1; absent = no)."""
+        return bool((self.catalog or {}).get("generative"))
+
 
 class Pipeline(Base):
     __tablename__ = "pipeline"
@@ -243,13 +253,70 @@ class Run(Base):
     hardware: Mapped[dict[str, Any]] = mapped_column(default=dict)
     # Seconds from start to finish, including the stage jobs of an assembled pipeline (not cold starts).
     wall_s: Mapped[float | None] = mapped_column(Float)
+    # Speech enhancement (EVALUATE_PLAN.md §5): the run read the enhanced copy of the dataset that this
+    # enhancement model made. None = original audio. Pipelines also place it before or after diarisation.
+    enh_model_id: Mapped[int | None] = mapped_column(ForeignKey("model.id", ondelete="CASCADE"))
+    enh_copy_id: Mapped[int | None] = mapped_column(ForeignKey("enhanced_copy.id", ondelete="SET NULL"))
+    enh_placement: Mapped[str | None] = mapped_column(String(8))  # before | after (pipelines only)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     started_at: Mapped[datetime | None] = mapped_column(DateTime)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime)
 
-    model: Mapped[Model | None] = relationship()
+    model: Mapped[Model | None] = relationship(foreign_keys=[model_id])
+    enh_model: Mapped[Model | None] = relationship(foreign_keys=[enh_model_id])
     pipeline: Mapped[Pipeline | None] = relationship()
     dataset: Mapped[Dataset] = relationship()
+
+
+class EnhancedCopy(Base):
+    """A cleaned copy of a dataset's audio made by one enhancement model's build (EVALUATE_PLAN.md §5.2).
+
+    Same files and lengths as the originals, which are never changed. Each file is stored as derived audio
+    under its own sha256 (`enhanced_file`), so runs on the copy are cached like any other audio. Deleting a
+    copy removes its audio and keeps this row (`deleted`), so the runs that read it keep their scores."""
+
+    __tablename__ = "enhanced_copy"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    dataset_id: Mapped[int] = mapped_column(ForeignKey("dataset.id", ondelete="CASCADE"))
+    model_id: Mapped[int] = mapped_column(ForeignKey("model.id", ondelete="CASCADE"))
+    build_key: Mapped[str | None] = mapped_column(String(32))
+    params_hash: Mapped[str] = mapped_column(String(16))
+    params: Mapped[dict[str, Any]] = mapped_column(default=dict)
+    status: Mapped[str] = mapped_column(String(16), default="building")  # building | ready | failed | cancelled | deleted
+    progress: Mapped[float] = mapped_column(Float, default=0.0)
+    error: Mapped[str | None] = mapped_column(Text)
+    size_bytes: Mapped[int | None] = mapped_column(Integer)
+    files: Mapped[int | None] = mapped_column(Integer)
+    # ok: every file came back the right length; trimmed: some were off by up to 10 ms and were padded or
+    # trimmed to the original length; failed: a file was further off.
+    length_check: Mapped[str | None] = mapped_column(String(16))
+    max_shift_ms: Mapped[float | None] = mapped_column(Float)
+    audio_s: Mapped[float | None] = mapped_column(Float)
+    processing_s: Mapped[float | None] = mapped_column(Float)
+    hardware: Mapped[dict[str, Any]] = mapped_column(default=dict)
+    image: Mapped[str | None] = mapped_column(String(300))
+    job_id: Mapped[int | None] = mapped_column(ForeignKey("job.id", ondelete="SET NULL"))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime)
+
+    model: Mapped[Model] = relationship()
+    dataset: Mapped[Dataset] = relationship()
+
+    @property
+    def rtf(self) -> float | None:
+        return self.processing_s / self.audio_s if self.audio_s and self.processing_s is not None else None
+
+
+class EnhancedFile(Base):
+    __tablename__ = "enhanced_file"
+    __table_args__ = (UniqueConstraint("copy_id", "audio_file_id", name="uq_enhanced_file"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    copy_id: Mapped[int] = mapped_column(ForeignKey("enhanced_copy.id", ondelete="CASCADE"))
+    audio_file_id: Mapped[int] = mapped_column(ForeignKey("audio_file.id", ondelete="CASCADE"))
+    sha256: Mapped[str] = mapped_column(String(64))  # of the enhanced 16 kHz FLAC (paths.derived)
+    duration: Mapped[float] = mapped_column(Float)
+    shift_ms: Mapped[float] = mapped_column(Float, default=0.0)  # how far its length was off before the fix
+    latency_s: Mapped[float] = mapped_column(Float, default=0.0)
 
 
 class ModelOutput(Base):
@@ -321,7 +388,7 @@ class Result(Base):
 class Job(Base):
     __tablename__ = "job"
     id: Mapped[int] = mapped_column(primary_key=True)
-    type: Mapped[str] = mapped_column(String(32))  # ingest | run | seg_stage | asr_stage | score
+    type: Mapped[str] = mapped_column(String(32))  # ingest | run | seg_stage | asr_stage | score | enhance
     payload: Mapped[dict[str, Any]] = mapped_column(default=dict)
     status: Mapped[str] = mapped_column(String(16), default=JobStatus.queued)
     required_services: Mapped[list[str]] = mapped_column(default=list)  # catalog model ids it leases

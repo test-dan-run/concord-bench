@@ -24,7 +24,7 @@ def catalog_entry(rec: dict[str, Any] | None, m: Model | None, runs: int = 0) ->
     last record Bench kept."""
     src = rec if rec is not None else (m.catalog if m is not None else {})
     caps = (rec.get("capabilities") if rec is not None else src.get("capabilities")) or {}
-    tasks = [t for t in caps.get("tasks") or [] if t in ("asr", "vad", "diar", "kws")]
+    tasks = [t for t in caps.get("tasks") or [] if t in ("asr", "vad", "diar", "kws", "enhance")]
     cid = rec["id"] if rec is not None else m.catalog_id
     why = catalog.unusable_reason(rec, cid) if rec is not None else "not in the model catalog (or it is unreachable)"
     return {
@@ -39,7 +39,14 @@ def catalog_entry(rec: dict[str, Any] | None, m: Model | None, runs: int = 0) ->
         "timing_level": caps.get("timing_level") if "asr" in tasks else None,
         "output_detail": caps.get("output_detail") or [], "rtf": caps.get("rtf"), "verified_at": caps.get("verified_at"),
         "has_speakers": "diar" in tasks,
-        "stages": (["seg"] if {"vad", "diar"} & set(tasks) else []) + (["asr"] if "asr" in tasks else []),
+        "stages": ((["enh"] if "enhance" in tasks else []) + (["seg"] if {"vad", "diar"} & set(tasks) else [])
+                   + (["asr"] if "asr" in tasks else [])),
+        "generative": bool(src.get("generative")),
+        # enhancers: what the catalog measured on its check clip (SI-SDR in and out, length difference)
+        "check_sample": {k: v for k, v in (((rec or {}).get("capabilities") or {}).get("report") or {})
+                         .get("sample", {}).items() if k in ("si_sdr_input_db", "si_sdr_output_db",
+                                                             "length_diff_samples")} if "enhance" in tasks else None,
+        "tasks": list((rec or {}).get("tasks") or []),
         "cold_start_s": (rec or {}).get("cold_start_s"), "cold_start_measured": bool((rec or {}).get("cold_start_measured")),
         "gpu": (rec or {}).get("gpu"), "usable": why is None, "not_usable": why, "runs": runs,
     }

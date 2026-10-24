@@ -32,6 +32,13 @@ class Unit:
 class FileRefs:
     file: AudioFile
     segments: list[Segment] = field(default_factory=list)
+    # The audio models hear, when it is not the file's own: an enhanced copy's file (same length).
+    audio_sha: str | None = None
+
+    @property
+    def sha256(self) -> str:
+        """The audio a model call is about (and its cache key): the enhanced file when there is one."""
+        return self.audio_sha or self.file.sha256
 
     @property
     def duration(self) -> float:

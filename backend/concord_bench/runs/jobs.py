@@ -7,10 +7,14 @@ Job types:
 - run        {run_id, normalisers?, collar?, assemble?}
                                           a single run's inference, or with `assemble` a pipeline put together
                                           from its stages' stored outputs (no model); then scoring
-- seg_stage  {dataset_id, model_id}       one segmenter over every usable file of a dataset (a grid's seg stage)
-- asr_stage  {dataset_id, model_id, sources}
-                                          one ASR model over the cuts of every seg source (Bench model ids,
-                                          None = oracle) of a grid
+- seg_stage  {dataset_id, model_id, enh_model_id?}
+                                          one segmenter over every usable file of a dataset (a grid's seg stage),
+                                          on the original audio or an enhancement model's copy
+- asr_stage  {dataset_id, model_id, sources, enh_model_id?}
+                                          one ASR model over the cuts of every seg source of a grid: {seg: Bench
+                                          model id or None for the oracle, seg_enh: the copy the segmenter heard}
+- enhance    {dataset_id, model_id, copy_id}
+                                          an enhanced copy of a dataset (runs.enhance); needs the enhancement model
 - score      {run_id, normaliser, collar, skip_overlap?}
                                           rescoring with a platform normaliser (through the catalog's gateway)
 
@@ -42,9 +46,9 @@ from sqlalchemy.orm import Session
 
 from ..core import paths
 from ..core.db import SessionLocal
-from ..core.models import Dataset, Job, JobStatus, Model, Run, utcnow
+from ..core.models import Dataset, EnhancedCopy, Job, JobStatus, Model, Run, utcnow
 from ..platform import catalog
-from . import executor, scoring
+from . import enhance, executor, scoring
 
 LEASE_DONE = ("failed", "expired", "released")
 _waiting: dict[int, Lease] = {}  # job id -> its lease, queued in the catalog (this worker process)
@@ -105,20 +109,61 @@ def enqueue(session: Session, type_: str, payload: dict[str, Any], required_serv
     return job
 
 
-def enqueue_stage(session: Session, type_: str, dataset_id: int, model: Model, sources: list[int | None] | None = None,
-                  after: list[int] | None = None) -> Job:
-    """A grid stage job for one model on one dataset; merged into a queued one for the same pair."""
+def source_spec(src: Any) -> dict[str, Any]:
+    """An ASR stage source as stored: {seg, seg_enh}. Jobs queued before enhancement hold bare model ids."""
+    return src if isinstance(src, dict) else {"seg": src, "seg_enh": None}
+
+
+def _merge_sources(*lists: list[Any]) -> list[dict[str, Any]]:
+    out: dict[str, dict[str, Any]] = {}
+    for src in (s for lst in lists for s in lst or []):
+        spec = source_spec(src)
+        out.setdefault(json.dumps(spec, sort_keys=True), spec)
+    return list(out.values())
+
+
+def enqueue_stage(session: Session, type_: str, dataset_id: int, model: Model, sources: list[Any] | None = None,
+                  after: list[int] | None = None, enh_model_id: int | None = None) -> Job:
+    """A grid stage job for one model on one dataset and audio version (original, or an enhancement model's
+    copy); merged into a queued one for the same model, dataset and audio."""
     for j in session.scalars(select(Job).where(Job.type == type_, Job.status == JobStatus.queued)):
         p = j.payload or {}
-        if p.get("dataset_id") == dataset_id and p.get("model_id") == model.id:
+        if p.get("dataset_id") == dataset_id and p.get("model_id") == model.id and p.get("enh_model_id") == enh_model_id:
             if sources is not None:
-                j.payload = {**p, "sources": list(dict.fromkeys([*(p.get("sources") or []), *sources]))}
+                j.payload = {**p, "sources": _merge_sources(p.get("sources"), sources)}
             j.after = sorted(set(j.after or []) | set(after or []))
             return j
     payload: dict[str, Any] = {"dataset_id": dataset_id, "model_id": model.id}
+    if enh_model_id is not None:
+        payload["enh_model_id"] = enh_model_id
     if sources is not None:
-        payload["sources"] = list(dict.fromkeys(sources))
+        payload["sources"] = _merge_sources(sources)
     return enqueue(session, type_, payload, [model.catalog_id], after)
+
+
+def copy_job(session: Session, ds: Dataset, model: Model) -> tuple[EnhancedCopy, Job | None]:
+    """The enhanced copy of a dataset a plan needs, and the job building it (None when it is ready).
+
+    A ready copy of the build the catalog runs now (or of any build, when the catalog cannot say) is reused;
+    so is one being built; otherwise a new copy and its `enhance` job are queued."""
+    try:
+        rec = catalog.record(model.catalog_id)
+    except catalog.CatalogUnavailable:
+        rec = None
+    current = (rec or {}).get("build_key")
+    ready = enhance.find(session, ds.id, model.id, ("ready",), current)
+    if ready is not None:
+        return ready, None
+    building = enhance.find(session, ds.id, model.id, ("building",))
+    if building is not None and building.job_id:
+        job = session.get(Job, building.job_id)
+        if job is not None and job.status in (JobStatus.queued, JobStatus.waiting, JobStatus.running):
+            return building, job
+    c = enhance.new_copy(session, ds, model, {"build_key": current, "image": (rec or {}).get("image")}, None)
+    job = enqueue(session, "enhance", {"dataset_id": ds.id, "model_id": model.id, "copy_id": c.id}, [model.catalog_id])
+    c.job_id = job.id
+    session.flush()
+    return c, job
 
 
 def read_log(job_id: int, tail: int = 400) -> list[str]:
@@ -346,8 +391,19 @@ def _stage_subject(session: Session, job: Job) -> tuple[Model, Dataset]:
     return model, ds
 
 
-def _sources(session: Session, job: Job) -> list[Model | None]:
-    return [session.get(Model, i) if i is not None else None for i in job.payload.get("sources") or []]
+def _sources(session: Session, job: Job) -> list[executor.Source]:
+    out = []
+    for src in job.payload.get("sources") or []:
+        spec = source_spec(src)
+        seg = session.get(Model, spec["seg"]) if spec.get("seg") is not None else None
+        enh = session.get(Model, spec["seg_enh"]) if spec.get("seg_enh") is not None else None
+        out.append(executor.Source(seg, enh))
+    return out
+
+
+def _enh_model(session: Session, job: Job) -> Model | None:
+    i = (job.payload or {}).get("enh_model_id")
+    return session.get(Model, i) if i is not None else None
 
 
 # ---------------------------------------------------------------- handlers
@@ -438,7 +494,7 @@ def _prepare_seg_stage(session: Session, job: Job, ctx: JobContext) -> list[str]
     if not (rec or {}).get("build_key"):
         return list(job.required_services)
     st = executor.seg_stage(session, model, ds, {"build_key": rec["build_key"], "image": rec.get("image")},
-                            ctx.log, ctx.progress, mode="check")
+                            ctx.log, ctx.progress, mode="check", enh_model=_enh_model(session, job))
     return _needed(job, ctx, model, st)
 
 
@@ -449,8 +505,16 @@ def _prepare_asr_stage(session: Session, job: Job, ctx: JobContext) -> list[str]
         return list(job.required_services)
     st = executor.asr_stage(session, model, ds, _sources(session, job), _dep_builds(session, job),
                             {"build_key": rec["build_key"], "image": rec.get("image")}, ctx.log, ctx.progress,
-                            mode="check")
+                            mode="check", enh_model=_enh_model(session, job))
     return _needed(job, ctx, model, st)
+
+
+def _prepare_enhance(session: Session, job: Job, ctx: JobContext) -> list[str]:
+    c = session.get(EnhancedCopy, job.payload["copy_id"])
+    if c is not None and c.status == "ready":
+        ctx.log("the enhanced copy is ready already; no lease needed")
+        return []
+    return list(job.required_services)
 
 
 def _needed(job: Job, ctx: JobContext, model: Model, st: dict[str, Any]) -> list[str]:
@@ -464,13 +528,48 @@ def _needed(job: Job, ctx: JobContext, model: Model, st: dict[str, Any]) -> list
 
 def _handle_seg_stage(session: Session, job: Job, ctx: JobContext) -> dict[str, Any]:
     model, ds = _stage_subject(session, job)
-    return executor.seg_stage(session, model, ds, _current_build(model.catalog_id), ctx.log, ctx.progress)
+    return executor.seg_stage(session, model, ds, _current_build(model.catalog_id), ctx.log, ctx.progress,
+                              enh_model=_enh_model(session, job))
 
 
 def _handle_asr_stage(session: Session, job: Job, ctx: JobContext) -> dict[str, Any]:
     model, ds = _stage_subject(session, job)
     return executor.asr_stage(session, model, ds, _sources(session, job), _dep_builds(session, job),
-                              _current_build(model.catalog_id), ctx.log, ctx.progress)
+                              _current_build(model.catalog_id), ctx.log, ctx.progress, enh_model=_enh_model(session, job))
+
+
+def _handle_enhance(session: Session, job: Job, ctx: JobContext) -> dict[str, Any]:
+    from .. import adapters
+
+    model, ds = _stage_subject(session, job)
+    c = session.get(EnhancedCopy, job.payload["copy_id"])
+    if c is None:
+        raise ValueError("the enhanced copy no longer exists")
+    if c.status != "ready":
+        build = _current_build(model.catalog_id)
+        c.status, c.error = "building", None
+        c.build_key, c.image, c.hardware = build["build_key"], build.get("image"), build.get("hardware") or {}
+        session.commit()
+        try:
+            enhance.build(session, c, adapters.for_model(model), ctx.log, ctx.progress)
+        except enhance.Cancelled:
+            session.rollback()
+            c = session.get(EnhancedCopy, job.payload["copy_id"])
+            enhance.remove_audio(session, c)
+            c.status, c.finished_at = "cancelled", utcnow()
+            session.commit()
+            raise
+        except Exception as exc:
+            session.rollback()
+            c = session.get(EnhancedCopy, job.payload["copy_id"])
+            c.status, c.error, c.finished_at = "failed", str(exc)[:2000], utcnow()
+            session.commit()
+            raise
+        if c.status != "ready":
+            raise executor.RunError(c.error or "the enhanced copy failed")
+    computed = sum(1 for _ in enhance.files_of(session, c))
+    return {"model": model.catalog_id, "build_key": c.build_key, "image": c.image, "hardware": c.hardware or {},
+            "copy_id": c.id, "files": c.files, "computed": computed}
 
 
 def _handle_score(session: Session, job: Job, ctx: JobContext) -> dict[str, Any]:
@@ -482,9 +581,9 @@ def _handle_score(session: Session, job: Job, ctx: JobContext) -> dict[str, Any]
 
 
 HANDLERS = {"ingest": _handle_ingest, "run": _handle_run, "seg_stage": _handle_seg_stage,
-            "asr_stage": _handle_asr_stage, "score": _handle_score}
+            "asr_stage": _handle_asr_stage, "score": _handle_score, "enhance": _handle_enhance}
 # Before leasing: the models still needed once stored and indexed outputs are counted.
-PREPARE = {"seg_stage": _prepare_seg_stage, "asr_stage": _prepare_asr_stage}
+PREPARE = {"seg_stage": _prepare_seg_stage, "asr_stage": _prepare_asr_stage, "enhance": _prepare_enhance}
 
 
 def run_job(job_id: int, lease: Lease | None = None) -> None:
@@ -582,6 +681,10 @@ def retry(session: Session, job: Job) -> None:
         run = session.get(Run, job.payload["run_id"])
         if run is not None:
             run.status, run.error = "queued", None
+    if job.type == "enhance":
+        c = session.get(EnhancedCopy, job.payload["copy_id"])
+        if c is not None and c.status in ("failed", "cancelled"):
+            c.status, c.error, c.progress = "building", None, 0.0
     for dep in session.scalars(select(Job).where(Job.status == JobStatus.blocked)).all():
         if job.id in (dep.after or []):
             retry(session, dep)

@@ -15,10 +15,11 @@ from sqlalchemy.orm import Session
 from .. import peer
 from ..core import paths
 from ..core.db import get_session
-from ..core.models import AudioFile, Dataset, Job, Model, Run, RunTask, Segment
+from ..core.models import AudioFile, Dataset, EnhancedCopy, Job, JobStatus, Model, Run, RunTask, Segment
 from ..core.settings import REPO_ROOT
 from ..datasets.ingest import NO_REFERENCES, inspect_source
-from ..runs import jobs
+from ..platform import catalog
+from ..runs import enhance, jobs
 
 router = APIRouter(tags=["datasets"])
 TEMPLATES = REPO_ROOT / "fixtures" / "generated" / "templates"
@@ -112,10 +113,16 @@ def inspect_path(body: PathIn) -> dict[str, Any]:
 # ---------------------------------------------------------------- datasets
 
 class PlanIn(BaseModel):
-    seg_model_ids: list[int] = Field(default_factory=list)
+    """A benchmark plan queued once the upload is ingested (the fields of api.benchmarks.PlanIn)."""
+    seg_models: list[str] = Field(default_factory=list)  # catalog model ids
+    asr_models: list[str] = Field(default_factory=list)
+    seg_model_ids: list[int] = Field(default_factory=list)  # Bench model ids
     asr_model_ids: list[int] = Field(default_factory=list)
     oracle: bool = False
     mode: str = "grid"  # grid | stages
+    enhancers: list[str] = Field(default_factory=list)  # enhancement models: each builds a copy at ingest
+    include_original: bool = True
+    placements: list[str] = Field(default_factory=lambda: ["before"])
 
 
 class DatasetIn(BaseModel):
@@ -160,7 +167,22 @@ def dataset_json(session: Session, ds: Dataset, detail: bool = False) -> dict[st
         job = session.scalar(select(Job).where(Job.type == "ingest").order_by(Job.id.desc())
                              .where(Job.payload["dataset_id"].as_integer() == ds.id))
         d["ingest_job"] = job_brief(job) if job else None
+        d["enhanced"] = copies_of(session, ds)
+    else:
+        d["enhanced"] = [{"enh_model_id": c["model_id"], "display_name": c["display_name"], "status": c["status"],
+                          "progress": c["progress"]} for c in copies_of(session, ds)]
     return d
+
+
+def copies_of(session: Session, ds: Dataset) -> list[dict[str, Any]]:
+    """The dataset's enhanced copies, newest per enhancement model (deleted ones left out), with run counts."""
+    newest: dict[int, EnhancedCopy] = {}
+    for c in session.scalars(select(EnhancedCopy).where(EnhancedCopy.dataset_id == ds.id,
+                                                        EnhancedCopy.status != "deleted").order_by(EnhancedCopy.id)):
+        newest[c.model_id] = c
+    runs = dict(session.execute(select(Run.enh_copy_id, func.count(Run.id)).where(Run.dataset_id == ds.id)
+                                .group_by(Run.enh_copy_id)).all())
+    return [enhance.copy_json(c, runs.get(c.id, 0)) for c in sorted(newest.values(), key=lambda c: c.model.display_name)]
 
 
 def previous_plan(session: Session, ds: Dataset) -> dict[str, Any] | None:
@@ -260,6 +282,57 @@ def patch_dataset(dataset_id: int, body: DatasetPatch, session: Session = Depend
         setattr(ds, k, _clean_tags(v) if k == "tags" else v)
     session.commit()
     return dataset_json(session, ds)
+
+
+class EnhanceIn(BaseModel):
+    models: list[str] = Field(min_length=1)  # catalog ids of enhancement models
+
+
+@router.get("/datasets/{dataset_id}/enhanced")
+def dataset_enhanced(dataset_id: int, session: Session = Depends(get_session)) -> list[dict[str, Any]]:
+    return copies_of(session, get_dataset(session, dataset_id))
+
+
+@router.post("/datasets/{dataset_id}/enhanced", status_code=202)
+def build_enhanced(dataset_id: int, body: EnhanceIn, session: Session = Depends(get_session)) -> dict[str, Any]:
+    """Build each enhancement model's copy of the dataset as a job (one already built or building is kept)."""
+    ds = get_dataset(session, dataset_id)
+    if ds.status != "ready":
+        raise HTTPException(409, f"dataset is {ds.status}")
+    out = []
+    for cid in dict.fromkeys(body.models):
+        try:
+            m = catalog.ensure_model(session, cid)
+        except catalog.ModelUnusable as exc:
+            raise HTTPException(404, str(exc)) from None
+        except catalog.CatalogUnavailable as exc:
+            raise HTTPException(503, str(exc)) from None
+        if not m.is_enh:
+            raise HTTPException(422, f"{m.display_name} is not a speech enhancement model")
+        c, job = jobs.copy_job(session, ds, m)
+        out.append({"copy": enhance.copy_json(c), "job": job_brief(job) if job else None})
+    session.commit()
+    return {"copies": out}
+
+
+@router.delete("/enhanced/{copy_id}")
+def delete_enhanced(copy_id: int, session: Session = Depends(get_session)) -> dict[str, Any]:
+    """Delete a ready (or failed) copy's audio, keeping the scores of runs that read it; or cancel a build."""
+    c = session.get(EnhancedCopy, copy_id)
+    if c is None:
+        raise HTTPException(404, "enhanced copy not found")
+    job = session.get(Job, c.job_id) if c.job_id else None
+    if c.status == "building":
+        c.status = "cancelled"
+        if job is not None and job.status in (JobStatus.queued, JobStatus.waiting):
+            job.status, job.error = JobStatus.failed, "cancelled before it started"
+        session.commit()  # a running build stops at its next file and removes what it wrote
+        return {"copy": enhance.copy_json(c), "freed": 0}
+    if c.status == "deleted":
+        return {"copy": enhance.copy_json(c), "freed": 0}
+    freed = enhance.delete(session, c)
+    session.commit()
+    return {"copy": enhance.copy_json(c), "freed": freed}
 
 
 @router.delete("/datasets/{dataset_id}", status_code=204)

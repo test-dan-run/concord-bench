@@ -15,7 +15,7 @@ export function PipelinesTab({ normaliser, collar }: { normaliser: string; colla
   const q = useQuery({
     queryKey: ["pipes", dsId, normaliser, collar],
     queryFn: () => api.get<PipeGrid>(`/benchmarks-pipelines${qs({ dataset_id: dsId, normaliser, collar })}`),
-    refetchInterval: (query) => (query.state.data?.cells.some((c) => c.status === "queued" || c.status === "running") ? 3000 : false),
+    refetchInterval: (query) => (query.state.data?.cells.some((c) => c.status === "queued" || c.status === "waiting" || c.status === "running") ? 3000 : false),
   });
   const run = useMutation({
     mutationFn: (c: PipeCell) =>
@@ -27,7 +27,7 @@ export function PipelinesTab({ normaliser, collar }: { normaliser: string; colla
   const g = q.data;
   const eligible = g.datasets.filter((d) => d.has_labels);
   if (!eligible.length) return <Empty>Pipelines need a dataset with transcripts. Upload one with speaker-attributed transcripts (STM, SegLST or JSON segments) to get cpWER.</Empty>;
-  if (!g.cols.length) return <Empty>Register at least one ASR model to build pipelines. <Link to="/models/add">Add a model</Link>.</Empty>;
+  if (!g.cols.length) return <Empty>No ASR model has run yet. Pick catalog models with Run evaluation (full grid) to build pipelines, or see <Link to="/models">Models</Link>.</Empty>;
   const cell = (seg: number | null, asr: number) => g.cells.find((c) => c.seg_model_id === seg && c.asr_model_id === asr)!;
   const val = (c: PipeCell) => (metric === "cpwer" ? c.cpwer : c.wer);
   const vals = g.cells.map(val).filter((v): v is number => v !== null && v !== undefined);
@@ -175,12 +175,12 @@ function RowCells({
       {cols.map((col) => {
         const c = cell(row.seg_model_id, col.asr_model_id);
         const v = val(c);
-        const busy = c.status === "queued" || c.status === "running";
+        const busy = c.status === "queued" || c.status === "waiting" || c.status === "running";
         if (!c.score_id) {
           return (
             <span key={col.asr_model_id} className="flex items-center justify-end gap-2 min-h-12 px-2 rounded-md bg-track/40">
               {busy ? (
-                <span className="text-[11px] text-muted inline-flex items-center gap-1.5"><StatusDot state="running" />{c.status}</span>
+                <span className="text-[11px] text-muted inline-flex items-center gap-1.5"><StatusDot state={c.status ?? "queued"} />{c.status === "waiting" ? "waiting for compute" : c.status}</span>
               ) : !row.available ? (
                 <span className="text-[11px] text-subtle" title="The oracle needs speaker labels in this dataset">no speaker labels</span>
               ) : (

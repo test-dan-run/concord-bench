@@ -1,8 +1,8 @@
 """Writing an offline kit.
 
 The platform's `tools/bundle.py --dir --with-images --with-weights --platform-tree` writes the models'
-images, weights and a trimmed platform tree; it is run the way `ensure_services` runs `stack.py`, with
-its output streamed into the job log. For a full kit Concord then saves the app images that are ticked
+images, weights and a trimmed platform tree; it runs with the platform's environment (`platform.tools`),
+with its output streamed into the job log. For a full kit Concord then saves the app images that are ticked
 (this app, the other app, or both; CONTRACTS.md §6), writes `concord/compose.yml`, `install.sh` and
 the README, and checksums every file into `manifest.json`. The other app's image comes from the local
 Docker images by its contract name.
@@ -24,7 +24,7 @@ from typing import Any
 from .. import APP, __version__
 from ..core.models import utcnow
 from ..core.settings import get_settings
-from ..platform.services import platform_command, platform_env
+from ..platform.tools import platform_command, platform_env
 from . import kit as kitfiles
 
 KINDS = ("full", "models")

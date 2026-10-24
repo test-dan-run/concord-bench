@@ -131,8 +131,8 @@ def test_complete_package_accepts_into_a_dataset_with_provenance(client, session
     imp = client.get(f"/api/reference-imports/{staged['id']}").json()
     assert imp["status"] == "accepted" and imp["dataset_id"] == d["id"]
     assert imp["result"]["uids"] == {"matched": 3, "unmatched": 0}
-    # outputs/seg.jsonl: pyannote-diarization is not registered in this Bench, so it is skipped
-    assert imp["result"]["outputs"]["imported"] == 0 and imp["result"]["outputs"]["skipped"]["not_registered"] == 1
+    # outputs/seg.jsonl: pyannote-diarization is not in this (empty) model catalog, so it is skipped
+    assert imp["result"]["outputs"]["imported"] == 0 and imp["result"]["outputs"]["skipped"]["unknown_model"] == 1
     assert not (data_dir / "uploads" / upload_id).exists() and not (data_dir / "imports" / str(staged["id"])).exists()
     # the manifest, files.csv, uids and outputs were never read as annotations
     assert set(d["report"]["tasks"]) == {"spk_asr"} and d["report"]["unmatched"] == []
@@ -273,52 +273,85 @@ def test_reject_discards_the_package(client, session, data_dir):
 # ---------------------------------------------------------------- outputs into the cache
 
 
-def _register_seg(session, name: str = "pyannote-diarization") -> Model:
-    m = Model(registry_name=name, display_name=name, capabilities=["diar"], timing_level="segment",
-              registry_snapshot={"contract": "oip-v2", "api": "infer"})
-    session.add(m)
-    session.commit()
-    return m
+SAMPLE_BUILD = "a41c9e07d2b85f63"  # the build key in the sample's outputs/seg.jsonl
+
+
+def _catalog_with_seg(session, build_key: str = SAMPLE_BUILD) -> Model:
+    """A catalog whose pyannote-diarization runs the build the sample package's output came from."""
+    from aicore.catalog import FakeCatalog
+
+    from concord_bench.platform import catalog
+    from conftest import catalog_model
+
+    fake = FakeCatalog([catalog_model("pyannote-diarization", ["diar"], build_key=build_key),
+                        catalog_model("silero-vad", ["vad"])])
+    catalog.use(fake)
+    return catalog.ensure_model(session, "pyannote-diarization")
 
 
 def test_outputs_import_makes_a_seg_run_a_cache_hit(replay, client, session):
     from concord_bench import adapters
     from concord_bench.api.runs import enqueue_run
+    from concord_bench.platform import catalog
 
-    model = _register_seg(session)
+    model = _catalog_with_seg(session)
+    session.commit()
     d = import_complete(client)
     imp = client.get("/api/reference-imports").json()[0]
     assert imp["result"]["outputs"]["imported"] == 1
     row = session.scalar(select(ModelOutput).where(ModelOutput.audio_sha256 == CLIP_SHA))
-    assert row.params_hash == adapters.for_model(model).params_hash and (row.span_start, row.span_end) == (0.0, -1.0)
+    assert row.params_hash == adapters.for_model(model).params_hash and (row.span_start, row.span_end) == (-1.0, -1.0)
+    assert row.build_key == SAMPLE_BUILD and row.image == "ghcr.io/owner/pyannote-diarization:0.1.0"
     assert row.output == {"segments": [[0.41, 3.38], [2.93, 6.8], [7.12, 9.94]], "speakers": ["spk0", "spk1", "spk0"]}
+    # recorded in the catalog's index, so Concord Label finds it too
+    hit = catalog.get().index_lookup("label", [{"build_key": SAMPLE_BUILD, "audio_sha256": CLIP_SHA, "span_start": -1,
+                                                "span_end": -1, "params_hash": row.params_hash}])[0]
+    assert hit["owner"] == "bench" and hit["output_id"] == row.id
     ds = session.get(Dataset, d["id"])
     run, job = enqueue_run(session, "seg", ds, model=model)
     session.commit()
-    jobs.run_pending()  # no recorded response for this call: only a cache hit can finish it
+    jobs.run_pending()  # a cache hit: no model call
     session.expire_all()
     run = session.get(Run, run.id)
     assert run.status == "done", run.error
     assert next(iter(run.outputs.values()))["cache_id"] == row.id
+    assert run.builds == {"pyannote-diarization": {"build_key": SAMPLE_BUILD,
+                                                   "image": "ghcr.io/owner/pyannote-diarization:0.1.0"}}
     assert any("1 from cache" in line for line in jobs.read_log(job.id))
     assert session.scalar(select(Score).where(Score.run_id == run.id)).aggregates["der"] is not None
 
 
-def test_outputs_with_another_image_or_unknown_params_are_skipped(replay, client, session, tmp_path):
-    _register_seg(session)
+def test_outputs_from_another_build_or_unknown_params_are_skipped(replay, client, session, tmp_path):
+    _catalog_with_seg(session)
+    session.commit()
     pkg = _copy_complete(tmp_path)
     rec = json.loads((pkg / "outputs" / "seg.jsonl").read_text())
-    lines = [{**rec, "image": "ghcr.io/owner/pyannote-diarization:0.0.9"},
+    no_build = {k: v for k, v in rec.items() if k != "build_key"}
+    lines = [{**rec, "build_key": "0123456789abcdef"},
+             {**no_build, "params": {**rec["params"], "image": rec["image"]}},  # a package from before the catalog
              {**rec, "params": {"sample_rate": 16000, "num_speakers": 2}},
-             {**rec, "model": "silero-vad"}, {"model": "x"}]
+             {**rec, "model": "kokoro-tts"}, {"model": "x"}]
     (pkg / "outputs" / "seg.jsonl").write_text("".join(json.dumps(x) + "\n" for x in lines) + "not json\n")
     import_id = stage(client, pkg)["id"]
     accept(client, import_id)
     out = client.get(f"/api/reference-imports/{import_id}").json()["result"]["outputs"]
-    assert out["imported"] == 0 and out["lines"] == 5
-    assert out["skipped"] == {"image_differs": 1, "params_differ": 1, "not_registered": 1, "invalid": 2,
-                              "not_in_dataset": 0}
+    assert out["imported"] == 0 and out["lines"] == 6
+    assert out["skipped"] == {"build_differs": 1, "no_build_key": 1, "params_differ": 1, "unknown_model": 1,
+                              "invalid": 2, "not_in_dataset": 0}
     assert session.scalar(select(ModelOutput)) is None
+
+
+def test_params_with_an_old_image_key_still_match(replay, client, session, tmp_path):
+    """`params.image` from writers before the catalog is ignored: the build is matched on build_key."""
+    _catalog_with_seg(session)
+    session.commit()
+    pkg = _copy_complete(tmp_path)
+    rec = json.loads((pkg / "outputs" / "seg.jsonl").read_text())
+    rec["params"]["image"] = rec["image"]
+    (pkg / "outputs" / "seg.jsonl").write_text(json.dumps(rec) + "\n")
+    import_id = stage(client, pkg)["id"]
+    accept(client, import_id)
+    assert client.get(f"/api/reference-imports/{import_id}").json()["result"]["outputs"]["imported"] == 1
 
 
 # ---------------------------------------------------------------- flags back to Label
@@ -410,10 +443,8 @@ def fixture_package(dest: Path, version: int = 1) -> Path:
 def test_scores_by_source(replay, client, session, tmp_path, monkeypatch):
     assert client.get("/api/datasets/by-source/uid-synth/scores").status_code == 404
     d = accept(client, stage(client, fixture_package(tmp_path / "pkg"))["id"])
-    job = client.post("/api/registry/whisper-large-v3/check").json()
-    jobs.run_pending()
-    m = client.post("/api/models", json={"registry_name": "whisper-large-v3", "check_job_id": job["id"]}).json()
-    r = client.post("/api/benchmarks/plan", json={"dataset_id": d["id"], "asr_model_ids": [m["id"]], "mode": "stages"})
+    r = client.post("/api/benchmarks/plan", json={"dataset_id": d["id"], "asr_models": ["whisper-large-v3"],
+                                                  "mode": "stages"})
     assert r.json()["queued"] == 1
     jobs.run_pending()
     body = client.get("/api/datasets/by-source/uid-synth/scores?install_id=inst1&normaliser=basic").json()

@@ -8,7 +8,6 @@ turns are kept in fixtures/synth/turns/ (committed): kokoro on a GPU is not bit-
 so re-running reuses them and gives identical files. Delete a turn file to re-synthesise it.
 
 Writes fixtures/generated/:
-  check/           check_clip.wav + check_clip.json (the compatibility-check clip and its truth)
   dataset/audio/   six dialogues plus the ingest edge cases (8 kHz, 44.1 kHz stereo MP3, OGG,
                    clipped, corrupt)
   dataset/truth.json
@@ -375,17 +374,6 @@ def main(argv: list[str] | None = None) -> int:
     spec = yaml.safe_load((HERE / "dialogues.yaml").read_text())
 
     try:
-        # check clip
-        (OUT / "check").mkdir(parents=True, exist_ok=True)
-        cc = spec["check_clip"]
-        mix, turns = render(cc, args.service)
-        sf.write(OUT / "check" / "check_clip.wav", to16k(mix), OUT_SR, subtype="PCM_16")
-        (OUT / "check" / "check_clip.json").write_text(json.dumps({
-            "file": "check_clip.wav", "duration": round(len(mix) / TTS_SR, 3),
-            "speakers": sorted({t["speaker"] for t in turns}),
-            "transcript": " ".join(t["text"] for t in turns), "turns": turns}, indent=1) + "\n")
-        print(f"check clip: {len(mix) / TTS_SR:.1f} s, {len(turns)} turns")
-
         # dataset
         audio_dir = OUT / "dataset" / "audio"
         if audio_dir.exists():

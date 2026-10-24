@@ -128,12 +128,16 @@ test("bring-your-own screens load; Bench has no Label or Training pages", async 
   await expect(page.getByRole("heading", { name: "Upload dataset" })).toBeVisible();
   await expect(page.getByRole("link", { name: "asr.jsonl" })).toBeVisible();
   await expect(page.getByRole("radio", { name: /Audio only/ })).toHaveCount(0);
-  await page.goto("/models/add?name=pyannote-diarization");
-  await expect(page.getByText("OIP signature")).toBeVisible();
+  // Models come from the model catalog (the replay stand-in here): read-only, no registration screens.
   await page.goto("/models");
   await expect(page.getByText("faster-whisper-large-v3 · openai / audio.transcriptions")).toBeVisible();
-  await page.goto("/contract");
-  await expect(page.getByText("How capabilities and timing are detected")).toBeVisible();
+  await expect(page.getByRole("link", { name: "Open the model catalog" })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Re-check|Remove/ })).toHaveCount(0);
+  const primary = page.getByRole("navigation", { name: "Primary" });
+  await expect(primary.getByText("Add model")).toHaveCount(0);
+  await expect(primary.getByText("Model contract")).toHaveCount(0);
+  await page.goto("/models/add");
+  await expect(page).toHaveURL(/\/benchmarks$/); // removed routes fall back to the benchmarks
   await page.goto("/jobs");
   await expect(page.getByRole("heading", { name: "Jobs" })).toBeVisible();
   const nav = page.getByRole("navigation", { name: "Primary" });

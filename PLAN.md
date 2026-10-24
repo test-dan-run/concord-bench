@@ -352,3 +352,6 @@ Separate `concord_improve` package and router, in `concord-full` only. It reads 
 |---|---|---|
 | Q5 | Phase 3 scope and how training jobs are launched. | Phase 3 not started. |
 | Q6b | When KWS comes in, and whether the platform gets a KWS OIP signature or KWS is first scored from ASR word output. | Hooks only (§5). |
+
+> **Note (Oct 2026).** Model registration, compatibility checks and starting services moved to the
+> platform's model catalog (`platform/MODEL_CATALOG_REDESIGN.md`); see README.md for the current flow.

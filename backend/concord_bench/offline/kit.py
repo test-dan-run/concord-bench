@@ -284,9 +284,9 @@ def readme(manifest: dict[str, Any]) -> str:
             "(`AI_ASSETS=<this folder>/assets`, `HF_HUB_OFFLINE=1`) and `concord/.env`, creates the platform's Docker "
             f"network and starts {titles} from `concord/compose.yml`. `--internal` creates the network with no "
             "outside access.",
-            "3. Open " + " and ".join(f"http://127.0.0.1:{APPS[a['app']]['port']}" for a in apps) + " and register "
-            "each model with **Add model**: the compatibility check runs on this machine's hardware and images. "
-            "No registrations, scores or datasets come with the kit.",
+            "3. Register each model in the platform's model catalog, which verifies it on this machine's hardware "
+            "and images, then open " + " and ".join(f"http://127.0.0.1:{APPS[a['app']]['port']}" for a in apps)
+            + ". No registrations, scores or datasets come with the kit.",
             "",
             "The apps mount `platform/` and `assets/` at the same absolute path as on the host, because the "
             "platform's `docker compose` runs on the host's daemon.",
@@ -298,7 +298,7 @@ def readme(manifest: dict[str, Any]) -> str:
             "checksums, refuses a service the install already has with a different image unless `--replace` "
             "is given, loads `images/platform.tar`, copies `assets/`, `services/*.yaml` and `custom/<name>/` into "
             "the install and validates its platform.",
-            "3. Register the new models with **Add model** in the apps that use them.",
+            "3. Register the new models in the install's model catalog.",
         ]
     lines += [
         "",

@@ -55,12 +55,12 @@ def export_json(rec: OfflineExport, job: Job | None = None) -> dict[str, Any]:
 
 @router.get("/services")
 def services_table(session: Session = Depends(get_session)) -> dict[str, Any]:
-    """Every service in the platform registry with image and weight sizes, registered in Concord or not."""
+    """Every service in the platform registry with image and weight sizes, used by Bench or not."""
     try:
         rep = export.dry_run()
     except export.ExportError as exc:
         raise HTTPException(503, f"platform unavailable: {exc}") from None
-    registered = {m.registry_name: m for m in session.scalars(select(Model))}
+    registered = {m.catalog_id: m for m in session.scalars(select(Model))}
     rows = []
     for r in rep["services"]:
         m = registered.get(r["name"])

@@ -1,6 +1,6 @@
 """`openai` / `audio.transcriptions`: multipart upload of the 16 kHz audio (or a segment cut).
 
-Asks for the best timing level the compatibility check found: word times
+Asks for the best timing level the catalog's verifier found: word times
 (`verbose_json` + `timestamp_granularities[]=word`), segment times (`verbose_json`), or text (`json`).
 """
 

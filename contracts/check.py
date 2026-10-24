@@ -27,6 +27,7 @@ AUDIO_EXTS = {".wav", ".flac", ".mp3", ".ogg", ".m4a", ".opus", ".aac", ".wma", 
 MANIFEST_REQUIRED = ("format", "format_version", "name", "created_at", "label_types", "counts", "audio_included")
 SOURCE_FIELDS = ("app", "install_id", "dataset_uid", "dataset_name")
 FLAG_FIELDS = ("uid", "file_sha256", "start", "end", "note")
+HEX = set("0123456789abcdef")
 
 
 def sha256_file(p: Path) -> str:
@@ -135,6 +136,9 @@ def check_package(root: Path) -> list[str]:
                 missing = {"model", "image", "sha256", "params", "output"} - rec.keys()
                 if missing or "segments" not in (rec.get("output") or {}):
                     problems.append(f"outputs/seg.jsonl line {n}: missing {sorted(missing) or ['output.segments']}")
+                bk = rec.get("build_key")
+                if bk is not None and not (isinstance(bk, str) and len(bk) >= 16 and all(c in HEX for c in bk)):
+                    problems.append(f"outputs/seg.jsonl line {n}: build_key must be the catalog's hex build key")
     return problems
 
 

@@ -1,234 +1,244 @@
-"""ensure_services with stack.py mocked (blocked state, log streaming, eviction flag), leases
-(SPLIT_PLAN.md §6: holder, renewal, release) and worker batching under util_limit (PLAN §8)."""
+"""Jobs and the model catalog's leases (platform/catalog/README.md), against aicore's FakeCatalog and a stub
+whose lease queues before it is granted: holder, release, `waiting` with queue position, blocked states,
+preferring jobs whose models are running, and stage dependencies."""
 
 from __future__ import annotations
 
-import io
-import threading
-import time
-
 import pytest
+from aicore.catalog import FakeCatalog
 
-from concord_bench.platform import services
-from concord_bench.platform.services import Health, ServicesBlocked
+from concord_bench.core.models import Job, Run
+from concord_bench.platform import catalog
 from concord_bench.runs import jobs
-
-
-class FakeProc:
-    def __init__(self, lines: list[str], code: int):
-        self.stdout = io.StringIO("".join(f"{x}\n" for x in lines))
-        self._code = code
-
-    def wait(self):
-        return self._code
+from conftest import catalog_model
 
 
 @pytest.fixture
-def health(monkeypatch):
-    state: dict[str, str] = {}
-    monkeypatch.setattr(services, "health", lambda n, timeout=2.0: Health(n, state.get(n, "down")))
-    return state
+def cat():
+    fake = FakeCatalog([catalog_model("a", ["vad"]), catalog_model("big", ["asr"], state="stopped"),
+                        catalog_model("small", ["diar"], state="running")])
+    catalog.use(fake)
+    return fake
 
 
-def test_all_up_still_takes_the_lease(health, data_dir):
-    """`up --holder` is called even when everything is up: that is what leases the services."""
-    health.update({"a": "up", "b": "up"})
-    seen = {}
-
-    def runner(cmd, **kw):
-        seen["cmd"] = cmd
-        return FakeProc(["leased to bench:job-7 for 120s: a, b"], 0)
-
-    services.ensure_services(["b", "a"], runner=runner, holder="bench:job-7")
-    assert seen["cmd"][-5:] == ["up", "a", "b", "--holder", "bench:job-7"]
-
-
-def test_starts_whole_set_and_streams_log(health, data_dir):
-    health.update({"a": "up", "b": "down"})
-    seen = {}
-    logs: list[str] = []
-
-    def runner(cmd, **kw):
-        seen["cmd"], seen["env"] = cmd, kw["env"]
-        health["b"] = "up"
-        return FakeProc(["[1/2] a already running", "[2/2] starting b", "up: a, b"], 0)
-
-    services.ensure_services(["b", "a"], logs.append, runner=runner)
-    assert seen["cmd"][-3:] == ["up", "a", "b"]  # every required service, so none of them is evicted
-    assert "--no-evict" not in seen["cmd"]
-    assert "[2/2] starting b" in logs and logs[-1] == "services ready: a, b"
-
-
-def test_no_evict_flag(health, data_dir, monkeypatch):
-    from concord_bench.core.settings import reset_settings
-
-    monkeypatch.setenv("NO_EVICT", "true")
-    reset_settings()
-    assert services.stack_command(["a"])[-1] == "--no-evict"
-
-
-def test_failure_is_blocked_with_tool_message(health, data_dir):
-    def runner(cmd, **kw):
-        return FakeProc(["checking", "error: b: weights not found at /x; run `just fetch-weights b`"], 1)
-
-    with pytest.raises(ServicesBlocked, match="weights not found"):
-        services.ensure_services(["b"], runner=runner)
-
-
-def test_unknown_service_blocks(monkeypatch, data_dir):
-    monkeypatch.setattr(services, "health", lambda n, timeout=2.0: Health(n, "unknown", "not in map"))
-    with pytest.raises(ServicesBlocked, match="not in the platform endpoint map"):
-        services.ensure_services(["ghost"])
-
-
-def test_blocked_job_state(session, health, monkeypatch):
-    def boom(names, log, **kw):
-        raise ServicesBlocked("docker daemon not reachable")
-
-    monkeypatch.setattr(services, "ensure_services", boom)
-    job = jobs.enqueue(session, "check", {"service": "x"}, ["x"])
-    session.commit()
-    jobs.run_pending()
-    session.refresh(job)
-    assert job.status == "blocked" and "docker" in job.error
-    assert any("blocked: docker daemon" in line for line in jobs.read_log(job.id))
-
-
-def test_claim_prefers_jobs_whose_services_are_up_and_batches(session, health, monkeypatch):
-    fractions = {"big": 0.6, "mid": 0.3, "small": 0.1, "cpu": 0.0}
-    monkeypatch.setattr(services, "gpu_fraction", lambda n: fractions[n])
-    monkeypatch.setattr(services, "util_limit", lambda: 0.93)
-    health.update({"cpu": "up"})
-    j1 = jobs.enqueue(session, "check", {"service": "big"}, ["big"])
-    j2 = jobs.enqueue(session, "check", {"service": "cpu"}, ["cpu"])
-    jobs.enqueue(session, "check", {"service": "mid"}, ["mid"])
-    jobs.enqueue(session, "check", {"service": "small"}, ["small"])
-    session.commit()
-    job, batch = jobs.claim_next(session)
-    assert job.id == j2.id and batch == ["cpu"]  # services already up: no start, no eviction
-    job, batch = jobs.claim_next(session)
-    assert job.id == j1.id
-    assert batch == ["big", "mid"]  # big + mid = 0.9 fits; adding small (1.0) would not
-
-
-# ---------------------------------------------------------------- leases
-
-
-@pytest.fixture
-def platform(monkeypatch, health):
-    """stack.py mocked: `up` through the Popen runner, `lease` / `release` through run_tool."""
-    calls: list[list[str]] = []
-    state = {"up_code": 0, "up_lines": ["up: a"], "lease": (0, "renewed")}
-    lock = threading.Lock()
-
-    def popen(cmd, **kw):
-        with lock:
-            calls.append(cmd[cmd.index("tools/stack.py") + 1:])
-        for n in cmd[cmd.index("up") + 1:]:
-            if not n.startswith("-") and state["up_code"] == 0:
-                health[n] = "up"
-        return FakeProc(state["up_lines"], state["up_code"])
-
-    def run_tool(cmd, timeout=120):
-        with lock:
-            calls.append(cmd[cmd.index("tools/stack.py") + 1:])
-        return state["lease"] if cmd[cmd.index("tools/stack.py") + 1] == "lease" else (0, "released")
-
-    monkeypatch.setattr(services.subprocess, "Popen", popen)
-    monkeypatch.setattr(services, "run_tool", run_tool)
-    monkeypatch.setattr(services, "LEASE_RENEW_S", 0.02)
-    return calls, state
-
-
-def _lease_threads() -> list[threading.Thread]:
-    return [t for t in threading.enumerate() if t.name.startswith("lease bench:")]
-
-
-def _job(session, monkeypatch, handler) -> int:
+def _job(session, monkeypatch, handler, models=("a",), after=None) -> int:
     monkeypatch.setitem(jobs.HANDLERS, "fake", handler)
-    job = jobs.enqueue(session, "fake", {}, ["a"])
+    job = jobs.enqueue(session, "fake", {}, list(models), after)
     session.commit()
     return job.id
 
 
-def _wait_for(pred, timeout=3.0) -> bool:
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if pred():
-            return True
-        time.sleep(0.01)
-    return False
+def _status(session, job_id: int) -> Job:
+    session.expire_all()
+    return session.get(Job, job_id)
 
 
-def test_job_leases_renews_and_releases_on_success(session, platform, monkeypatch):
-    calls, _ = platform
+def test_job_leases_its_models_and_releases_on_success(session, cat, monkeypatch):
     seen = {}
 
     def handler(session, job, ctx):
-        seen["renewed"] = _wait_for(lambda: ["lease", "--holder", f"bench:job-{job.id}"] in calls)
-        seen["threads"] = len(_lease_threads())
+        seen["leases"] = [x for x in cat.leases() if x["holder"] == jobs.holder_for(job.id)]
         return {"ok": True}
 
     job_id = _job(session, monkeypatch, handler)
     jobs.run_pending()
     holder = f"bench:job-{job_id}"
-    assert calls[0] == ["up", "a", "--holder", holder]
-    assert seen == {"renewed": True, "threads": 1}  # the renew thread ran while the job did
-    assert calls[-1] == ["release", "--holder", holder]
-    assert _lease_threads() == []  # ...and stopped with it
-    assert session.get(jobs.Job, job_id).status == "done"
+    assert ("lease", (holder, ("a",))) in cat.calls
+    assert [x["state"] for x in seen["leases"]] == ["active"]  # held while the job ran...
+    assert cat.leases() == [] and cat.calls[-1][0] == "release"  # ...and released at the end
+    assert _status(session, job_id).status == "done"
 
 
-def test_job_releases_on_failure(session, platform, monkeypatch):
-    calls, _ = platform
-
+def test_job_releases_on_failure(session, cat, monkeypatch):
     def handler(session, job, ctx):
         raise RuntimeError("model fell over")
 
     job_id = _job(session, monkeypatch, handler)
     jobs.run_pending()
-    job = session.get(jobs.Job, job_id)
-    session.refresh(job)
+    job = _status(session, job_id)
     assert job.status == "failed" and "fell over" in job.error
-    assert calls[-1] == ["release", "--holder", f"bench:job-{job_id}"]
-    assert _lease_threads() == []
+    assert cat.leases() == []
 
 
-def test_refused_lease_blocks_the_job_and_releases(session, platform, monkeypatch):
-    calls, state = platform
-    state["up_code"] = 1
-    state["up_lines"] = ["error: not enough VRAM next to leased services qwen3-8b (held by label:job-1); "
-                         "wait for it or stop it"]
+def test_jobs_without_models_take_no_lease(session, cat, monkeypatch):
+    job_id = _job(session, monkeypatch, lambda *a: {}, models=())
+    jobs.run_pending()
+    assert _status(session, job_id).status == "done" and not [c for c in cat.calls if c[0] == "lease"]
+
+
+@pytest.mark.parametrize("record, reason", [
+    (None, "ghost is not in the model catalog"),
+    (catalog_model("ghost", ["asr"], status="stale"), "not verified for its current build yet (capabilities stale)"),
+    ({**catalog_model("ghost", ["asr"]), "capabilities": None}, "has not been verified by the model catalog"),
+    ({**catalog_model("ghost", ["asr"], status="failed"),
+      "capabilities": {"status": "failed", "report": {"lines": [{"name": "route", "status": "fail",
+                                                                 "reason": "no /v1/audio/transcriptions"}]}}},
+     "failed verification in the model catalog (route: no /v1/audio/transcriptions)"),
+    ({**catalog_model("ghost", ["asr"]), "registered": False}, "not registered"),
+])
+def test_unknown_or_unverified_model_blocks(session, cat, monkeypatch, record, reason):
+    if record is not None:
+        cat.add_model(record)
+    job_id = _job(session, monkeypatch, lambda *a: pytest.fail("must not run"), models=("ghost",))
+    jobs.run_pending()
+    job = _status(session, job_id)
+    assert job.status == "blocked" and reason in job.error
+    assert any("blocked:" in line and reason in line for line in jobs.read_log(job_id))
+    assert not [c for c in cat.calls if c[0] == "lease"]
+
+
+def test_catalog_down_blocks(session, monkeypatch):
+    class Down(FakeCatalog):
+        def models(self, *a, **k):
+            import httpx
+
+            raise httpx.ConnectError("connection refused")
+
+    catalog.use(Down())
     job_id = _job(session, monkeypatch, lambda *a: pytest.fail("must not run"))
     jobs.run_pending()
-    job = session.get(jobs.Job, job_id)
-    session.refresh(job)
-    assert job.status == "blocked" and "held by label:job-1" in job.error
-    assert calls[-1] == ["release", "--holder", f"bench:job-{job_id}"]
-    assert _lease_threads() == []
+    job = _status(session, job_id)
+    assert job.status == "blocked" and "not reachable" in job.error
 
 
-def test_expired_lease_is_taken_again(session, platform, monkeypatch):
-    calls, state = platform
-    state["lease"] = (1, "error: no live lease for bench:job-1 (expired or released)")
+class QueuedCatalog(FakeCatalog):
+    """Leases queue at position 2 until `grant()` (or fail with `fail()`)."""
 
-    def handler(session, job, ctx):
-        _wait_for(lambda: sum(c[0] == "up" for c in calls) >= 2)
+    def __init__(self, models):
+        super().__init__(models)
+        self.outcome: str | None = None
+        self.polls = 0
+
+    def request_lease(self, holder, models, ttl_s=90):
+        d = super().request_lease(holder, models, ttl_s)
+        self._leases[d["id"]].update(state="queued", position=2,
+                                     waiting_for="a does not fit next to qwen3-32b-awq (leased by label:job-3)")
+        return dict(self._leases[d["id"]])
+
+    def get_lease(self, lease_id):
+        self.polls += 1
+        lease = self._leases[lease_id]
+        if self.outcome == "active":
+            lease.update(state="active", position=None, waiting_for=None)
+        elif self.outcome == "failed":
+            lease.update(state="failed", error="a failed to start: CUDA out of memory")
+        return dict(lease)
+
+    def grant(self):
+        self.outcome = "active"
+
+    def fail(self):
+        self.outcome = "failed"
+
+
+def test_queued_lease_waits_for_compute_then_runs(session, monkeypatch):
+    cat = QueuedCatalog([catalog_model("a", ["vad"])])
+    catalog.use(cat)
+    ran: list[int] = []
+    monkeypatch.setitem(jobs.HANDLERS, "free", lambda s, job, ctx: ran.append(job.id) or {})
+    model_job = _job(session, monkeypatch, lambda s, job, ctx: ran.append(job.id) or {})
+    other_model_job = _job(session, monkeypatch, lambda s, job, ctx: ran.append(job.id) or {})
+    free_job = jobs.enqueue(session, "free", {}).id
+    session.commit()
+
+    assert jobs.run_pending(max_jobs=1) == 1
+    job = _status(session, model_job)
+    assert job.status == "waiting" and ran == []
+    assert job.lease["position"] == 2 and "label:job-3" in job.lease["waiting_for"]
+    assert job.message.startswith("waiting for compute #2: a does not fit")
+    # while one lease waits, only jobs that need no model run
+    assert jobs.run_pending(max_jobs=1) == 1 and ran == [free_job]
+    assert jobs.run_pending(max_jobs=1) == 0 and _status(session, other_model_job).status == "queued"
+    cat.grant()
+    jobs.run_pending(poll_s=0.01)
+    assert ran == [free_job, model_job, other_model_job]
+    assert _status(session, model_job).status == "done" and _status(session, model_job).lease is None
+    assert cat.leases() == []  # both released
+
+
+def test_lease_that_fails_while_queued_blocks_the_job(session, monkeypatch):
+    cat = QueuedCatalog([catalog_model("a", ["vad"])])
+    catalog.use(cat)
+    job_id = _job(session, monkeypatch, lambda *a: pytest.fail("must not run"))
+    jobs.run_pending(max_jobs=1)
+    assert _status(session, job_id).status == "waiting"
+    cat.fail()
+    jobs.run_pending(poll_s=0.01)
+    job = _status(session, job_id)
+    assert job.status == "blocked" and "CUDA out of memory" in job.error and jobs._waiting == {}
+
+
+def test_refused_lease_blocks(session, monkeypatch):
+    class Refusing(FakeCatalog):
+        def request_lease(self, holder, models, ttl_s=90):
+            d = super().request_lease(holder, models, ttl_s)
+            self._leases[d["id"]].update(state="failed", error="a needs 40 GB; the host has 32 GB")
+            return dict(self._leases[d["id"]])
+
+    catalog.use(Refusing([catalog_model("a", ["vad"])]))
+    job_id = _job(session, monkeypatch, lambda *a: pytest.fail("must not run"))
+    jobs.run_pending()
+    job = _status(session, job_id)
+    assert job.status == "blocked" and "the host has 32 GB" in job.error
+
+
+def test_waiting_run_job_mirrors_on_its_run(session, monkeypatch):
+    from concord_bench.core.models import Dataset
+
+    cat = QueuedCatalog([catalog_model("a", ["vad"])])
+    catalog.use(cat)
+    ds = Dataset(name="d", status="ready")
+    session.add(ds)
+    session.flush()
+    run = Run(task="seg", dataset_id=ds.id, status="queued")
+    session.add(run)
+    session.flush()
+    jobs.enqueue(session, "run", {"run_id": run.id}, ["a"])
+    session.commit()
+    jobs.run_pending(max_jobs=1)
+    session.expire_all()
+    assert session.get(Run, run.id).status == "waiting"
+    assert jobs.recover(session) == 1  # a restarted worker requeues it (the old lease expires on its own)
+    session.commit()
+    assert session.query(Job).one().status == "queued"
+
+
+def test_claim_prefers_jobs_whose_models_are_running(session, cat):
+    j_big = jobs.enqueue(session, "fake", {}, ["big"])
+    j_small = jobs.enqueue(session, "fake", {}, ["small"])
+    session.commit()
+    job, lease = jobs.claim_next(session)
+    assert job.id == j_small.id and lease is None  # small is running: no load
+    job, _ = jobs.claim_next(session)
+    assert job.id == j_big.id
+
+
+def test_later_stages_wait_and_block_with_their_earlier_stage(session, cat, monkeypatch):
+    calls = {"n": 0}
+
+    def flaky(session, job, ctx):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("seg stage fell over")
         return {}
 
-    job_id = _job(session, monkeypatch, handler)
+    first = _job(session, monkeypatch, flaky)
+    monkeypatch.setitem(jobs.HANDLERS, "assemble", lambda *a: {})
+    second = jobs.enqueue(session, "assemble", {}, [], [first]).id
+    session.commit()
+    job, _ = jobs.claim_next(session)
+    assert job.id == first  # the second waits for it, although it needs no model
+    jobs.run_job(job.id)
+    session.expire_all()
+    assert jobs.claim_next(session) is None
+    blocked = _status(session, second)
+    assert blocked.status == "blocked" and f"needs job #{first}" in blocked.error
+    jobs.retry(session, _status(session, first))  # retrying the stage requeues what it blocked
+    session.commit()
+    assert _status(session, second).status == "queued"
     jobs.run_pending()
-    ups = [c for c in calls if c[0] == "up"]
-    assert len(ups) >= 2 and all(c[-2:] == ["--holder", f"bench:job-{job_id}"] for c in ups)
-    assert calls[-1][0] == "release"
+    assert _status(session, first).status == _status(session, second).status == "done"
 
 
-def test_replay_mode_takes_no_lease(session, platform, monkeypatch):
-    from concord_bench.core.settings import reset_settings
-
-    calls, _ = platform
-    monkeypatch.setenv("REPLAY_DIR", "/nonexistent")
-    reset_settings()
-    job_id = _job(session, monkeypatch, lambda *a: {})
-    jobs.run_pending()
-    assert calls == [] and session.get(jobs.Job, job_id).status == "done"
+def test_holder_names_the_app_and_job():
+    assert jobs.holder_for(12) == "bench:job-12"

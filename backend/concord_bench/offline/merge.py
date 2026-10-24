@@ -32,7 +32,7 @@ from typing import Any
 
 import yaml
 
-from ..platform.services import platform_command, platform_env
+from ..platform.tools import platform_command, platform_env
 from .kit import read_manifest
 
 Log = Callable[[str], None]

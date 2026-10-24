@@ -1,4 +1,5 @@
-"""HTTP API on the fixture set (TestClient): config, uploads, ingest job, flags, registry errors, templates."""
+"""HTTP API on the fixture set (TestClient): config, uploads, ingest job, flags, catalog models, outputs
+served to other apps, templates."""
 
 from __future__ import annotations
 
@@ -6,8 +7,6 @@ import io
 import json
 import shutil
 import zipfile
-
-import pytest
 
 from concord_bench.runs import jobs
 from conftest import GEN, ROOT
@@ -35,7 +34,8 @@ def test_config_names_the_app_and_contract(client):
     assert cfg["peer"] == {"url": None, "reachable": False, "contract_version": None}
     sample = json.loads((ROOT / "contracts" / "samples" / "api" / "config.bench.json").read_text())
     assert set(sample) <= set(cfg) and set(sample["peer"]) == set(cfg["peer"])
-    assert "features" not in cfg and "variant" not in cfg
+    assert "features" not in cfg and "variant" not in cfg and "no_evict" not in cfg
+    assert cfg["catalog"] == {"url": "http://127.0.0.1:8700", "ui_url": "http://127.0.0.1:8700"}
     assert [t["id"] for t in cfg["tasks"]] == ["asr", "diar", "pipeline"]
     for gone in ("/api/improve/status", "/api/label/console", "/api/sync/packages"):
         assert client.get(gone).status_code == 404
@@ -108,26 +108,90 @@ def test_templates(client):
     assert client.get("/api/templates/..%2Fdataset%2Ftruth.json").status_code == 404
 
 
-def test_registry_lists_platform_entries(client):
-    entries = client.get("/api/registry").json()
-    by = {e["name"]: e for e in entries}
-    if not by:
-        pytest.skip("no endpoint map")
-    assert by["silero-vad"]["usable_as"] == "segmenter" and by["silero-vad"]["relevance"] == 0
-    assert by["text-normalizer"]["usable_as"] is None
-    assert entries[0]["relevance"] == 0  # speech models first
-    assert client.post("/api/registry/nope/check").status_code == 404
+def test_models_come_from_the_catalog(client, session):
+    """The Models page lists the catalog's speech models with state, capabilities, cold start and build key;
+    there is nothing to register, re-check or remove in Bench."""
+    from aicore.catalog import FakeCatalog
 
+    from concord_bench.core.models import Model
+    from concord_bench.platform import catalog
+    from conftest import catalog_model
 
-def test_model_requires_successful_check(client, session):
-    job = jobs.enqueue(session, "check", {"service": "silero-vad"})
-    job.status = "done"
-    job.result = {"report": {"capabilities": [], "timing_level": None}}
+    fake = FakeCatalog([
+        catalog_model("faster-whisper-large-v3", ["asr"], contract="openai", api="audio.transcriptions",
+                      timing="word", state="stopped", tags=["call-centre"]),
+        catalog_model("pyannote-diarization", ["diar"], cold_start_s=21.0, cold_start_measured=True),
+        catalog_model("new-asr", ["asr"], contract="openai", api="audio.transcriptions", status="pending"),
+        {**catalog_model("text-normalizer", []), "api": "text.transform", "capabilities": None},
+        {**catalog_model("unregistered-vad", ["vad"]), "registered": False},
+    ])
+    catalog.use(fake)
+    body = client.get("/api/models").json()
+    assert body["catalog"]["available"] and body["catalog"]["ui_url"] == "http://127.0.0.1:8700"
+    by = {m["catalog_id"]: m for m in body["models"]}
+    assert set(by) == {"faster-whisper-large-v3", "pyannote-diarization", "new-asr"}
+    fw = by["faster-whisper-large-v3"]
+    assert fw["capabilities"] == ["asr"] and fw["timing_level"] == "word" and fw["state"] == "stopped"
+    assert fw["usable"] and fw["build_key"] == "b000000000000001" and fw["model_id"] is None  # no row until used
+    assert by["pyannote-diarization"]["has_speakers"] and by["pyannote-diarization"]["cold_start_s"] == 21.0
+    assert not by["new-asr"]["usable"] and "pending" in by["new-asr"]["not_usable"]
+    for gone in (("post", "/api/models"), ("post", "/api/registry/silero-vad/check"), ("get", "/api/registry"),
+                 ("post", "/api/models/1/recheck")):
+        assert getattr(client, gone[0])(gone[1]).status_code in (404, 405)
+    # a model gets its row on first use, and pickers rank catalog models by shared tags
+    m = catalog.ensure_model(session, "faster-whisper-large-v3")
     session.commit()
-    r = client.post("/api/models", json={"registry_name": "silero-vad", "check_job_id": job.id})
-    assert r.status_code == 422
-    r = client.post("/api/models", json={"registry_name": "default-vad", "check_job_id": 999})
-    assert r.status_code == 400
+    assert m.is_asr and m.timing_level == "word" and m.tags == ["call-centre"]
+    sug = client.get("/api/suggestions/models?tags=call-centre&label_types=asr").json()
+    assert [(e["catalog_id"], e["preselect"]) for e in sug["asr"]] == [("faster-whisper-large-v3", True),
+                                                                       ("new-asr", False)]
+    assert client.get("/api/models").json()["models"][0]["model_id"] == m.id
+    # the catalog is down: the models Bench has used, from their last record
+    class Down(FakeCatalog):
+        def models(self, *a, **k):
+            import httpx
+
+            raise httpx.ConnectError("refused")
+
+    catalog.use(Down())
+    body = client.get("/api/models").json()
+    assert not body["catalog"]["available"] and "not reachable" in body["catalog"]["error"]
+    assert [(x["catalog_id"], x["capabilities"], x["in_catalog"]) for x in body["models"]] == [
+        ("faster-whisper-large-v3", ["asr"], False)]
+    assert session.query(Model).count() == 1
+    assert [n["id"] for n in client.get("/api/normalisers").json()] == ["basic", "whisper_en", "none"]
+
+
+def test_outputs_served_to_other_apps(client, session):
+    """POST /api/outputs/batch (platform/catalog/README.md): rows by id, missing ids left out."""
+    from concord_bench.core.models import ModelOutput
+
+    row = ModelOutput(model_name="silero-vad", build_key="b000000000000001", audio_sha256="ab" * 32,
+                      span_start=-1.0, span_end=-1.0, params_hash="e3c3f2d4fcaebd2c",
+                      params={"adapter": "OIPSegmenter"}, output={"segments": [[0.5, 1.0]], "speakers": None},
+                      latency_s=0.25)
+    session.add(row)
+    session.commit()
+    body = client.post("/api/outputs/batch", json={"ids": [row.id, 999, str(row.id)]}).json()
+    assert body == {"outputs": [{"id": row.id, "build_key": "b000000000000001", "audio_sha256": "ab" * 32,
+                                 "span_start": -1.0, "span_end": -1.0, "params_hash": "e3c3f2d4fcaebd2c",
+                                 "params": {"adapter": "OIPSegmenter"},
+                                 "output": {"segments": [[0.5, 1.0]], "speakers": None}, "latency_s": 0.25}]}
+
+
+def test_app_registers_with_the_catalog(data_dir, fake_catalog):
+    import time
+
+    from fastapi.testclient import TestClient
+
+    from concord_bench.api.app import create_app
+
+    with TestClient(create_app()):
+        for _ in range(100):
+            if fake_catalog.apps():
+                break
+            time.sleep(0.01)
+    assert fake_catalog.apps() == [{"name": "bench", "base_url": "http://127.0.0.1:8600"}]
 
 
 def test_audio_only_upload_refused(client, tmp_path):

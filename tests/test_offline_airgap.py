@@ -1,9 +1,10 @@
 """Air-gap test of an offline kit (SPLIT_PLAN.md §7), `just test-offline`.
 
 Exports a full kit with `silero-vad` (CPU only: a 434 MB image and 2.3 MB of weights, no GPU), installs
-it with `install.sh --internal` on a Docker network with no outside access, registers the model through
-the installed Concord Bench's API, runs a VAD benchmark on the fixture set and compares the score with
-the one recorded on the source machine (fixtures/recorded/summary.json).
+it with `install.sh --internal` on a Docker network with no outside access, finds the model among the
+model catalog's models through the installed Concord Bench's API, runs a VAD benchmark on the fixture set
+and compares the score with the one recorded on the source machine (fixtures/recorded/summary.json).
+Kits carry no model catalog yet, so this fails until they do (see README, Offline kits).
 
 Two variants: a kit with Concord Bench only (which also merges a model kit with `install.sh --add`), and
 a kit with both app images (CONTRACTS.md §6), where each app must also reach the other by its compose
@@ -148,7 +149,7 @@ def test_full_kit_installs_and_benchmarks_on_an_internal_network(kit_dir, data_d
     res = json.loads(flow.stdout.strip().splitlines()[-1])
 
     assert res["internet"] is False  # the Concord container has no way out
-    assert res["registry"] == [SERVICE]  # the kit's platform holds only what was exported
+    assert res["models"] == [SERVICE]  # the kit's platform (and its catalog) holds only what was exported
     assert res["check"]["ok"] and res["check"]["capabilities"] == ["vad"], res["check"]["log"]
     started = docker("ps", "--filter", f"label=com.docker.compose.project={PROJECT}", "--format", "{{.Names}} {{.Networks}}")
     assert started.stdout.split() == [f"{PROJECT}-{SERVICE}-1", NETWORK]
@@ -160,8 +161,6 @@ def test_full_kit_installs_and_benchmarks_on_an_internal_network(kit_dir, data_d
     print(f"\nair-gap ({'+'.join(apps)}) VAD error {res['score']['value']:.6f}, source machine {recorded_score():.6f}; "
           f"kit {out['bytes'] / 1e9:.2f} GB")
     if len(apps) == 2:
-        # Label sees the same kit platform (the registry it would pseudo-label with)
-        assert [e["name"] for e in get_json("concord-label", "http://127.0.0.1:8620/api/registry")] == [SERVICE]
         return
 
     # A model kit merged in with install.sh --add (the merge runs in the installed app image).
@@ -169,8 +168,8 @@ def test_full_kit_installs_and_benchmarks_on_an_internal_network(kit_dir, data_d
     r = subprocess.run([str(mk / "install.sh"), "--add", str(k)], env=env, capture_output=True, text=True, timeout=900)
     assert r.returncode == 0, r.stdout + r.stderr
     assert "add: text-normalizer" in r.stdout
-    registry = get_json("concord-bench", "http://127.0.0.1:8600/api/registry")
-    assert sorted(e["name"] for e in registry) == [SERVICE, "text-normalizer"]  # Bench sees the re-rendered map
+    normalisers = get_json("concord-bench", "http://127.0.0.1:8600/api/normalisers")
+    assert "platform:text-normalizer" in [n["id"] for n in normalisers]  # the catalog sees the re-rendered platform
     owner = k.stat().st_uid
     assert [f for f in (k / "platform").rglob("*") if f.lstat().st_uid != owner] == []
     # the same service with another image is refused, and the install keeps what it has

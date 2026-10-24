@@ -9,12 +9,12 @@ response, `parse()` turns it into the normalised output. Recordings hold raw res
 tests still exercise every parser.
 
 Record / replay (settings `record_dir`, `replay_dir`): files at `<dir>/<service>/<key>.json`, keyed
-on the same (service, audio sha256, span, params) as the output cache.
+on (service, audio sha256, span, params hash). The build is not in the key: a recording stands for
+whatever build the replay catalog reports.
 """
 
 from __future__ import annotations
 
-import hashlib
 import json
 import time
 from abc import ABC, abstractmethod
@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any, ClassVar
 
 import numpy as np
+from aicore.catalog import params_hash as catalog_params_hash
 
 from ..core.settings import get_settings
 
@@ -39,7 +40,8 @@ class ReplayMiss(AdapterError):
 
 
 def params_hash(params: dict[str, Any]) -> str:
-    return hashlib.sha256(json.dumps(params, sort_keys=True).encode()).hexdigest()[:16]
+    """The catalog's index hash of request parameters, shared with Concord Label so their keys agree."""
+    return catalog_params_hash(params)
 
 
 @dataclass(frozen=True)
@@ -66,7 +68,7 @@ class Adapter(ABC):
 
     @property
     def params(self) -> dict[str, Any]:
-        """Everything besides the audio that changes the output; part of the cache key."""
+        """Everything besides the audio and the build that changes the output; part of the cache key."""
         return {"adapter": type(self).__name__, **self.options}
 
     @property

@@ -1,11 +1,14 @@
 """The scripted Phase 1 acceptance run (HANDOFF §3.7), through the HTTP API.
 
 1. Upload the labelled fixture dataset (audio + speaker-attributed STM) by local path.
-2. Register >= 2 ASR and >= 2 VAD / diarisation models from the registry, typing no fields.
-3. Run single-model benchmarks and the full pipeline grid incl. the oracle.
+2. Pick >= 2 ASR and >= 2 VAD / diarisation models from the model catalog, typing no fields (the catalog
+   has registered and verified them; Bench only lists them).
+3. Run single-model benchmarks and the full pipeline grid incl. the oracle, stage by stage, after
+   previewing the catalog's plan.
 
-Used by `just record` (live services, responses recorded) and by the end-to-end test (replayed).
-Jobs run in this process via `jobs.run_pending()`, so no separate worker is needed.
+Used by `just record` (live catalog and services, responses recorded) and by the end-to-end test
+(replayed, with the replay stand-in for the catalog). Jobs run in this process via `jobs.run_pending()`,
+so no separate worker is needed.
 """
 
 from __future__ import annotations
@@ -39,7 +42,7 @@ def _ok(r, *codes: int) -> Any:
 
 
 def run_flow(client, staging: Path, asr_models: list[str] | None = None, seg_models: list[str] | None = None,
-             extra_checks: list[str] | None = None, log: Callable[[str], None] = print) -> dict[str, Any]:
+             log: Callable[[str], None] = print) -> dict[str, Any]:
     asr_models = asr_models or ASR_MODELS
     seg_models = seg_models or SEG_MODELS
     out: dict[str, Any] = {"typed_fields": 0}
@@ -56,30 +59,23 @@ def run_flow(client, staging: Path, asr_models: list[str] | None = None, seg_mod
     out["dataset"] = ds
     log(f"dataset {ds_id}: {ds['files']} files, {ds['usable_files']} usable, labels {ds['label_types']}")
 
-    # 2. models: pick from the registry, run the check, add with no typed fields
+    # 2. models: listed by the catalog with what its verifier found; nothing to type, nothing to register here
+    listing = _ok(client.get("/api/models"))
+    by_id = {m["catalog_id"]: m for m in listing["models"]}
     out["models"] = {}
-    out["checks"] = {}
-    for name in seg_models + asr_models + (extra_checks or []):
-        job = _ok(client.post(f"/api/registry/{name}/check"), 202)
-        jobs.run_pending()
-        job = _ok(client.get(f"/api/jobs/{job['id']}"))
-        if job["status"] != "done":
-            raise AssertionError(f"check of {name} {job['status']}: {job['error']}\n" + "\n".join(job["log"][-15:]))
-        report = job["result"]["report"]
-        out["checks"][name] = report
-        log(f"check {name}: {report['capabilities']} timing={report['timing_level']}")
-        if name in (extra_checks or []):
-            continue
-        m = _ok(client.post("/api/models", json={"registry_name": name, "check_job_id": job["id"]}), 201)
+    for name in seg_models + asr_models:
+        m = by_id.get(name)
+        if m is None or not m["usable"]:
+            raise AssertionError(f"{name} is not a usable catalog model: {m and m['not_usable']}")
         out["models"][name] = m
+        log(f"model {name}: {m['capabilities']} timing={m['timing_level']} build {m['build_key']}")
 
-    # 3. benchmarks: each stage alone, then the full grid incl. the oracle
-    seg_ids = [out["models"][n]["id"] for n in seg_models]
-    asr_ids = [out["models"][n]["id"] for n in asr_models]
-    _ok(client.post("/api/benchmarks/plan", json={"dataset_id": ds_id, "seg_model_ids": seg_ids,
-                                                  "asr_model_ids": asr_ids, "mode": "stages"}), 202)
-    _ok(client.post("/api/benchmarks/plan", json={"dataset_id": ds_id, "seg_model_ids": seg_ids,
-                                                  "asr_model_ids": asr_ids, "oracle": True, "mode": "grid"}), 202)
+    # 3. benchmarks: each stage alone, then the full grid incl. the oracle (previewed first)
+    stages = {"dataset_id": ds_id, "seg_models": seg_models, "asr_models": asr_models, "mode": "stages"}
+    grid = {"dataset_id": ds_id, "seg_models": seg_models, "asr_models": asr_models, "oracle": True, "mode": "grid"}
+    out["plan"] = _ok(client.post("/api/benchmarks/plan/preview", json=grid))
+    _ok(client.post("/api/benchmarks/plan", json=stages), 202)
+    _ok(client.post("/api/benchmarks/plan", json=grid), 202)
     jobs.run_pending()
     failed = [j for j in _ok(client.get("/api/jobs?limit=200")) if j["status"] in ("failed", "blocked")]
     if failed:

@@ -47,7 +47,7 @@ export function sortImports(list: ReferenceImport[]): { waiting: ReferenceImport
   return { waiting, decided };
 }
 
-/** Skipped seg-model outputs as "2 image differs, 1 not registered" (zero counts left out). */
+/** Skipped seg-model outputs as "2 build differs, 1 unknown model" (zero counts left out). */
 export function skippedSummary(skipped: Record<string, number> | undefined): string {
   const parts = Object.entries(skipped ?? {})
     .filter(([, n]) => n > 0)

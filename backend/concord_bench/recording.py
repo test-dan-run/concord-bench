@@ -1,8 +1,9 @@
 """`just record`: run the acceptance flow against live services and record every model response.
 
 Writes `fixtures/recorded/<service>/<key>.json`, a copy of the endpoint map the responses were taken
-with (`endpoints.generated.yaml`: replay keys include image tags, so tests pin this copy), and
-`summary.json` with the scores of the recorded run for regression checks.
+with (`endpoints.generated.yaml`: the replay stand-in for the model catalog is built from it), and
+`summary.json` with the catalog's capabilities of each model (`models`, which replay serves) and the scores
+of the recorded run for regression checks. Needs the model catalog running (AICORE_CATALOG / CATALOG_URL).
 """
 
 from __future__ import annotations
@@ -16,7 +17,7 @@ from pathlib import Path
 from .core.settings import REPO_ROOT, reset_settings
 
 
-def record(out: str, services: list[str] | None = None, extra_checks: list[str] | None = None) -> int:
+def record(out: str, services: list[str] | None = None) -> int:
     import aicore
     from fastapi.testclient import TestClient
 
@@ -37,10 +38,10 @@ def record(out: str, services: list[str] | None = None, extra_checks: list[str] 
     asr = [s for s in acceptance.ASR_MODELS if not services or s in services]
     seg = [s for s in acceptance.SEG_MODELS if not services or s in services]
     with TestClient(create_app()) as client:
-        res = acceptance.run_flow(client, work / "staging", asr, seg, extra_checks=extra_checks)
+        res = acceptance.run_flow(client, work / "staging", asr, seg)
     summary = {
-        "checks": {k: {"capabilities": v["capabilities"], "timing_level": v["timing_level"],
-                       "lines": [(ln["status"], ln["name"]) for ln in v["lines"]]} for k, v in res["checks"].items()},
+        "models": {k: {"capabilities": v["capabilities"], "timing_level": v["timing_level"],
+                       "build_key": v["build_key"], "image": v["image"]} for k, v in res["models"].items()},
         "asr": {c["model_id"]: c["value"] for c in res["asr"]["cells"]},
         "diar": {c["model_id"]: [c["metric"], c["value"]] for c in res["diar"]["cells"]},
         "pipelines": [{"label": c["label"], "cpwer": c["cpwer"], "wer": c["wer"], "der": c["der"]}

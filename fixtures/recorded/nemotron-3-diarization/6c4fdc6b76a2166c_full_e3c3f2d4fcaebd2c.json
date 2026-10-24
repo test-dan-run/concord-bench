@@ -1,0 +1,1 @@
+{"service": "nemotron-3-diarization", "params": {"adapter": "OIPSegmenter"}, "audio": {"sha256": "6c4fdc6b76a2166c911443e289eb5dd271099bc9417e024365a4b27e0a875756", "start": 0.0, "end": -1.0}, "latency_s": 0.3905, "raw": {"SEGMENTS": [[0.41, 4.16], [4.43, 7.33], [8.34, 13.47], [13.78, 14.33], [15.01, 18.09], [18.4, 20.7], [20.44, 21.59]], "SPEAKERS": [0, 1, 0, 1, 1, 0, 1]}}

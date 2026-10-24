@@ -9,7 +9,8 @@ a person, staged with a preview, then accepted into a new dataset through the no
   references file, so the manifest, `files.csv`, `uids.jsonl` and `outputs/` are never read as
   annotations. A package without a manifest is ingested as it is, like an annotated upload.
 - `finish` runs after the ingest: provenance, Label's segment uids (for flags back, §3) and seg-model
-  outputs imported into the output cache when the image tag is the one Bench would use (§2.5).
+  outputs imported into the output cache when they come from the build the model catalog runs now
+  (`build_key`, §2.5), recorded in the catalog's output index too.
 
 References that have been scored are never changed: a package from the same source as an earlier
 dataset (`source.install_id` + `source.dataset_uid`) becomes a new dataset, `<name> v<N>`, linked to
@@ -32,7 +33,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..core import paths
-from ..core.models import AudioFile, Dataset, Job, Model, ModelOutput, ReferenceImport, Segment, utcnow
+from ..core.models import AudioFile, Dataset, Job, ModelOutput, ReferenceImport, Segment, utcnow
 from . import audio as audio_mod
 from .ingest import NO_REFERENCES, SKIP_DIRS, extract_zips, inspect_source
 from .parsers import ANNOTATION_EXTS, parse_file
@@ -486,16 +487,20 @@ def finish(session: Session, import_id: int, dataset_id: int, log=print) -> dict
     ds = session.get(Dataset, dataset_id)
     if imp is None or ds is None:
         return {}
+    from ..runs.cache import OutputCache
+
     result: dict[str, Any] = {}
     root = Path(imp.path)
+    oc = OutputCache(session, log)
     if imp.manifest is not None and root.is_dir():
         pkg = read_package(root, check_audio=False)
         result["uids"] = assign_uids(session, ds, pkg.uids)
-        result["outputs"] = import_outputs(session, ds, pkg)
+        result["outputs"] = import_outputs(session, ds, pkg, oc)
         log(f"reference package: {result['uids']['matched']} of {len(pkg.uids)} segment uids matched; "
             f"outputs imported {result['outputs']['imported']}, skipped {sum(result['outputs']['skipped'].values())}")
     imp.status, imp.result, imp.decided_at = "accepted", result, utcnow()
     session.commit()
+    oc.flush()  # the imported outputs, into the catalog's index
     discard_files(imp)
     return result
 
@@ -535,7 +540,8 @@ def assign_uids(session: Session, ds: Dataset, uids: list[dict[str, Any]]) -> di
 
 
 def _params_match(adapter, rec_params: dict[str, Any]) -> bool:
-    """The package's call params (written out in full) against Bench's own call for that model."""
+    """The package's call params (written out in full) against Bench's own call for that model. `image`, which
+    writers from before the catalog put there, is ignored: the build is matched on `build_key`."""
     own = {k: v for k, v in adapter.params.items() if k not in ("adapter", "image")}
     own.setdefault("sample_rate", BENCH_SAMPLE_RATE)
     theirs = dict(rec_params or {})
@@ -545,21 +551,24 @@ def _params_match(adapter, rec_params: dict[str, Any]) -> bool:
     return all(k in own and own[k] == v for k, v in theirs.items())
 
 
-def import_outputs(session: Session, ds: Dataset, pkg: Package) -> dict[str, Any]:
-    """outputs/seg.jsonl rows into the output cache, keyed the way `runs.cache.get_or_run` keys a
-    whole-file call of that model, when the model is registered and the image tag is the one Bench
-    would use now (CONTRACTS.md §2.5). Others are skipped and counted."""
+def import_outputs(session: Session, ds: Dataset, pkg: Package, oc: Any = None) -> dict[str, Any]:
+    """outputs/seg.jsonl rows into the output cache, keyed the way `runs.cache` keys a whole-file call of
+    that model, when the model catalog knows the model as a segmenter and `build_key` is the build it runs
+    now (CONTRACTS.md §2.5). Others are skipped and counted; rows without a build key (written before the
+    catalog) too."""
     from .. import adapters
-    from ..runs import cache
+    from ..platform import catalog
+    from ..runs.cache import WHOLE, OutputCache, lookup
 
-    skipped = {"not_registered": 0, "image_differs": 0, "params_differ": 0, "not_in_dataset": 0, "invalid":
-               pkg.outputs_invalid}
+    oc = oc or OutputCache(session)
+    skipped = {"unknown_model": 0, "no_build_key": 0, "build_differs": 0, "params_differ": 0, "not_in_dataset": 0,
+               "invalid": pkg.outputs_invalid}
     imported = cached = 0
     shas = set(session.scalars(select(AudioFile.sha256).where(AudioFile.dataset_id == ds.id)))
     by_model: dict[str, Any] = {}
     for rec in pkg.outputs:
         out = rec.get("output") or {}
-        if not {"model", "image", "sha256", "params"} <= rec.keys() or not isinstance(out.get("segments"), list):
+        if not {"model", "sha256", "params"} <= rec.keys() or not isinstance(out.get("segments"), list):
             skipped["invalid"] += 1
             continue
         if rec["sha256"] not in shas:
@@ -567,24 +576,28 @@ def import_outputs(session: Session, ds: Dataset, pkg: Package) -> dict[str, Any
             continue
         name = rec["model"]
         if name not in by_model:
-            model = session.scalar(select(Model).where(Model.registry_name == name))
+            by_model[name] = None
             try:
-                by_model[name] = adapters.for_model(model) if model is not None and model.is_seg else None
-            except adapters.AdapterError:
-                by_model[name] = None
-        adapter = by_model[name]
-        if adapter is None or adapter.kind != "seg":
-            skipped["not_registered"] += 1
+                crec = catalog.record(name)
+                model = catalog.ensure_model(session, name, crec) if crec is not None else None
+                if model is not None and model.is_seg:
+                    by_model[name] = (adapters.for_model(model), crec.get("build_key"))
+            except (catalog.CatalogUnavailable, catalog.ModelUnusable, adapters.AdapterError):
+                pass
+        if by_model[name] is None or by_model[name][0].kind != "seg":
+            skipped["unknown_model"] += 1
             continue
-        if rec["image"] != adapter.options.get("image"):
-            skipped["image_differs"] += 1
+        adapter, current = by_model[name]
+        if not rec.get("build_key"):
+            skipped["no_build_key"] += 1
+            continue
+        if rec["build_key"] != current:
+            skipped["build_differs"] += 1
             continue
         if not isinstance(rec["params"], dict) or not _params_match(adapter, rec["params"]):
             skipped["params_differ"] += 1
             continue
-        s, e = cache._span(0.0, cache.WHOLE)
-        phash = adapter.params_hash
-        if cache.lookup(session, adapter.service, rec["sha256"], s, e, phash) is not None:
+        if lookup(session, adapter.service, current, rec["sha256"], WHOLE, WHOLE, adapter.params_hash) is not None:
             cached += 1
             continue
         try:
@@ -595,9 +608,10 @@ def import_outputs(session: Session, ds: Dataset, pkg: Package) -> dict[str, Any
         except (TypeError, ValueError):
             skipped["invalid"] += 1
             continue
-        session.add(ModelOutput(model_name=adapter.service, audio_sha256=rec["sha256"], span_start=s, span_end=e,
-                                params_hash=phash, output={"segments": segs, "speakers": spk},
-                                latency_s=float(rec.get("latency_s") or 0.0), image=rec["image"]))
+        oc.store(ModelOutput(model_name=adapter.service, build_key=current, audio_sha256=rec["sha256"],
+                              span_start=WHOLE, span_end=WHOLE, params_hash=adapter.params_hash,
+                              params=adapter.params, output={"segments": segs, "speakers": spk},
+                              latency_s=float(rec.get("latency_s") or 0.0), image=rec.get("image")))
         session.flush()
         imported += 1
     return {"lines": len(pkg.outputs) + pkg.outputs_invalid, "imported": imported, "already_cached": cached,

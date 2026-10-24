@@ -12,7 +12,8 @@ from fastapi.staticfiles import StaticFiles
 from .. import __version__
 from ..core import db
 from ..core.settings import get_settings
-from . import audio, benchmarks, config, datasets, errors, models, offline, references, runs
+from ..platform import catalog
+from . import audio, benchmarks, config, datasets, errors, models, offline, outputs, references, runs
 
 log = logging.getLogger("concord_bench")
 
@@ -28,11 +29,13 @@ def create_app(migrate: bool = True) -> FastAPI:
             except db.ForeignDatabase as exc:
                 log.error("%s", exc)
                 raise
+        # Where other apps read Bench's outputs; a catalog that is down only delays this to the next start.
+        catalog.register_app_in_background()
         yield
 
     app = FastAPI(title="Concord Bench", version=__version__, lifespan=lifespan)
     for r in (config.router, datasets.router, models.router, runs.router, benchmarks.router, errors.router,
-              audio.router, offline.router, references.router):
+              audio.router, offline.router, references.router, outputs.router):
         app.include_router(r, prefix="/api")
 
     dist = settings.frontend_dist

@@ -8,7 +8,7 @@ import { flagsPushBlocker, fromLabel, provenanceOf } from "../../lib/peer";
 import * as I from "../../components/icons";
 import { TagInput } from "../../components/TagInput";
 import { Button, Chip, Empty, ErrorNote, Fact, JobPill, PageHeader, Panel, Spinner, StatusDot } from "../../components/ui";
-import { PlanPanel, planCount, type PlanValue } from "../benchmarks/PlanPanel";
+import { EMPTY_PLAN, PlanPanel, planCount, type PlanValue } from "../benchmarks/PlanPanel";
 
 interface FileRow {
   id: number;
@@ -38,7 +38,7 @@ export function DatasetDetail() {
     onSuccess: () => void qc.invalidateQueries({ queryKey: ["dataset-flags", id] }),
   });
   const runs = useQuery({ queryKey: ["dataset-runs", id], queryFn: () => api.get<Run[]>(`/runs?dataset_id=${id}`), refetchInterval: 4000, enabled: q.data?.status === "ready" });
-  const [plan, setPlan] = useState<PlanValue>({ seg_model_ids: [], asr_model_ids: [], oracle: false, mode: "grid" });
+  const [plan, setPlan] = useState<PlanValue>(EMPTY_PLAN);
   const [editTags, setEditTags] = useState<string[] | null>(null);
   const runPlan = useMutation({ mutationFn: () => api.post("/benchmarks/plan", { dataset_id: Number(id), ...plan }), onSuccess: () => qc.invalidateQueries() });
   const saveTags = useMutation({
@@ -50,7 +50,7 @@ export function DatasetDetail() {
   });
   const del = useMutation({ mutationFn: () => api.del(`/datasets/${id}`), onSuccess: () => nav("/datasets") });
   const { data: cfg } = useConfig();
-  const [rerun, setRerun] = useState<PlanValue>({ seg_model_ids: [], asr_model_ids: [], oracle: false, mode: "stages" });
+  const [rerun, setRerun] = useState<PlanValue>({ ...EMPTY_PLAN, mode: "stages" });
   const runRerun = useMutation({ mutationFn: () => api.post("/benchmarks/plan", { dataset_id: Number(id), ...rerun }), onSuccess: () => qc.invalidateQueries() });
   const sendFlags = useMutation({ mutationFn: () => api.post<{ matched: number; unmatched: number; sent: number }>(`/datasets/${id}/flags/send`) });
 

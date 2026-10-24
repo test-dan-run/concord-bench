@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 from .. import peer
 from ..core import paths
 from ..core.db import get_session
-from ..core.models import AudioFile, Dataset, Job, Run, RunTask, Segment
+from ..core.models import AudioFile, Dataset, Job, Model, Run, RunTask, Segment
 from ..core.settings import REPO_ROOT
 from ..datasets.ingest import NO_REFERENCES, inspect_source
 from ..runs import jobs
@@ -185,8 +185,12 @@ def previous_plan(session: Session, ds: Dataset) -> dict[str, Any] | None:
             else:
                 seg.add(r.pipeline.seg_model_id)
     already = {r.model_id for r in session.scalars(select(Run).where(Run.dataset_id == ds.id)) if r.model_id}
+
+    def cids(ids: set[int]) -> list[str]:
+        return sorted(m.catalog_id for m in (session.get(Model, i) for i in ids) if m is not None)
+
     return {"previous": {"id": prev.id, "name": prev.name, "export_version": prev.export_version},
-            "plan": {"seg_model_ids": sorted(seg), "asr_model_ids": sorted(asr), "oracle": oracle,
+            "plan": {"seg_models": cids(seg), "asr_models": cids(asr), "oracle": oracle,
                      "mode": "grid" if pipelines else "stages"},
             "models": len(seg | asr), "already_run": bool(already & (seg | asr))}
 
@@ -197,6 +201,7 @@ def job_brief(job: Job) -> dict[str, Any]:
             "progress": live["progress"] if live else job.progress,
             "message": live["message"] if live else job.message,
             "error": job.error, "required_services": job.required_services, "payload": job.payload,
+            "after": job.after or [], "lease": job.lease,
             "result": job.result, "created_at": job.created_at.isoformat(),
             "started_at": job.started_at.isoformat() if job.started_at else None,
             "finished_at": job.finished_at.isoformat() if job.finished_at else None}

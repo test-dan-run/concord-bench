@@ -143,3 +143,24 @@ def test_record_then_replay(tmp_path, monkeypatch, data_dir):
     assert out["text"] == "recorded words"
     with pytest.raises(base.ReplayMiss):
         b.run(AUDIO, AudioRef("other"))
+
+
+def test_for_model_takes_contract_and_timing_from_the_catalog_and_no_image():
+    """The build is not an adapter option (it is a cache key part of its own), so Bench and Concord Label
+    hash the same params: aicore.catalog.params_hash."""
+    from aicore.catalog import params_hash
+
+    from concord_bench.adapters import for_model
+    from concord_bench.core.models import Model
+
+    m = Model(catalog_id="faster-whisper-large-v3", display_name="fw",
+              catalog={"contract": "openai", "api": "audio.transcriptions", "image": "img:1", "build_key": "b" * 16,
+                       "capabilities": {"status": "verified", "tasks": ["asr"], "timing_level": "word"}})
+    a = for_model(m, "en-SG")
+    assert isinstance(a, OpenAIASR) and a.params == {"adapter": "OpenAIASR", "timing": "word", "language": "en"}
+    assert a.params_hash == params_hash(a.params) == base.params_hash(a.params)
+    seg = Model(catalog_id="silero-vad", display_name="s",
+                catalog={"contract": "oip-v2", "api": "infer", "capabilities": {"tasks": ["vad"]}})
+    assert for_model(seg).params == {"adapter": "OIPSegmenter"}
+    with pytest.raises(base.AdapterError, match="no adapter"):
+        for_model(Model(catalog_id="x", display_name="x", catalog={"contract": "openai", "api": "embeddings"}))

@@ -7,7 +7,7 @@ import { pickedFromDrop, pickedFromInput, uploadFiles, type PickedFile } from ".
 import * as I from "../../components/icons";
 import { TagInput } from "../../components/TagInput";
 import { Button, Chip, cx, ErrorNote, Fact, PageHeader, Panel, Spinner } from "../../components/ui";
-import { PlanPanel, planCount, type PlanValue } from "../benchmarks/PlanPanel";
+import { EMPTY_PLAN, PlanPanel, planCount, type PlanValue } from "../benchmarks/PlanPanel";
 
 const TASK_INFO: Record<string, { title: string; feeds: string }> = {
   asr: { title: "ASR transcripts", feeds: "WER" },
@@ -46,7 +46,7 @@ export function UploadDataset() {
   const [uploadId, setUploadId] = useState<string | null>(null);
   const [progress, setProgress] = useState<[number, number] | null>(null);
   const [inspection, setInspection] = useState<Inspection | null>(null);
-  const [plan, setPlan] = useState<PlanValue>({ seg_model_ids: [], asr_model_ids: [], oracle: false, mode: "grid" });
+  const [plan, setPlan] = useState<PlanValue>(EMPTY_PLAN);
   const [drag, setDrag] = useState(false);
   const templates = useQuery({ queryKey: ["templates"], queryFn: () => api.get<{ name: string; size: number }[]>("/templates") });
 
@@ -214,7 +214,7 @@ export function UploadDataset() {
           </Panel>
           <Panel title="Benchmark plan" subtitle="Ranked by tags shared with this dataset">
             {hasReferences(inspection) ? <PlanPanel tags={tags} labelTypes={labels} language={language} value={plan} onChange={setPlan} /> : <span className="text-[13px] text-muted">Shown once annotations are matched.</span>}
-            <Link to="/models/add" className="text-xs">Add another model</Link>
+            <Link to="/models" className="text-xs">Models in the catalog</Link>
           </Panel>
           {inspection && !hasReferences(inspection) && <span role="alert" className="text-xs text-warn">{NO_REFERENCES}</span>}
           <ErrorNote error={create.error} />

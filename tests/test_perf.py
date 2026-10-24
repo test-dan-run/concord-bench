@@ -36,8 +36,9 @@ def corrupt(rng: random.Random, s: str) -> str:
 def build(session, files: int, segs_per_file: int, scored_files: int):
     rng = random.Random(7)
     ds = Dataset(name="perf", status="ready", label_types=["asr", "diar"])
-    model = Model(registry_name="perf-asr", display_name="perf", capabilities=["asr"], timing_level="text",
-                  registry_snapshot={"contract": "openai", "api": "audio.transcriptions"})
+    model = Model(catalog_id="perf-asr", display_name="perf",
+                  catalog={"contract": "openai", "api": "audio.transcriptions",
+                           "capabilities": {"status": "verified", "tasks": ["asr"], "timing_level": "text"}})
     session.add_all([ds, model])
     session.flush()
     afs = [AudioFile(dataset_id=ds.id, rel_path=f"f{i:04d}.wav", sha256=f"{i:064x}", ext=".wav", duration=300.0,

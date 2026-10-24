@@ -16,7 +16,6 @@ def main(argv: list[str] | None = None) -> int:
     rec = sub.add_parser("record", help="re-record adapter responses on the fixture set against live services")
     rec.add_argument("--out", default="fixtures/recorded")
     rec.add_argument("--services", nargs="*", default=None, help="limit to these benchmark models")
-    rec.add_argument("--extra-checks", nargs="*", default=None, help="also record compatibility checks of these")
     ex = sub.add_parser("export-offline", help="write an offline kit of these platform services into a folder")
     ex.add_argument("names", nargs="+", help="platform service names or aliases")
     ex.add_argument("--kind", choices=["full", "models"], default="full",
@@ -56,7 +55,7 @@ def main(argv: list[str] | None = None) -> int:
     elif args.cmd == "record":
         from .recording import record
 
-        return record(args.out, args.services, args.extra_checks)
+        return record(args.out, args.services)
     return 0
 
 

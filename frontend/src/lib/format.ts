@@ -1,5 +1,7 @@
 // Number and time formatting. Every value rendered with these goes inside a `.num` element.
 
+import type { Job } from "./api";
+
 export const DASH = "—";
 
 export function pct(v: number | null | undefined, digits = 1): string {
@@ -68,4 +70,25 @@ export function capLabel(c: string): string {
 
 export function timingLabel(t: string | null | undefined): string {
   return { word: "word times", segment: "segment times", text: "text only" }[t ?? ""] ?? DASH;
+}
+
+/** "74 s" / "3.1 min"; `~` when the catalog has not measured a load of this build yet. */
+export function coldStart(s: number | null | undefined, measured = true): string {
+  if (s === null || s === undefined) return DASH;
+  const v = s < 90 ? `${Math.round(s)} s` : `${(s / 60).toFixed(1)} min`;
+  return measured ? v : `~${v}`;
+}
+
+export function modelStateLabel(state: string | null | undefined): string {
+  return { running: "running", stopped: "stopped", starting: "starting", stopping: "stopping", queued: "queued", failed: "failed to start" }[state ?? ""] ?? "unknown";
+}
+
+/** "running 40%", or "waiting for compute #2" while the job's lease is queued in the model catalog. */
+export function jobStatusText(j: Pick<Job, "status" | "progress" | "lease">): string {
+  if (j.status === "running") return `${Math.round(j.progress * 100)}%`;
+  if (j.status === "waiting") {
+    if (j.lease?.state === "starting") return "starting models";
+    return `waiting for compute${j.lease?.position ? ` #${j.lease.position}` : ""}`;
+  }
+  return j.status;
 }

@@ -1,4 +1,5 @@
-"""Against live platform services (`just test-live`). Starts what it needs through ensure_services."""
+"""Against the live model catalog and platform services (`just test-live`): the catalog (AICORE_CATALOG or
+CATALOG_URL) must be running; the lease starts what the tests need."""
 
 from __future__ import annotations
 
@@ -6,34 +7,35 @@ import pytest
 
 from concord_bench.adapters import for_model
 from concord_bench.adapters.base import AudioRef
-from concord_bench.platform.services import ensure_services, health
-from concord_bench.registry.check import check_clip, run_check
+from concord_bench.core.models import Model
+from concord_bench.platform import catalog
+from concord_bench.runs.jobs import holder_for
+from conftest import GEN, dialogue_files
 
 pytestmark = pytest.mark.live
+MODELS = ["silero-vad", "faster-whisper-large-v3"]
 
 
 @pytest.fixture(scope="module", autouse=True)
-def services():
-    ensure_services(["silero-vad", "faster-whisper-large-v3"], print)
+def lease():
+    with catalog.get().lease(holder_for(0), MODELS, on_wait=lambda d: print("waiting:", d)) as lease:
+        yield lease
 
 
-def test_health_reports_up():
-    assert health("silero-vad").up and health("default-vad").up
+def test_catalog_lists_verified_models():
+    for name in MODELS:
+        assert catalog.unusable_reason(catalog.record(name, refresh=True), name) is None
+    assert catalog.record("silero-vad")["capabilities"]["tasks"] == ["vad"]
+    assert catalog.record("faster-whisper-large-v3")["capabilities"]["timing_level"] == "word"
 
 
-def test_check_detects_vad_and_word_times():
-    assert run_check("silero-vad").capabilities == ["vad"]
-    rep = run_check("faster-whisper-large-v3")
-    assert rep.capabilities == ["asr"] and rep.timing_level == "word"
+def test_adapter_through_the_gateway():
+    from concord_bench.datasets.audio import decode, probe, to_mono_16k
 
-
-def test_adapter_on_check_clip():
-    class M:
-        registry_name = "faster-whisper-large-v3"
-        registry_snapshot = {"contract": "openai", "api": "audio.transcriptions"}
-        timing_level = "word"
-
-    audio, truth, sha = check_clip()
-    out, latency = for_model(M(), "en").run(audio, AudioRef(sha))
+    rec = catalog.record("faster-whisper-large-v3", refresh=True)
+    m = Model(catalog_id=rec["id"], display_name=rec["id"], catalog=catalog.snapshot(rec))
+    path = GEN / "dataset" / "audio" / next(iter(dialogue_files().values()))["file"]
+    p = probe(path)
+    audio = to_mono_16k(decode(path, p.sample_rate, p.channels), p.sample_rate)
+    out, latency = for_model(m, "en").run(audio, AudioRef("live-test"))
     assert out["words"] and latency > 0
-    assert "parcel" in out["text"].lower()

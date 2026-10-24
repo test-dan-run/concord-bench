@@ -48,17 +48,17 @@ describe("reference imports", () => {
     expect(decided.map((i) => i.id)).toEqual([5, 3]);
   });
 
-  it("pre-tick the rerun plan with the previous version's models still offered", () => {
-    const m = (model_id: number) => ({ model_id }) as never;
+  it("pre-tick the rerun plan with the previous version's models the catalog still offers verified", () => {
+    const m = (catalog_id: string, usable = true) => ({ catalog_id, usable }) as never;
     const plan = presetFor(
-      { seg_model_ids: [1, 9], asr_model_ids: [2, 3], oracle: true, mode: "grid" },
-      { seg: [m(1)], asr: [m(2), m(3), m(4)], oracle_available: false },
+      { seg_models: ["pyannote", "gone"], asr_models: ["whisper", "fw", "stale"], oracle: true, mode: "grid" },
+      { seg: [m("pyannote")], asr: [m("whisper"), m("fw"), m("other"), m("stale", false)], oracle_available: false },
     );
-    expect(plan).toEqual({ seg_model_ids: [1], asr_model_ids: [2, 3], oracle: false, mode: "grid" });
+    expect(plan).toEqual({ seg_models: ["pyannote"], asr_models: ["whisper", "fw"], oracle: false, mode: "grid" });
   });
 
   it("summarise skipped outputs", () => {
-    expect(skippedSummary({ image_differs: 2, not_registered: 0, params_differ: 1 })).toBe("2 image differs, 1 params differ");
+    expect(skippedSummary({ build_differs: 2, unknown_model: 0, params_differ: 1 })).toBe("2 build differs, 1 params differ");
     expect(skippedSummary(undefined)).toBe("");
   });
 });

@@ -144,7 +144,7 @@ def scores_by_source(dataset_uid: str, install_id: str | None = None, normaliser
         wanted = [s for s in all_scores if normaliser and (s.normaliser == normaliser
                                                            or s.normaliser.split("@")[0] == normaliser)]
         sc = (wanted or all_scores)[-1]
-        scores.append({"model": run.model.registry_name, "display_name": run.model.display_name,
+        scores.append({"model": run.model.catalog_id, "display_name": run.model.display_name,
                        "wer": (sc.aggregates or {}).get("wer"), "normaliser": sc.normaliser, "run_id": run.id,
                        "score_id": sc.id, "created_at": _iso(sc.created_at)})
     scores.sort(key=lambda s: (s["wer"] is None, s["wer"] if s["wer"] is not None else 0, s["model"]))

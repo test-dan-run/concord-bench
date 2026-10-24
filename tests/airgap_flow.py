@@ -3,9 +3,10 @@
     python airgap_flow.py DATASET_DIR SERVICE
 
 Drives the running API on 127.0.0.1:8600 the way a user would: upload the fixture dataset by local
-path, run the compatibility check of SERVICE (the worker starts it through the kit's platform),
-register it, run a VAD / diarisation benchmark and print the score as JSON. Standard library only.
-It also checks that the container cannot reach the internet.
+path, find SERVICE among the model catalog's models (the kit's catalog has registered and verified it),
+run a VAD / diarisation benchmark (the worker leases it, which starts it) and print the score as JSON.
+Standard library only. It also checks that the container cannot reach the internet. Needs a model
+catalog in the kit (CATALOG_URL), which offline kits do not carry yet.
 """
 
 from __future__ import annotations
@@ -58,18 +59,16 @@ def main(dataset: str, service: str) -> None:
     ds = call("GET", f"/datasets/{created['dataset']['id']}")
     out["dataset"] = {"files": ds["files"], "usable_files": ds["usable_files"], "label_types": ds["label_types"]}
 
-    registry = [e["name"] for e in call("GET", "/registry")]
-    out["registry"] = registry
-    job = call("POST", f"/registry/{service}/check")
-    job = wait_job(job["id"])
-    report = job["result"]["report"]
-    out["check"] = {"capabilities": report["capabilities"], "ok": report["ok"], "log": job["log"][-40:]}
-    model = call("POST", "/models", {"registry_name": service, "check_job_id": job["id"]})
+    listing = call("GET", "/models")
+    out["models"] = [m["catalog_id"] for m in listing["models"]]
+    model = next((m for m in listing["models"] if m["catalog_id"] == service), None)
+    if model is None:
+        raise SystemExit(f"{service} is not among the catalog's models: {out['models']} ({listing['catalog']})")
+    out["check"] = {"capabilities": model["capabilities"], "ok": model["usable"], "log": [model["not_usable"] or ""]}
 
-    call("POST", "/benchmarks/plan", {"dataset_id": ds["id"], "seg_model_ids": [model["id"]], "asr_model_ids": [],
-                                      "mode": "stages"})
+    call("POST", "/benchmarks/plan", {"dataset_id": ds["id"], "seg_models": [service], "mode": "stages"})
     for j in call("GET", "/jobs?limit=50"):
-        if j["status"] in ("queued", "running"):
+        if j["status"] in ("queued", "waiting", "running"):
             wait_job(j["id"])
     cells = [c for c in call("GET", "/benchmarks/diar")["cells"] if c["dataset_id"] == ds["id"]]
     out["score"] = {"metric": cells[0]["metric"], "value": cells[0]["value"], "image": cells[0].get("image")}

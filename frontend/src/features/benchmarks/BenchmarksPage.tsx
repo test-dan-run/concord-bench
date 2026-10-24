@@ -9,7 +9,7 @@ import * as I from "../../components/icons";
 import { Button, cx, Empty, ErrorNote, Fact, LinkButton, PageHeader, Panel, Select, Spinner, StatusDot } from "../../components/ui";
 import { DatasetPicker } from "./DatasetPicker";
 import { PipelinesTab } from "./PipelinesTab";
-import { PlanPanel, planCount, type PlanValue } from "./PlanPanel";
+import { EMPTY_PLAN, PlanPanel, planCount, type PlanValue } from "./PlanPanel";
 
 const SEL_KEY = "concord.benchmarks.datasets";
 
@@ -57,8 +57,8 @@ export function BenchmarksPage() {
             <LinkButton to="/datasets/upload">
               <I.Upload /> Upload dataset
             </LinkButton>
-            <LinkButton to="/models/add">
-              <I.Plus /> Add model
+            <LinkButton to="/models">
+              <I.Cpu /> Models
             </LinkButton>
             <Button variant="primary" onClick={() => setShowPlan((s) => !s)} aria-expanded={showPlan}>
               <I.Play size={12} /> Run evaluation
@@ -117,7 +117,7 @@ function RunEvaluation({ onClose }: { onClose: () => void }) {
   const ready = (datasets ?? []).filter((d) => d.status === "ready" && d.label_types.length);
   const [dsId, setDsId] = useState<number | null>(null);
   const ds = ready.find((d) => d.id === dsId) ?? ready[0];
-  const [plan, setPlan] = useState<PlanValue>({ seg_model_ids: [], asr_model_ids: [], oracle: false, mode: "grid" });
+  const [plan, setPlan] = useState<PlanValue>(EMPTY_PLAN);
   const run = useMutation({
     mutationFn: () => api.post<{ queued: number }>("/benchmarks/plan", { dataset_id: ds!.id, ...plan }),
     onSuccess: () => {
@@ -129,7 +129,7 @@ function RunEvaluation({ onClose }: { onClose: () => void }) {
   if (!ds) return <Empty>Upload a labelled dataset first.</Empty>;
   const n = planCount(plan, ds.label_types);
   return (
-    <Panel title="Run evaluation" subtitle="Pick a dataset and the models to run on it. Services the runs need are started for you." actions={<Button size="sm" variant="ghost" onClick={onClose}>Close</Button>}>
+    <Panel title="Run evaluation" subtitle="Pick a dataset and catalog models to run on it. The model catalog starts each model when its turn comes." actions={<Button size="sm" variant="ghost" onClick={onClose}>Close</Button>}>
       <Select label="Dataset" value={ds.id} onChange={(e) => setDsId(Number(e.target.value))}>
         {ready.map((d) => (
           <option key={d.id} value={d.id}>
@@ -154,7 +154,7 @@ function Leaderboard({ tab, normaliser, collar }: { tab: string; normaliser: str
     queryKey: ["bench", tab, normaliser, collar],
     queryFn: () => api.get<BenchTable>(`/benchmarks/${tab}${qs({ normaliser, collar })}`),
     refetchInterval: (query) =>
-      query.state.data?.cells.some((c) => c.status === "queued" || c.status === "running" || c.rerunning || c.pending_score_job) ? 3000 : false,
+      query.state.data?.cells.some((c) => c.status === "queued" || c.status === "waiting" || c.status === "running" || c.rerunning || c.pending_score_job) ? 3000 : false,
   });
   const [selected, setSelected] = useState<number[] | null>(loadSel);
   const [inspect, setInspect] = useState<{ m: number; d: number } | null>(null);
@@ -210,7 +210,7 @@ function Leaderboard({ tab, normaliser, collar }: { tab: string; normaliser: str
         >
           {!data.models.length ? (
             <Empty>
-              No {tab === "asr" ? "ASR" : "VAD / diarisation"} models registered yet. <Link to="/models/add">Add a model</Link>.
+              No {tab === "asr" ? "ASR" : "VAD / diarisation"} model has run yet. Pick models from the catalog with Run evaluation, or see <Link to="/models">Models</Link>.
             </Empty>
           ) : !cols.length ? (
             <Empty>Select at least one dataset with {taskWord} labels to see scores.</Empty>
@@ -333,7 +333,7 @@ function CellView({
   datasetName: string;
 }) {
   if (c.value === null || c.value === undefined) {
-    const busy = c.status === "queued" || c.status === "running" || running;
+    const busy = c.status === "queued" || c.status === "waiting" || c.status === "running" || running;
     return (
       <span className="inline-flex items-center justify-end gap-2 min-h-9 px-2">
         {c.status === "failed" || c.status === "blocked" ? (
@@ -345,8 +345,8 @@ function CellView({
         )}
         {busy ? (
           <span className="text-[11px] text-muted inline-flex items-center gap-1.5">
-            <StatusDot state="running" />
-            {c.status ?? "queued"}
+            <StatusDot state={c.status ?? "queued"} />
+            {c.status === "waiting" ? "waiting for compute" : (c.status ?? "queued")}
           </span>
         ) : (
           <Button size="sm" onClick={onRun} aria-label={`Run ${modelName} on ${datasetName}`}>

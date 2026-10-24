@@ -7,16 +7,6 @@
 # `text` is exactly what the voice reads, so it is the reference transcript.
 # `output` says how the mixed audio is written: the ingest edge cases come from conversion.
 
-check_clip:
-  # ~10 s, two voices, one short overlap: the compatibility-check clip.
-  id: check_clip
-  voices: {agent: af_heart, caller: am_michael}
-  noise_db: null
-  turns:
-    - {spk: agent, at: 0.4, text: "Thank you for calling the help desk. How can I help you today?"}
-    - {spk: caller, overlap: 0.5, text: "Hi, my parcel was meant to arrive yesterday but it never came."}
-    - {spk: agent, gap: 0.3, text: "I am sorry about that. Let me check the tracking for you."}
-
 dataset:
   - id: d01
     voices: {agent: af_heart, customer: am_michael}

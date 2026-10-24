@@ -40,15 +40,24 @@ def get_config() -> dict[str, Any]:
         "default_collar": DEFAULT_COLLAR,
         "collars": [0.0, 0.1, 0.25, 0.5],
         "replay": s.replay_dir is not None,
-        "no_evict": s.no_evict,
+        # The model catalog: models, leases and the gateway; `ui_url` is where models are registered.
+        "catalog": {"url": s.catalog_url.rstrip("/"), "ui_url": s.catalog_ui},
         "links": {"platform_readme": "dev/README.md", "contracts_readme": "platform/contracts/README.md"},
     }
 
 
+def text_transform_services() -> list[str]:
+    """Platform `text.transform` services the catalog knows (called through its gateway)."""
+    from ..platform import catalog
+
+    try:
+        return sorted(r["id"] for r in catalog.records().values() if r.get("api") == "text.transform")
+    except catalog.CatalogUnavailable:
+        return []
+
+
 @router.get("/normalisers")
 def list_normalisers() -> list[dict[str, Any]]:
-    from ..registry.reader import text_transform_services
-
     out = [{"id": n.id, "key": n.key, "label": n.label, "description": n.description, "default": n.id ==
             normalisers.DEFAULT, "service": None} for n in normalisers.BUILTIN.values()]
     for svc in text_transform_services():

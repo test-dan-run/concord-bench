@@ -1,4 +1,5 @@
-"""Shared fixtures. Every test gets its own CONCORD_DATA and database; nothing needs the platform."""
+"""Shared fixtures. Every test gets its own CONCORD_DATA and database; nothing needs the platform or the
+model catalog (an in-memory `FakeCatalog` stands in, or the replay stand-in built from the recording)."""
 
 from __future__ import annotations
 
@@ -22,14 +23,37 @@ def dialogue_files() -> dict:
 
 
 @pytest.fixture(autouse=True)
-def no_platform_tools(request, monkeypatch):
-    """Lease renewals and releases never reach a real stack.py in tests (orchestration tests record
-    them); live tests use the real platform."""
-    from concord_bench.platform import services
+def fake_catalog(request):
+    """No test reaches a real model catalog: an empty in-memory FakeCatalog answers unless a test installs
+    its own (`catalog.use`) or replays recordings (the `replay` fixture); live tests use the real one."""
+    from aicore.catalog import FakeCatalog
+
+    from concord_bench.platform import catalog
+    from concord_bench.runs import jobs
 
     if request.node.get_closest_marker("live") or request.node.get_closest_marker("offline"):
+        catalog.reset()
+        yield None
         return
-    monkeypatch.setattr(services, "run_tool", lambda cmd, timeout=120: (0, ""))
+    fake = FakeCatalog()
+    catalog.use(fake)
+    yield fake
+    for lease in jobs._waiting.values():
+        lease.release()
+    jobs._waiting.clear()
+    catalog.reset()
+
+
+def catalog_model(model_id: str, tasks: list[str], *, contract: str = "oip-v2", api: str = "infer",
+                  timing: str | None = "segment", build_key: str = "b000000000000001", state: str = "running",
+                  status: str = "verified", **extra) -> dict:
+    """A catalog model record (platform/catalog/README.md) for FakeCatalog."""
+    caps = {"build_key": build_key, "status": status, "tasks": tasks, "timing_level": timing,
+            "usable_as": "asr" if "asr" in tasks else "segmenter"}
+    return {"id": model_id, "aliases": [], "registered": True, "display_name": model_id, "tags": [],
+            "contract": contract, "api": api, "state": state, "build_key": build_key,
+            "image": f"ghcr.io/owner/{model_id}:0.1.0", "capabilities": caps, "cold_start_s": 30.0,
+            "cold_start_measured": False, **extra}
 
 
 @pytest.fixture
@@ -39,7 +63,7 @@ def data_dir(tmp_path, monkeypatch):
     from concord_bench.core.settings import reset_settings
 
     monkeypatch.setenv("CONCORD_DATA", str(tmp_path / "data"))
-    for var in ("REPLAY_DIR", "RECORD_DIR", "NO_EVICT", "LABEL_URL"):
+    for var in ("REPLAY_DIR", "RECORD_DIR", "LABEL_URL", "CATALOG_URL", "AICORE_CATALOG", "CATALOG_UI_URL", "PUBLIC_URL"):
         monkeypatch.delenv(var, raising=False)
     reset_settings()
     peer.clear_cache()
@@ -71,13 +95,16 @@ def client(data_dir):
 
 @pytest.fixture
 def replay(monkeypatch, data_dir):
-    """Recorded responses instead of live services, with the endpoint map they were recorded with."""
+    """Recorded responses instead of live services, with the endpoint map they were recorded with; the
+    model catalog is the replay stand-in built from that map and summary.json."""
     from concord_bench.core.settings import reset_settings
+    from concord_bench.platform import catalog
 
     if not (RECORDED / "endpoints.generated.yaml").is_file():
         pytest.skip("no recorded responses; run `just record`")
     monkeypatch.setenv("REPLAY_DIR", str(RECORDED))
     monkeypatch.setenv("AICORE_ENDPOINTS", str(RECORDED / "endpoints.generated.yaml"))
     reset_settings()
+    catalog.use(None)
     yield RECORDED
     reset_settings()

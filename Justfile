@@ -48,7 +48,7 @@ test *args:
     uv run pytest {{args}}
     cd frontend && npm run test --silent
 
-# adapter / orchestration tests against live platform services (starts what they need)
+# adapter tests against the live model catalog and its services (the lease starts what they need)
 test-live *args:
     uv run pytest -m live -o addopts="--import-mode=importlib" {{args}}
 
@@ -94,7 +94,7 @@ check-contracts *args:
 fixtures:
     {{py}} fixtures/synth/make.py
 
-# re-record adapter responses against live services into fixtures/recorded (starts the services it needs)
+# re-record adapter responses through the live model catalog into fixtures/recorded (it starts what is needed)
 record:
     {{py}} -m concord_bench.cli record --out {{recorded}}
 

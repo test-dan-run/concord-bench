@@ -68,10 +68,11 @@ class SegmentStatus(enum.StrEnum):
 
 class JobStatus(enum.StrEnum):
     queued = "queued"
+    waiting = "waiting"  # its lease is queued in the catalog: waiting for compute
     running = "running"
     done = "done"
     failed = "failed"
-    blocked = "blocked"  # the platform could not start a required service
+    blocked = "blocked"  # cannot run: unknown or unverified model, a failed lease, or a failed earlier stage
 
 
 class Dataset(Base):
@@ -166,17 +167,33 @@ class KeywordEvent(Base):
 
 
 class Model(Base):
+    """A catalog model (platform/catalog/README.md) Bench has used: runs and pipelines point here. Rows are
+    created on first use from the catalog's record; registration, verification and capabilities belong to
+    the catalog. `catalog` keeps the last record seen (contract, api, capabilities of the current build),
+    so pages and rescoring of old runs work while the catalog is unreachable."""
+
     __tablename__ = "model"
     id: Mapped[int] = mapped_column(primary_key=True)
-    registry_name: Mapped[str] = mapped_column(String(200), unique=True)
+    catalog_id: Mapped[str] = mapped_column(String(200), unique=True)  # the platform service name
     display_name: Mapped[str] = mapped_column(String(200))
     tags: Mapped[list[str]] = mapped_column(default=list)
     parent_model_id: Mapped[int | None] = mapped_column(ForeignKey("model.id", ondelete="SET NULL"))
-    capabilities: Mapped[list[str]] = mapped_column(default=list)
-    timing_level: Mapped[str | None] = mapped_column(String(16))
-    check_report: Mapped[dict[str, Any]] = mapped_column(default=dict)
-    registry_snapshot: Mapped[dict[str, Any]] = mapped_column(default=dict)
+    catalog: Mapped[dict[str, Any]] = mapped_column(default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+    @property
+    def caps(self) -> dict[str, Any]:
+        """The catalog's capability record for the model's current build ({} before the first verification)."""
+        return (self.catalog or {}).get("capabilities") or {}
+
+    @property
+    def capabilities(self) -> list[str]:
+        """Tasks the catalog's verifier observed: asr, vad, diar (kws later)."""
+        return [t for t in self.caps.get("tasks") or [] if t in set(Capability)]
+
+    @property
+    def timing_level(self) -> str | None:
+        return self.caps.get("timing_level") if self.is_asr else None
 
     @property
     def is_asr(self) -> bool:
@@ -211,9 +228,11 @@ class Run(Base):
     model_id: Mapped[int | None] = mapped_column(ForeignKey("model.id", ondelete="CASCADE"))
     pipeline_id: Mapped[int | None] = mapped_column(ForeignKey("pipeline.id", ondelete="CASCADE"))
     dataset_id: Mapped[int] = mapped_column(ForeignKey("dataset.id", ondelete="CASCADE"))
-    status: Mapped[str] = mapped_column(String(16), default="queued")  # queued | running | done | failed | blocked
+    status: Mapped[str] = mapped_column(String(16), default="queued")  # queued | waiting | running | done | failed | blocked
     error: Mapped[str | None] = mapped_column(Text)
-    image_tags: Mapped[dict[str, Any]] = mapped_column(default=dict)  # service -> {image, labels}
+    # The builds that produced the run's outputs: catalog model id -> {build_key, image}. Runs from before
+    # the catalog have {image, labels} (the pinned tag) and no build key.
+    builds: Mapped[dict[str, Any]] = mapped_column(default=dict)
     params: Mapped[dict[str, Any]] = mapped_column(default=dict)
     # Per-file inference outputs gathered by the run, consumed by scoring (keys are audio_file ids).
     outputs: Mapped[dict[str, Any]] = mapped_column(default=dict)
@@ -228,19 +247,29 @@ class Run(Base):
 
 
 class ModelOutput(Base):
-    """The inference cache, keyed on (model, audio, span, params). Shared by runs and pipelines."""
+    """The inference cache, keyed on (model, build, audio, span, params). Shared by runs and pipelines, and
+    with other apps through the catalog's output index: a row read from another app keeps its owner and
+    the owner's output id. Rows from before the catalog have no build key: still readable by id (old runs
+    score), never matched by a lookup."""
 
     __tablename__ = "model_output"
-    __table_args__ = (UniqueConstraint("model_name", "audio_sha256", "span_start", "span_end", "params_hash"),)
+    __table_args__ = (UniqueConstraint("model_name", "build_key", "audio_sha256", "span_start", "span_end",
+                                       "params_hash", name="uq_model_output_key"),
+                      Index("ix_model_output_audio", "audio_sha256"))
     id: Mapped[int] = mapped_column(primary_key=True)
-    model_name: Mapped[str] = mapped_column(String(200))  # platform service name
+    model_name: Mapped[str] = mapped_column(String(200))  # catalog model id (platform service name)
+    build_key: Mapped[str | None] = mapped_column(String(32))
     audio_sha256: Mapped[str] = mapped_column(String(64))
     span_start: Mapped[float] = mapped_column(Float, default=0.0)
     span_end: Mapped[float] = mapped_column(Float, default=-1.0)  # -1 = whole file
     params_hash: Mapped[str] = mapped_column(String(16))
+    params: Mapped[dict[str, Any] | None] = mapped_column(JSON)  # the adapter params params_hash was taken of
     output: Mapped[dict[str, Any]] = mapped_column()
     latency_s: Mapped[float] = mapped_column(Float)
-    image: Mapped[str | None] = mapped_column(String(300))
+    image: Mapped[str | None] = mapped_column(String(300))  # image tag, for display
+    # Copied from another app through the catalog's index: that app's name and its output id.
+    source_app: Mapped[str | None] = mapped_column(String(64))
+    source_output_id: Mapped[str | None] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
@@ -284,10 +313,13 @@ class Result(Base):
 class Job(Base):
     __tablename__ = "job"
     id: Mapped[int] = mapped_column(primary_key=True)
-    type: Mapped[str] = mapped_column(String(32))  # ingest | check | run | score | export
+    type: Mapped[str] = mapped_column(String(32))  # ingest | run | seg_stage | asr_stage | score | export
     payload: Mapped[dict[str, Any]] = mapped_column(default=dict)
     status: Mapped[str] = mapped_column(String(16), default=JobStatus.queued)
-    required_services: Mapped[list[str]] = mapped_column(default=list)
+    required_services: Mapped[list[str]] = mapped_column(default=list)  # catalog model ids it leases
+    after: Mapped[list[Any]] = mapped_column(default=list)  # job ids that must be done first
+    # The catalog lease while it waits for compute: {id, state, position, waiting_for}.
+    lease: Mapped[dict[str, Any] | None] = mapped_column(JSON)
     attempts: Mapped[int] = mapped_column(Integer, default=0)
     error: Mapped[str | None] = mapped_column(Text)
     progress: Mapped[float] = mapped_column(Float, default=0.0)

@@ -1,4 +1,4 @@
-"""Model adapters: one per (contract, api), built on `aicore.client(name)`."""
+"""Model adapters: one per (contract, api), built on `aicore.client(name)` (the catalog's gateway)."""
 
 from __future__ import annotations
 
@@ -18,18 +18,16 @@ def whisper_language(language: str | None) -> str | None:
 
 
 def for_model(model: Any, language: str | None = None) -> Adapter:
-    """Adapter for a registered `Model`. The image tag recorded at registration is replaced by the
-    current one from the endpoint map, and both the tag and the timing level go into the cache key."""
-    from ..platform.services import image_info
-
-    snap = model.registry_snapshot or {}
-    cls = adapter_class(snap.get("contract", ""), snap.get("api", ""))
+    """Adapter for a catalog `Model`. Contract, api and timing level come from the catalog's record of the
+    model's current build. The build itself is not an adapter option: it is part of the cache key on its
+    own (`runs.cache`), so params hash the same in Bench and Label for every build."""
+    rec = model.catalog or {}
+    cls = adapter_class(rec.get("contract", ""), rec.get("api", ""))
     if cls is None:
-        raise AdapterError(f"{model.registry_name}: no adapter for {snap.get('contract')} / {snap.get('api')}")
-    image = image_info(model.registry_name).get("image") or snap.get("image")
-    options: dict[str, Any] = {"image": image}
+        raise AdapterError(f"{model.catalog_id}: no adapter for {rec.get('contract')} / {rec.get('api')}")
+    options: dict[str, Any] = {}
     if cls.kind == "asr":
         options["timing"] = model.timing_level or "text"
         if cls.api == "audio.transcriptions" and whisper_language(language):
             options["language"] = whisper_language(language)
-    return cls(model.registry_name, options)
+    return cls(model.catalog_id, options)

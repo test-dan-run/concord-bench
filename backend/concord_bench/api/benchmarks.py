@@ -18,8 +18,11 @@ from ..core.db import get_session
 from ..core.models import Dataset, Job, Model, Pipeline, Run, RunTask, Score
 from ..metrics import normalisers
 from ..metrics.der import DEFAULT_COLLAR
+from ..platform import catalog
+from ..runs import executor
 from .datasets import job_brief
-from .runs import enqueue_run, ensure_score, get_or_create_pipeline, run_label
+from .models import catalog_listing
+from .runs import enqueue_pipelines, enqueue_run, ensure_score, get_or_create_pipeline, run_label
 
 router = APIRouter(tags=["benchmarks"])
 
@@ -105,7 +108,8 @@ def benchmark_table(tab: str, normaliser: str | None = None, collar: float | Non
                                  "breakdown": _breakdown(tab, sc.aggregates, metric),
                                  "rtf": (cur.rtf_by_stage or {}).get("total"),
                                  "finished_at": cur.finished_at.isoformat() if cur.finished_at else None,
-                                 "image": next(iter(cur.image_tags.values()), {}).get("image") if cur.image_tags
+                                 "image": next(iter(cur.builds.values()), {}).get("image") if cur.builds else None,
+                                 "build_key": next(iter(cur.builds.values()), {}).get("build_key") if cur.builds
                                  else None})
                     if len(done) > 1:
                         psc, _ = ensure_score(session, done[-2], nkey, collar, queue=False)
@@ -120,7 +124,7 @@ def benchmark_table(tab: str, normaliser: str | None = None, collar: float | Non
     return {
         "tab": tab, "normaliser": nkey, "collar": collar,
         "datasets": [_ds_json(d, label in (d.label_types or []) and d.status == "ready") for d in datasets],
-        "models": [{"id": m.id, "display_name": m.display_name, "registry_name": m.registry_name, "tags": m.tags,
+        "models": [{"id": m.id, "display_name": m.display_name, "catalog_id": m.catalog_id, "tags": m.tags,
                     "capabilities": m.capabilities, "timing_level": m.timing_level,
                     "kind": "asr" if tab == "asr" else ("diar" if m.has_speakers else "vad")} for m in models],
         "cells": cells,
@@ -195,35 +199,119 @@ def pipeline_grid(dataset_id: int | None = None, normaliser: str | None = None, 
 
 class PlanIn(BaseModel):
     dataset_id: int
-    seg_model_ids: list[int] = Field(default_factory=list)
+    seg_models: list[str] = Field(default_factory=list)  # catalog model ids
+    asr_models: list[str] = Field(default_factory=list)
+    seg_model_ids: list[int] = Field(default_factory=list)  # Bench model ids (plans queued before the catalog)
     asr_model_ids: list[int] = Field(default_factory=list)
     oracle: bool = False
-    mode: str = "grid"  # grid: every seg x every ASR as pipelines; stages: each model alone
+    mode: str = "grid"  # grid: every seg x every ASR as pipelines, stage by stage; stages: each model alone
 
 
 def plan_size(seg: int, asr: int, oracle: bool, mode: str) -> int:
     return (seg + int(oracle)) * asr if mode == "grid" else seg + asr
 
 
+def _plan_models(session: Session, plan: dict[str, Any]) -> tuple[list[Model], list[Model]]:
+    """The plan's models as rows (made on first use from the catalog), seg and ASR, capable ones only."""
+    def pick(ids: list[int], cids: list[str]) -> list[Model]:
+        out = [m for m in (session.get(Model, i) for i in ids) if m is not None]
+        out += [catalog.ensure_model(session, c) for c in cids]
+        return list(dict.fromkeys(out))
+
+    seg = [m for m in pick(plan.get("seg_model_ids") or [], plan.get("seg_models") or []) if m.is_seg]
+    asr = [m for m in pick(plan.get("asr_model_ids") or [], plan.get("asr_models") or []) if m.is_asr]
+    return seg, asr
+
+
+def catalog_stages(session: Session, ds: Dataset, seg: list[Model], asr: list[Model], mode: str) -> list[dict]:
+    """The plan request for the catalog (POST /api/jobs): the seg stage with its index keys (whole files, so
+    the catalog counts what is stored already), then the ASR stage, whose cuts are unknown until the seg
+    stage has run. "Each stage alone" is two independent stages."""
+    from .. import adapters
+    from ..runs.cache import WHOLE
+
+    shas = [f.sha256 for f in executor.usable_files(session, ds.id)]
+    stages = []
+    if seg:
+        keys = {}
+        for m in seg:
+            try:
+                ph = adapters.for_model(m).params_hash
+            except adapters.AdapterError:
+                continue
+            keys[m.catalog_id] = [{"audio_sha256": sha, "span_start": WHOLE, "span_end": WHOLE, "params_hash": ph}
+                                  for sha in shas]
+        stages.append({"name": "seg", "models": [m.catalog_id for m in seg], "keys": keys})
+    if asr:
+        stages.append({"name": "asr", "models": [m.catalog_id for m in asr],
+                       **({"after": "seg"} if seg and mode == "grid" else {})})
+    return stages
+
+
+def plan_preview(session: Session, ds: Dataset, plan: dict[str, Any]) -> dict[str, Any]:
+    seg, asr = _plan_models(session, plan)
+    labels = set(ds.label_types or [])
+    mode = plan.get("mode", "grid")
+    oracle = bool(plan.get("oracle")) and "diar" in labels
+    if mode == "grid":
+        runs = (len(seg) + int(oracle)) * len(asr) if "asr" in labels else 0
+    else:
+        seg, asr = (seg if "diar" in labels else []), (asr if "asr" in labels else [])
+        runs = len(seg) + len(asr)
+    out: dict[str, Any] = {"runs": runs, "mode": mode, "plan": None, "error": None}
+    if not runs or not (seg or asr):
+        return out
+    try:
+        out["plan"] = catalog.plan(catalog_stages(session, ds, seg, asr, mode))
+    except catalog.CatalogUnavailable as exc:
+        out["error"] = str(exc)
+    return out
+
+
 def enqueue_plan(session: Session, dataset_id: int, plan: dict[str, Any]) -> list[Job]:
+    """Queue a plan: a grid as stage jobs plus one assemble job per pipeline, or each model as a single run.
+    Stage jobs follow the catalog's order (models already running first, then by cold start)."""
     ds = session.get(Dataset, dataset_id)
     if ds is None or ds.status != "ready":
         return []
-    seg = [m for m in (session.get(Model, i) for i in plan.get("seg_model_ids") or []) if m and m.is_seg]
-    asr = [m for m in (session.get(Model, i) for i in plan.get("asr_model_ids") or []) if m and m.is_asr]
+    seg, asr = _plan_models(session, plan)
     oracle = bool(plan.get("oracle")) and "diar" in (ds.label_types or [])
     out: list[Job] = []
     if plan.get("mode", "grid") == "grid" and "asr" in (ds.label_types or []):
         seg_ids: list[int | None] = ([None] if oracle else []) + [m.id for m in seg]
-        for sid in seg_ids:
-            for a in asr:
-                p = get_or_create_pipeline(session, sid, a.id)
-                out.append(enqueue_run(session, RunTask.pipeline, ds, pipeline=p)[1])
+        pipes = [get_or_create_pipeline(session, sid, a.id) for sid in seg_ids for a in asr]
+        order = None
+        try:
+            steps = catalog.plan(catalog_stages(session, ds, seg, asr, "grid")).get("steps") or []
+            order = [st["model"] for st in steps]
+        except catalog.CatalogUnavailable:
+            pass
+        for _, job in enqueue_pipelines(session, ds, pipes, order=order):
+            out.append(job)
+        stage_ids = {j for job in out for j in job.after}
+        out += [j for j in (session.get(Job, i) for i in sorted(stage_ids)) if j is not None]
     else:
         if "diar" in (ds.label_types or []):
             out += [enqueue_run(session, RunTask.seg, ds, model=m)[1] for m in seg]
         if "asr" in (ds.label_types or []):
             out += [enqueue_run(session, RunTask.asr, ds, model=m)[1] for m in asr]
+    session.commit()
+    return sorted(set(out), key=lambda j: j.id)
+
+
+@router.post("/benchmarks/plan/preview")
+def preview_plan(body: PlanIn, session: Session = Depends(get_session)) -> dict[str, Any]:
+    """What a plan would do, before it is queued: runs, and the catalog's stages, model loads, index hits
+    and estimated load time (`plan`; null with `error` when the catalog is unreachable)."""
+    ds = session.get(Dataset, body.dataset_id)
+    if ds is None:
+        raise HTTPException(404, "dataset not found")
+    try:
+        out = plan_preview(session, ds, body.model_dump())
+    except catalog.ModelUnusable as exc:
+        raise HTTPException(404, str(exc)) from None
+    except catalog.CatalogUnavailable as exc:
+        raise HTTPException(503, str(exc)) from None
     session.commit()
     return out
 
@@ -235,14 +323,21 @@ def run_plan(body: PlanIn, session: Session = Depends(get_session)) -> dict[str,
         raise HTTPException(404, "dataset not found")
     if ds.status != "ready":
         raise HTTPException(409, f"dataset is {ds.status}")
-    js = enqueue_plan(session, ds.id, body.model_dump())
-    return {"queued": len(js), "jobs": [job_brief(j) for j in js]}
+    try:
+        js = enqueue_plan(session, ds.id, body.model_dump())
+    except catalog.ModelUnusable as exc:
+        raise HTTPException(404, str(exc)) from None
+    except catalog.CatalogUnavailable as exc:
+        raise HTTPException(503, str(exc)) from None
+    runs = sum(1 for j in js if j.type == "run")
+    return {"queued": runs, "jobs": [job_brief(j) for j in js]}
 
 
 @router.get("/suggestions/models")
 def suggest_models(dataset_id: int | None = None, tags: str = "", language: str | None = None,
                    label_types: str = "", session: Session = Depends(get_session)) -> dict[str, Any]:
-    """Models grouped by stage, ranked by tag overlap with the dataset (or with the tags being typed)."""
+    """Catalog models grouped by stage, ranked by tag overlap with the dataset (or with the tags being typed),
+    each with its state, capabilities and cold start."""
     if dataset_id:
         ds = session.get(Dataset, dataset_id)
         if ds is None:
@@ -250,20 +345,20 @@ def suggest_models(dataset_id: int | None = None, tags: str = "", language: str 
         tag_list, language, labels = ds.tags, ds.language, set(ds.label_types or [])
     else:
         tag_list, labels = [t for t in tags.split(",") if t], {t for t in label_types.split(",") if t}
-    models = list(session.scalars(select(Model)))
-    ranked = rank_models(tag_list, models, language)
-    by_id = {m.id: m for m in models}
+    listing = catalog_listing(session)
+    entries = [e for e in listing["models"] if e["in_catalog"]]
+    by_id = {e["catalog_id"]: e for e in entries}
+    ranked = rank_models(tag_list, entries, language)
 
     def entry(r: dict[str, Any]) -> dict[str, Any]:
-        m = by_id[r["model_id"]]
-        return {**r, "display_name": m.display_name, "tags": m.tags, "capabilities": m.capabilities,
-                "has_speakers": m.has_speakers, "timing_level": m.timing_level}
+        return {**r, **by_id[r["catalog_id"]]}
 
     return {
         "seg": [entry(r) for r in ranked if "seg" in r["stages"]],
         "asr": [entry(r) for r in ranked if "asr" in r["stages"]],
         "oracle_available": "diar" in labels,
         "labels": sorted(labels),
+        "catalog": listing["catalog"],
     }
 
 

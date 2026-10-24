@@ -1,0 +1,1 @@
+{"service": "faster-whisper-large-v3", "params": {"adapter": "OpenAIASR", "timing": "word", "language": "en"}, "audio": {"sha256": "0bf57485f88bf303d0a2a489e78173cba54d81943e7b2b2c0ec8d8b4cecb7f3e", "start": 6.36, "end": 6.577}, "latency_s": 0.017, "raw": {"task": "transcribe", "language": "en", "duration": 0.217, "text": "", "segments": [], "words": []}}

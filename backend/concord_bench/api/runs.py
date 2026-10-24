@@ -12,13 +12,13 @@ from sqlalchemy.orm import Session
 from ..core.db import get_session
 from ..core.models import Dataset, Job, JobStatus, Model, Pipeline, Run, RunTask, Score
 from ..metrics import normalisers
-from ..platform import services
+from ..platform import catalog
 from ..runs import jobs, scoring
 from ..runs.executor import services_for
 from .datasets import job_brief
 
 router = APIRouter(tags=["runs"])
-ACTIVE = ("queued", "running")
+ACTIVE = ("queued", "waiting", "running")
 
 
 # ---------------------------------------------------------------- helpers shared with benchmarks
@@ -41,12 +41,8 @@ def run_label(run: Run) -> str:
     return run.model.display_name if run.model else f"run {run.id}"
 
 
-def enqueue_run(session: Session, task: str, dataset: Dataset, model: Model | None = None,
-                pipeline: Pipeline | None = None, normalisers_: list[str] | None = None,
-                collar: float | None = None) -> tuple[Run, Job]:
-    """Queue a run unless the same one is already queued or running (then return that)."""
-    if dataset.status != "ready":
-        raise HTTPException(409, f"dataset {dataset.name!r} is {dataset.status}")
+def _active_run(session: Session, task: str, dataset: Dataset, model: Model | None,
+                pipeline: Pipeline | None) -> tuple[Run, Job] | None:
     stmt = select(Run).where(Run.task == task, Run.dataset_id == dataset.id, Run.status.in_(ACTIVE))
     stmt = stmt.where(Run.pipeline_id == pipeline.id) if pipeline else stmt.where(Run.model_id == model.id)
     existing = session.scalar(stmt)
@@ -55,8 +51,19 @@ def enqueue_run(session: Session, task: str, dataset: Dataset, model: Model | No
                              .where(Job.payload["run_id"].as_integer() == existing.id))
         if job is not None:
             return existing, job
-    run = Run(task=task, dataset_id=dataset.id, model_id=model.id if model else None,
-              pipeline_id=pipeline.id if pipeline else None, status="queued")
+    return None
+
+
+def enqueue_run(session: Session, task: str, dataset: Dataset, model: Model | None = None,
+                normalisers_: list[str] | None = None, collar: float | None = None) -> tuple[Run, Job]:
+    """Queue a single-model run unless the same one is already queued or running (then return that).
+    Its job leases the model; pipelines go through `enqueue_pipelines`."""
+    if dataset.status != "ready":
+        raise HTTPException(409, f"dataset {dataset.name!r} is {dataset.status}")
+    active = _active_run(session, task, dataset, model, None)
+    if active is not None:
+        return active
+    run = Run(task=task, dataset_id=dataset.id, model_id=model.id, status="queued")
     session.add(run)
     session.flush()
     session.refresh(run)
@@ -65,10 +72,51 @@ def enqueue_run(session: Session, task: str, dataset: Dataset, model: Model | No
     return run, job
 
 
+def enqueue_pipelines(session: Session, dataset: Dataset, pipelines: list[Pipeline],
+                      normalisers_: list[str] | None = None, collar: float | None = None,
+                      order: list[str] | None = None) -> list[tuple[Run, Job]]:
+    """Pipelines stage by stage (MODEL_CATALOG_REDESIGN.md, "Job planning"): one seg-stage job per
+    segmenter over every file, one ASR-stage job per ASR model over the cuts of every seg source (oracle
+    included), then one assemble-and-score run job per pipeline that needs no model. Each stage job leases
+    only its own model, so each model loads once. `order` (catalog model ids, from the catalog's plan)
+    decides which stage job of a stage comes first. Pipelines already queued or running are returned as they are."""
+    if dataset.status != "ready":
+        raise HTTPException(409, f"dataset {dataset.name!r} is {dataset.status}")
+    out: list[tuple[Run, Job]] = []
+    todo: list[Pipeline] = []
+    for p in pipelines:
+        active = _active_run(session, RunTask.pipeline, dataset, None, p)
+        if active is not None:
+            out.append(active)
+        else:
+            todo.append(p)
+    rank = {cid: i for i, cid in enumerate(order or [])}
+
+    def by_plan(models: list[Model]) -> list[Model]:
+        return sorted(dict.fromkeys(models), key=lambda m: rank.get(m.catalog_id, len(rank)))
+
+    seg_jobs = {m.id: jobs.enqueue_stage(session, "seg_stage", dataset.id, m)
+                for m in by_plan([p.seg_model for p in todo if p.seg_model is not None])}
+    asr_jobs = {}
+    for a in by_plan([p.asr_model for p in todo]):
+        sources = [p.seg_model_id for p in todo if p.asr_model_id == a.id]
+        asr_jobs[a.id] = jobs.enqueue_stage(session, "asr_stage", dataset.id, a, sources,
+                                            after=[seg_jobs[s].id for s in sources if s is not None])
+    for p in todo:
+        run = Run(task=RunTask.pipeline, dataset_id=dataset.id, pipeline_id=p.id, status="queued")
+        session.add(run)
+        session.flush()
+        after = [asr_jobs[p.asr_model_id].id] + ([seg_jobs[p.seg_model_id].id] if p.seg_model_id else [])
+        job = jobs.enqueue(session, "run", {"run_id": run.id, "normalisers": normalisers_, "collar": collar,
+                                            "assemble": True}, [], after)
+        out.append((run, job))
+    return out
+
+
 def run_json(run: Run, with_scores: list[Score] | None = None) -> dict[str, Any]:
     d = {"id": run.id, "task": run.task, "label": run_label(run), "model_id": run.model_id,
          "pipeline_id": run.pipeline_id, "dataset_id": run.dataset_id, "dataset": run.dataset.name,
-         "status": run.status, "error": run.error, "image_tags": run.image_tags, "params": run.params,
+         "status": run.status, "error": run.error, "builds": run.builds, "params": run.params,
          "rtf": run.rtf_by_stage, "created_at": run.created_at.isoformat(),
          "started_at": run.started_at.isoformat() if run.started_at else None,
          "finished_at": run.finished_at.isoformat() if run.finished_at else None}
@@ -83,22 +131,22 @@ def run_json(run: Run, with_scores: list[Score] | None = None) -> dict[str, Any]
 
 def ensure_score(session: Session, run: Run, normaliser: str | None, collar: float | None,
                  queue: bool = True) -> tuple[Score | None, Job | None]:
-    """The score for (run, normaliser, collar), computed now if it only needs local code; a platform
-    normaliser whose service is down is queued as a score job instead."""
+    """The score for (run, normaliser, collar), computed now if it only needs local code. A platform
+    normaliser whose model is not running in the catalog is queued as a score job instead: the call goes
+    through the catalog's gateway, which starts the model, and that can take minutes."""
     if run.status != "done":
         return None, None
     sc = scoring.find_score(session, run, normaliser, collar)
     if sc is not None:
         return sc, None
     n = normalisers.get(normaliser or normalisers.DEFAULT) if run.task != RunTask.seg else None
-    if n is not None and n.service and not services.health(n.service).up:
+    if n is not None and n.service and _model_state(n.service) != "running":
         if not queue:
             return None, None
         job = session.scalar(select(Job).where(Job.type == "score", Job.status.in_(ACTIVE))
                              .where(Job.payload["run_id"].as_integer() == run.id))
         if job is None:
-            job = jobs.enqueue(session, "score", {"run_id": run.id, "normaliser": n.key, "collar": collar},
-                               [n.service])
+            job = jobs.enqueue(session, "score", {"run_id": run.id, "normaliser": n.key, "collar": collar})
             session.commit()
         return None, job
     sc = scoring.score_run(session, run, normaliser, collar)
@@ -106,14 +154,37 @@ def ensure_score(session: Session, run: Run, normaliser: str | None, collar: flo
     return sc, None
 
 
+def _model_state(model_id: str) -> str | None:
+    try:
+        rec = catalog.record(model_id)
+    except catalog.CatalogUnavailable:
+        return None
+    return rec.get("state") if rec else None
+
+
 # ---------------------------------------------------------------- runs
+
+def resolve_model(session: Session, ref: int | str | None) -> Model:
+    """A model by Bench model id (int) or catalog model id (str); a catalog model gets its row on first use."""
+    if isinstance(ref, str):
+        try:
+            return catalog.ensure_model(session, ref)
+        except catalog.CatalogUnavailable as exc:
+            raise HTTPException(503, str(exc)) from None
+        except catalog.ModelUnusable as exc:
+            raise HTTPException(404, str(exc)) from None
+    m = session.get(Model, ref) if ref is not None else None
+    if m is None:
+        raise HTTPException(404, "model not found")
+    return m
+
 
 class RunIn(BaseModel):
     task: str  # asr | seg | pipeline
     dataset_id: int
-    model_id: int | None = None
-    seg_model_id: int | None = None  # pipelines; None with oracle=True
-    asr_model_id: int | None = None
+    model_id: int | str | None = None  # Bench model id, or catalog model id
+    seg_model_id: int | str | None = None  # pipelines; None with oracle=True
+    asr_model_id: int | str | None = None
     oracle: bool = False
     normaliser: str | None = None
 
@@ -125,28 +196,26 @@ def create_run(body: RunIn, session: Session = Depends(get_session)) -> dict[str
         raise HTTPException(404, "dataset not found")
     norms = [normalisers.get(body.normaliser).key] if body.normaliser else None
     if body.task in (RunTask.asr, RunTask.seg):
-        m = session.get(Model, body.model_id or -1)
-        if m is None:
-            raise HTTPException(404, "model not found")
+        m = resolve_model(session, body.model_id)
         if body.task == RunTask.asr and not m.is_asr:
             raise HTTPException(422, f"{m.display_name} has no ASR capability")
         if body.task == RunTask.seg and not m.is_seg:
             raise HTTPException(422, f"{m.display_name} has no VAD / diarisation capability")
         run, job = enqueue_run(session, body.task, ds, model=m, normalisers_=norms)
     elif body.task == RunTask.pipeline:
-        asr = session.get(Model, body.asr_model_id or -1)
-        if asr is None or not asr.is_asr:
+        asr = resolve_model(session, body.asr_model_id)
+        if not asr.is_asr:
             raise HTTPException(422, "pipelines need an ASR model")
         seg_id = None
         if not body.oracle:
-            seg = session.get(Model, body.seg_model_id or -1)
-            if seg is None or not seg.is_seg:
+            seg = resolve_model(session, body.seg_model_id)
+            if not seg.is_seg:
                 raise HTTPException(422, "pipelines need a VAD / diarisation model or oracle=true")
             seg_id = seg.id
         elif "diar" not in (ds.label_types or []):
             raise HTTPException(422, "the oracle stage needs speaker labels in the dataset")
         p = get_or_create_pipeline(session, seg_id, asr.id)
-        run, job = enqueue_run(session, RunTask.pipeline, ds, pipeline=p, normalisers_=norms)
+        run, job = enqueue_pipelines(session, ds, [p], normalisers_=norms)[0]
     else:
         raise HTTPException(422, f"unknown task {body.task!r}")
     session.commit()
@@ -225,6 +294,10 @@ def job_label(session: Session, j: Job) -> str:
     if j.type == "run":
         r = session.get(Run, p.get("run_id"))
         return f"{run_label(r)} · {r.dataset.name}" if r else "run"
+    if j.type in ("seg_stage", "asr_stage"):
+        m, d = session.get(Model, p.get("model_id")), session.get(Dataset, p.get("dataset_id"))
+        stage = "seg stage" if j.type == "seg_stage" else "ASR stage"
+        return f"{stage} · {m.display_name if m else 'model'} · {d.name if d else 'dataset'}"
     if j.type == "ingest":
         d = session.get(Dataset, p.get("dataset_id"))
         return f"ingest · {d.name}" if d else "ingest"

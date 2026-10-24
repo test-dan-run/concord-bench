@@ -162,12 +162,27 @@ export function Tag({ children }: { children: ReactNode }) {
 
 export function StatusDot({ state }: { state: string }) {
   const color =
-    { up: "bg-good", replay: "bg-secondary", loading: "bg-warn", down: "bg-subtle", unknown: "bg-bad", running: "bg-primary", queued: "bg-subtle", done: "bg-good", failed: "bg-bad", blocked: "bg-warn" }[state] ?? "bg-subtle";
-  return <span aria-hidden className={cx("inline-block size-2 rounded-full shrink-0", color, state === "running" && "animate-pulse")} />;
+    {
+      up: "bg-good",
+      replay: "bg-secondary",
+      loading: "bg-warn",
+      down: "bg-subtle",
+      unknown: "bg-bad",
+      running: "bg-primary",
+      queued: "bg-subtle",
+      waiting: "bg-warn",
+      starting: "bg-warn",
+      stopping: "bg-subtle",
+      stopped: "bg-subtle",
+      done: "bg-good",
+      failed: "bg-bad",
+      blocked: "bg-warn",
+    }[state] ?? "bg-subtle";
+  return <span aria-hidden className={cx("inline-block size-2 rounded-full shrink-0", color, (state === "running" || state === "starting") && "animate-pulse")} />;
 }
 
-export function JobPill({ status, progress }: { status: string; progress?: number }) {
-  const tone = { done: "good", failed: "bad", blocked: "warn", running: "info", queued: "default" }[status] as
+export function JobPill({ status, progress, position }: { status: string; progress?: number; position?: number | null }) {
+  const tone = { done: "good", failed: "bad", blocked: "warn", running: "info", queued: "default", waiting: "warn" }[status] as
     | "good"
     | "bad"
     | "warn"
@@ -176,7 +191,8 @@ export function JobPill({ status, progress }: { status: string; progress?: numbe
   return (
     <Chip tone={tone ?? "default"}>
       <StatusDot state={status} />
-      {status}
+      {status === "waiting" ? "waiting for compute" : status}
+      {status === "waiting" && position ? <span className="num">#{position}</span> : null}
       {status === "running" && progress !== undefined && <span className="num">{Math.round(progress * 100)}%</span>}
     </Chip>
   );

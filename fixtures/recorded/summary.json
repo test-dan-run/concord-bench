@@ -1,144 +1,34 @@
 {
- "checks": {
+ "models": {
   "silero-vad": {
    "capabilities": [
     "vad"
    ],
-   "timing_level": "segment",
-   "lines": [
-    [
-     "pass",
-     "contract"
-    ],
-    [
-     "pass",
-     "signature"
-    ],
-    [
-     "pass",
-     "request"
-    ],
-    [
-     "pass",
-     "segments"
-    ],
-    [
-     "pass",
-     "result"
-    ]
-   ]
+   "timing_level": "segment"
   },
   "pyannote-diarization": {
    "capabilities": [
     "diar"
    ],
-   "timing_level": "segment",
-   "lines": [
-    [
-     "pass",
-     "contract"
-    ],
-    [
-     "pass",
-     "signature"
-    ],
-    [
-     "pass",
-     "request"
-    ],
-    [
-     "pass",
-     "speakers"
-    ],
-    [
-     "pass",
-     "result"
-    ]
-   ]
+   "timing_level": "segment"
   },
   "nemotron-3-diarization": {
    "capabilities": [
     "diar"
    ],
-   "timing_level": "segment",
-   "lines": [
-    [
-     "pass",
-     "contract"
-    ],
-    [
-     "pass",
-     "signature"
-    ],
-    [
-     "pass",
-     "request"
-    ],
-    [
-     "pass",
-     "speakers"
-    ],
-    [
-     "pass",
-     "result"
-    ]
-   ]
+   "timing_level": "segment"
   },
   "whisper-large-v3": {
    "capabilities": [
     "asr"
    ],
-   "timing_level": "segment",
-   "lines": [
-    [
-     "pass",
-     "contract"
-    ],
-    [
-     "pass",
-     "request"
-    ],
-    [
-     "pass",
-     "timing"
-    ],
-    [
-     "pass",
-     "transcript"
-    ],
-    [
-     "pass",
-     "result"
-    ]
-   ]
+   "timing_level": "segment"
   },
   "faster-whisper-large-v3": {
    "capabilities": [
     "asr"
    ],
-   "timing_level": "word",
-   "lines": [
-    [
-     "pass",
-     "contract"
-    ],
-    [
-     "pass",
-     "request"
-    ],
-    [
-     "pass",
-     "timing"
-    ],
-    [
-     "pass",
-     "transcript"
-    ],
-    [
-     "pass",
-     "result"
-    ]
-   ]
+   "timing_level": "word"
   }
  },
  "asr": {

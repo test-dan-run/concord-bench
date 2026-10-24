@@ -110,17 +110,24 @@ back (§3). Matched to a received segment by file and times within 0.01 s.
 Seg-model (VAD / diarisation) outputs on whole files, one per line:
 
 ```
-{"model": registry name, "image": pinned image tag, "sha256": audio sha256,
- "params": {"adapter": "OIPSegmenter", "image": pinned image tag, ...the adapter's options},
+{"model": model id in the model catalog (the platform service name), "image": image tag (for display),
+ "build_key": the catalog's build key of the build that produced it,
+ "sha256": audio sha256,
+ "params": {"adapter": "OIPSegmenter", ...the adapter's options},
  "latency_s": number,
  "output": {"segments": [[start, end], ...], "speakers": ["spk0", ...] or null}}
 ```
 
-`params` is exactly the writer's seg adapter params for that call, written out in full (not a hash):
-`adapter` is the adapter class name, `image` is the same tag as the top-level `image`, and any other key is
-an adapter option. The receiver computes its own cache key and stores an output only when `adapter` names
-its own adapter for that model, `image` is the tag it would use, and every other key equals its own call's
-option (`sample_rate`, if given, must be 16000). Otherwise the row is skipped.
+`build_key` is the model catalog's build key (16 hex characters: image, config and weights; see the
+platform's `catalog/README.md`) of the model's build that produced the output. `params` is exactly the
+writer's seg adapter params for that call, written out in full (not a hash): `adapter` is the adapter class
+name, and any other key is an adapter option. Packages written before the model catalog have no
+`build_key` and carry the image tag in `params` as `image`; readers ignore `params.image`.
+
+The receiver computes its own cache key and stores an output only when `build_key` is the build of that
+model the catalog runs now, `adapter` names its own adapter for that model, and every other key equals
+its own call's option (`sample_rate`, if given, must be 16000). Otherwise the row is skipped, as is a row
+without `build_key`.
 
 ### 2.6 Packages without a manifest
 

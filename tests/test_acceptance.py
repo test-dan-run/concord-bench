@@ -1,8 +1,9 @@
 """Phase 1 acceptance (HANDOFF §3.7) end to end on recorded model responses (no GPU, no platform).
 
-1. Upload the labelled fixture dataset; register 2 ASR + 3 VAD / diarisation models with 0 typed fields.
-2. Run single-model benchmarks and the full pipeline grid incl. the oracle; every stored number is
-   recomputed here with the reference libraries called directly (jiwer, pyannote.metrics, meeteval).
+1. Upload the labelled fixture dataset; pick 2 ASR + 3 VAD / diarisation models from the model catalog (the
+   replay stand-in) with 0 typed fields.
+2. Run single-model benchmarks and the full pipeline grid incl. the oracle, stage by stage; every stored
+   number is recomputed here with the reference libraries called directly (jiwer, pyannote.metrics, meeteval).
 3. Every error-analysis endpoint loads, sorts, expands and serves audio for the fixture set
    (the UI side is covered by the Playwright smoke test).
 """
@@ -31,15 +32,78 @@ def flow(replay, client, tmp_path, session):
     return out
 
 
-def test_registration_needs_no_typed_fields(flow):
+def test_models_come_from_the_catalog_with_no_typed_fields(flow):
     assert flow["typed_fields"] == 0
     assert set(flow["models"]) == set(ASR_MODELS + SEG_MODELS)
     caps = {n: (m["capabilities"], m["timing_level"]) for n, m in flow["models"].items()}
     assert caps["faster-whisper-large-v3"] == (["asr"], "word")
     assert caps["whisper-large-v3"] == (["asr"], "segment")
-    assert caps["silero-vad"] == (["vad"], "segment")
-    assert caps["pyannote-diarization"] == (["diar"], "segment")
-    assert caps["nemotron-3-diarization"] == (["diar"], "segment")
+    assert caps["silero-vad"] == (["vad"], None)
+    assert caps["pyannote-diarization"] == (["diar"], None)
+    assert caps["nemotron-3-diarization"] == (["diar"], None)
+    assert all(m["build_key"] and m["usable"] for m in flow["models"].values())
+
+
+def test_grid_runs_stage_by_stage(flow, session):
+    """Each segmenter once over the dataset, each ASR model once over every pipeline's cuts, then one
+    assembly per pipeline that leases nothing; the plan was previewed through the catalog first."""
+    from concord_bench.core.models import Job
+    from concord_bench.platform import catalog
+
+    plan = flow["plan"]
+    assert plan["runs"] == 8 and plan["error"] is None
+    assert [(st["stage"], st["model"]) for st in plan["plan"]["steps"]] == (
+        [("seg", m) for m in SEG_MODELS] + [("asr", m) for m in ASR_MODELS])
+    by_type: dict[str, list[Job]] = {}
+    for j in session.query(Job).order_by(Job.id):
+        by_type.setdefault(j.type, []).append(j)
+    assert sorted(j.payload["model_id"] for j in by_type["seg_stage"]) == sorted(
+        {j.payload["model_id"] for j in by_type["seg_stage"]})
+    assert len(by_type["seg_stage"]) == 3 and len(by_type["asr_stage"]) == 2
+    assert all(len(j.payload["sources"]) == 4 for j in by_type["asr_stage"])  # 3 segmenters + the oracle
+    assembled = [j for j in by_type["run"] if j.payload.get("assemble")]
+    assert len(assembled) == 8 and all(j.required_services == [] and j.after for j in assembled)
+    leases = [c[1] for c in catalog.get().calls if c[0] == "lease"]
+    holders = {f"bench:job-{j.id}" for j in by_type["seg_stage"] + by_type["asr_stage"]}
+    stage_leases = [models for holder, models in leases if holder in holders]
+    # the single seg runs before stored every whole-file output, so the seg stages lease nothing; each ASR
+    # model is leased once for every pipeline's cuts
+    assert sorted(m for (m,) in stage_leases) == sorted(ASR_MODELS)
+    assert all(j.result["computed"] == 0 and j.result["hits"] == 6 for j in by_type["seg_stage"])
+    assert all(j.result["computed"] > 0 for j in by_type["asr_stage"])
+    assert all(j.status == "done" and j.result["build_key"] for j in by_type["seg_stage"] + by_type["asr_stage"])
+
+
+def test_outputs_are_indexed_with_their_build(flow, session):
+    from concord_bench.platform import catalog
+
+    rows = session.query(ModelOutput).all()
+    assert rows and all(r.build_key and r.params and "image" not in r.params for r in rows)
+    keys = [{"build_key": r.build_key, "audio_sha256": r.audio_sha256, "span_start": r.span_start,
+             "span_end": r.span_end, "params_hash": r.params_hash} for r in rows]
+    hits = catalog.get().index_lookup("label", keys)
+    assert [h["output_id"] for h in hits] == [r.id for r in rows] and {h["owner"] for h in hits} == {"bench"}
+
+
+def test_rerun_needs_no_model(flow, client, session):
+    """Everything is stored: a second grid (new runs) leases nothing and calls no model."""
+    from concord_bench.core.models import Run
+    from concord_bench.platform import catalog
+    from concord_bench.runs import jobs
+
+    cat = catalog.get()
+    n_outputs = session.query(ModelOutput).count()
+    leases = len([c for c in cat.calls if c[0] == "lease"])
+    before = session.query(Run).filter(Run.task == "pipeline").count()
+    r = client.post("/api/benchmarks/plan", json={"dataset_id": flow["dataset"]["id"], "seg_models": SEG_MODELS,
+                                                  "asr_models": ASR_MODELS, "oracle": True, "mode": "grid"})
+    assert r.json()["queued"] == 8
+    jobs.run_pending()
+    session.expire_all()
+    assert session.query(ModelOutput).count() == n_outputs
+    assert len([c for c in cat.calls if c[0] == "lease"]) == leases
+    runs = session.query(Run).filter(Run.task == "pipeline").all()
+    assert len(runs) == before + 8 and all(r.status == "done" for r in runs)
 
 
 def test_grid_complete(flow):

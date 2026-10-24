@@ -223,3 +223,11 @@ Phase 3 adds `TrainingRun`; nothing above may reference it.
 5. Phase 3 scope and how training jobs are launched.
 
 All numbers, model names, dataset names and transcripts in the design are illustrative sample data.
+
+---
+
+> **Note (Oct 2026, model catalog).** Sections above that describe registering models (Add model, the
+> compatibility check, the Model contract page) and starting services with `stack.py` describe the app
+> before the platform's model catalog (`platform/MODEL_CATALOG_REDESIGN.md`). Registration and checks now
+> live in the catalog's UI; Bench lists catalog models, leases them per job, calls them through the
+> catalog's gateway and runs pipeline grids stage by stage. README.md describes the current flow.

@@ -1,4 +1,4 @@
-"""`python -m concord_bench.cli <command>`: migrate, revision and record."""
+"""`python -m concord_bench.cli <command>`: migrate, revision, record and move-originals."""
 
 from __future__ import annotations
 
@@ -15,12 +15,14 @@ def main(argv: list[str] | None = None) -> int:
     rec = sub.add_parser("record", help="re-record adapter responses on the fixture set against live services")
     rec.add_argument("--out", default="fixtures/recorded")
     rec.add_argument("--services", nargs="*", default=None, help="limit to these benchmark models")
+    sub.add_parser("move-originals", help="upload data/originals to the Dataset Catalog's store, hold them, and rename "
+                                          "the folder data/originals.moved (DATASET_STORE must be set)")
     args = ap.parse_args(argv)
 
     from .core import db
 
     try:
-        if args.cmd in ("migrate", "revision"):
+        if args.cmd in ("migrate", "revision", "move-originals"):
             db.migrate()
     except db.ForeignDatabase as exc:
         print(f"error: {exc}", file=sys.stderr)
@@ -35,6 +37,21 @@ def main(argv: list[str] | None = None) -> int:
         from .recording import record
 
         return record(args.out, args.services)
+    elif args.cmd == "move-originals":
+        from .core.db import session_scope
+        from .datasets.store import move_originals
+        from .platform import dataset_catalog
+
+        try:
+            with session_scope() as session:
+                out = move_originals(session)
+        except dataset_catalog.Unavailable as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
+        print(f"{out['files']} originals: {out['uploaded']} uploaded, {out['already_in_store']} already in the store, "
+              f"{out['held']} held, {out['not_used']} used by no dataset (not held)"
+              + (f", {len(out['skipped'])} skipped (not named by a sha256)" if out["skipped"] else ""))
+        return 1 if out["failed"] else 0
     return 0
 
 

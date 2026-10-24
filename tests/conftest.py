@@ -94,23 +94,33 @@ def client(data_dir):
         yield c
 
 
-@pytest.fixture
-def dataset_store(tmp_path, monkeypatch, data_dir):
+def install_dataset_catalog(monkeypatch, root: Path):
     """The Dataset Catalog set up: DATASET_STORE is the folder of an in-memory FakeDatasetCatalog (aicore),
-    which answers as the catalog service."""
+    which answers as the catalog service. `reset_dataset_catalog` takes it away after the test."""
     from aicore.datasets import FakeDatasetCatalog
 
     from concord_bench import APP
     from concord_bench.core.settings import reset_settings
     from concord_bench.platform import dataset_catalog
 
-    fake = FakeDatasetCatalog(tmp_path / "store", app=APP)
+    fake = FakeDatasetCatalog(root, app=APP)
     monkeypatch.setenv("DATASET_STORE", str(fake.store))
     reset_settings()
     dataset_catalog.use(fake)
-    yield fake
+    return fake
+
+
+@pytest.fixture(autouse=True)
+def reset_dataset_catalog():
+    yield
+    from concord_bench.platform import dataset_catalog
+
     dataset_catalog.reset()
-    reset_settings()
+
+
+@pytest.fixture
+def dataset_store(tmp_path, monkeypatch, data_dir):
+    return install_dataset_catalog(monkeypatch, tmp_path / "store")
 
 
 @pytest.fixture

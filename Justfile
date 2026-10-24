@@ -39,6 +39,10 @@ worker:
 migrate:
     {{py}} -m concord_bench.cli migrate
 
+# upload data/originals to the Dataset Catalog's store (DATASET_STORE), hold them, rename the folder originals.moved
+move-originals:
+    {{py}} -m concord_bench.cli move-originals
+
 # new Alembic revision from model changes: just revision "add foo"
 revision message:
     {{py}} -m concord_bench.cli revision "{{message}}"

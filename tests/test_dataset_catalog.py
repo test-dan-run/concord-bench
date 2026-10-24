@@ -13,7 +13,7 @@ from concord_bench.core import paths
 from concord_bench.core.models import AudioFile, Dataset
 from concord_bench.datasets.ingest import ingest
 from concord_bench.runs import jobs
-from conftest import GEN
+from conftest import GEN, install_dataset_catalog
 
 
 def fixture_source(tmp_path, name: str = "src"):
@@ -147,3 +147,54 @@ def test_an_empty_dataset_store_is_unset(monkeypatch, data_dir, value):
     monkeypatch.setenv("DATASET_STORE", value)
     reset_settings()
     assert get_settings().dataset_store is None and paths.store() is None
+
+
+# ---------------------------------------------------------------- just move-originals (§12)
+
+
+def test_move_originals_uploads_holds_and_renames_the_folder(session, tmp_path, data_dir, monkeypatch):
+    import hashlib
+
+    from concord_bench.datasets.store import move_originals
+
+    ds = ingest_fixture(session, tmp_path)  # before the store
+    orphan = b"RIFF-not-used-by-any-dataset"
+    orphan_sha = hashlib.sha256(orphan).hexdigest()
+    (data_dir / "originals" / f"{orphan_sha}.wav").write_bytes(orphan)
+    (data_dir / "originals" / "notes.txt").write_text("not an original")
+    before = sorted(p.name for p in (data_dir / "originals").iterdir())
+    fake = install_dataset_catalog(monkeypatch, tmp_path / "store")
+
+    out = move_originals(session, log=lambda m: None)
+    assert out["files"] == 9 and out["uploaded"] == 8 and out["already_in_store"] == 0
+    assert out["held"] == 7 and out["not_used"] == 1 and out["skipped"] == ["notes.txt"] and out["failed"] == []
+    assert fake.held() == shas_of(session, ds)  # the orphan is uploaded but not held
+    assert fake.audio(orphan_sha) is not None
+    assert not (data_dir / "originals").exists()
+    assert sorted(p.name for p in (data_dir / "originals.moved").iterdir()) == before  # nothing deleted
+    for f in session.scalars(select(AudioFile).where(AudioFile.dataset_id == ds.id)):
+        assert paths.original(f.sha256, f.ext) == fake.audio_path(f.sha256)
+
+    # again: nothing left to move, and originals.moved is kept as it is
+    again = move_originals(session, log=lambda m: None)
+    assert again["files"] == 0 and again["moved_to"] is None
+    assert sorted(p.name for p in (data_dir / "originals.moved").iterdir()) == before
+
+
+def test_move_originals_keeps_the_folder_when_a_file_is_refused(session, tmp_path, data_dir, monkeypatch):
+    from concord_bench.datasets.store import move_originals
+
+    ingest_fixture(session, tmp_path)
+    (data_dir / "originals" / f"{'ab' * 32}.wav").write_bytes(b"bytes that hash to something else")
+    fake = install_dataset_catalog(monkeypatch, tmp_path / "store")
+    out = move_originals(session, log=lambda m: None)
+    assert len(out["failed"]) == 1 and out["failed"][0].startswith("abab") and out["moved_to"] is None
+    assert (data_dir / "originals").is_dir() and not (data_dir / "originals.moved").exists()
+    assert len(fake.held()) == 7  # what was stored is held all the same
+
+
+def test_move_originals_needs_the_store(data_dir, capsys):
+    from concord_bench import cli
+
+    assert cli.main(["move-originals"]) == 2
+    assert "DATASET_STORE" in capsys.readouterr().err

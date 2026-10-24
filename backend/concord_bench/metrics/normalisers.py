@@ -91,12 +91,16 @@ BUILTIN: dict[str, Normaliser] = {
 }
 
 
+# text.transform names no batch limit, but services cap it (monkey-custom 1000, the ITN services 256)
+PLATFORM_BATCH = 256
+
+
 def platform_normaliser(service: str) -> Normaliser:
     def fn(texts: list[str]) -> list[str]:
         import aicore
 
         c = aicore.client(service)
-        out = c.transform(texts) if texts else []
+        out = [o for i in range(0, len(texts), PLATFORM_BATCH) for o in c.transform(texts[i:i + PLATFORM_BATCH])]
         return basic_fn(out)
 
     return Normaliser(f"platform:{service}", 1, f"{service} + basic", f"Platform text.transform service "

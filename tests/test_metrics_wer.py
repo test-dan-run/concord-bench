@@ -85,3 +85,19 @@ def test_unknown_normaliser():
     with pytest.raises(KeyError):
         normalisers.get("nope")
     assert normalisers.get("platform:text-normalizer").service == "text-normalizer"
+
+
+def test_platform_normaliser_batches(monkeypatch):
+    import aicore
+
+    sizes = []
+
+    class Client:
+        def transform(self, texts):
+            sizes.append(len(texts))
+            return [t.upper() for t in texts]
+
+    monkeypatch.setattr(aicore, "client", lambda service: Client())
+    texts = [f"Word {i}." for i in range(3997)]
+    assert normalisers.get("platform:text-normalizer").many(texts) == [f"word {i}" for i in range(3997)]
+    assert max(sizes) <= normalisers.PLATFORM_BATCH and sum(sizes) == 3997

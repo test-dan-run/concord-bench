@@ -39,6 +39,8 @@ describe("reference imports", () => {
     expect(sourceLine({ source, export_version: 2, has_manifest: true })).toBe("Concord Label · Help desk calls · version 2 · install 3f2a");
     expect(sourceLine({ source: null, export_version: null, has_manifest: true })).toMatch(/no source/);
     expect(sourceLine({ source: null, export_version: null, has_manifest: false })).toMatch(/No manifest/);
+    const catalog = { ...source, install_id: "dataset-catalog", dataset_uid: "8d4e2b6a" };
+    expect(sourceLine({ source: catalog, export_version: 3, has_manifest: true })).toBe("Dataset Catalog · Help desk calls · v3 · published by Concord Label");
   });
 
   it("list waiting imports first, oldest first, then decided ones newest first", () => {

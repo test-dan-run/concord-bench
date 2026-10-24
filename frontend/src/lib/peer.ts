@@ -4,6 +4,12 @@
 import type { AppConfig, Dataset, ImportPreview, Provenance, ReferenceImport } from "./api";
 
 export const LABEL_APP = "concord-label";
+/** `source.install_id` of every Dataset Catalog version (DATASET_CATALOG_PLAN.md §5.1). */
+export const CATALOG_INSTALL = "dataset-catalog";
+
+export function appName(app: string): string {
+  return app === LABEL_APP ? "Concord Label" : app === "concord-bench" ? "Concord Bench" : app;
+}
 
 /** Label answered at LABEL_URL with the contract version this app implements. */
 export function labelLinked(cfg: Pick<AppConfig, "contract_version" | "peer"> | undefined): boolean {
@@ -36,7 +42,9 @@ export function flagsPushBlocker(cfg: Pick<AppConfig, "contract_version" | "peer
 export function sourceLine(p: Pick<ImportPreview, "source" | "export_version" | "has_manifest">): string {
   if (!p.has_manifest) return "No manifest: read like an annotated upload, no provenance";
   if (!p.source) return "Hand-made or another tool (no source): no versions, no Label links";
-  const app = p.source.app === LABEL_APP ? "Concord Label" : p.source.app;
+  if (p.source.install_id === CATALOG_INSTALL)
+    return `Dataset Catalog · ${p.source.dataset_name} · v${p.export_version ?? "?"} · published by ${appName(p.source.app)}`;
+  const app = appName(p.source.app);
   return `${app} · ${p.source.dataset_name} · version ${p.export_version ?? "?"} · install ${p.source.install_id}`;
 }
 

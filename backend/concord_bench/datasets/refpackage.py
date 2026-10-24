@@ -16,6 +16,12 @@ a person, staged with a preview, then accepted into a new dataset through the no
 References that have been scored are never changed: a package from the same source as an earlier
 dataset (`source.install_id` + `source.dataset_uid`) becomes a new dataset, `<name> v<N>`, linked to
 the earlier versions.
+
+A Dataset Catalog version (DATASET_CATALOG_PLAN.md §9.2) is staged straight from its folder on the store's
+mount (`datasets.catalog`), with its audio found by sha256 in the store. The catalog fills in its `source`
+(install id `dataset-catalog`, the catalog dataset id) and `export_version` (the version number), so the
+Bench datasets made from one catalog dataset form one chain, together with the ones published as its
+versions (`Dataset.catalog_dataset_id`).
 """
 
 from __future__ import annotations
@@ -30,11 +36,12 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from ..core import paths
 from ..core.models import AudioFile, Dataset, Job, ModelOutput, ReferenceImport, Segment, utcnow
+from ..platform import dataset_catalog
 from . import audio as audio_mod
 from . import labels as labels_mod
 from .ingest import NO_REFERENCES, SKIP_DIRS, extract_zips, inspect_source
@@ -42,6 +49,9 @@ from .parsers import ANNOTATION_EXTS, flatten, parse_file
 
 FORMAT = "concord-reference-package"
 KNOWN_FORMAT_VERSIONS = (1, 2)
+# A catalog version may be format version 3 (contracts/datasets/version.md in the platform): version 2 that
+# also allows audio only, which Bench can't import (NO_REFERENCES). Zips stay at CONTRACTS.md's versions.
+CATALOG_FORMAT_VERSIONS = (1, 2, 3)
 ATTRIBUTES = "attributes.json"  # refs/attributes.json, format version 2 (CONTRACTS.md §2.7)
 SPEAKER_PREFIX = "speaker."
 MANIFEST_REQUIRED = ("format", "format_version", "name", "created_at", "label_types", "counts", "audio_included")
@@ -139,7 +149,7 @@ def _read_jsonl(path: Path) -> tuple[list[dict[str, Any]], int]:
     return good, bad
 
 
-def read_manifest(root: Path) -> dict[str, Any]:
+def read_manifest(root: Path, formats: tuple[int, ...] = KNOWN_FORMAT_VERSIONS) -> dict[str, Any]:
     try:
         m = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
     except (ValueError, UnicodeDecodeError) as exc:
@@ -147,14 +157,14 @@ def read_manifest(root: Path) -> dict[str, Any]:
     if not isinstance(m, dict) or m.get("format") != FORMAT:
         raise PackageError(f"manifest.json: format must be {FORMAT!r} (got {m.get('format') if isinstance(m, dict) else m!r})")
     v = m.get("format_version")
-    if v not in KNOWN_FORMAT_VERSIONS:
-        known = ", ".join(str(k) for k in KNOWN_FORMAT_VERSIONS)
+    if v not in formats:
+        known = ", ".join(str(k) for k in formats)
         raise PackageError(f"reference package format_version {v!r} is not supported: this Concord Bench reads "
                            f"format version {known}")
     return m
 
 
-def read_package(root: Path, *, check_audio: bool = True) -> Package:
+def read_package(root: Path, *, check_audio: bool = True, formats: tuple[int, ...] = KNOWN_FORMAT_VERSIONS) -> Package:
     """Validate a package folder (CONTRACTS.md §2). Raises PackageError listing what is wrong."""
     if not (root / "manifest.json").is_file():
         try:
@@ -168,7 +178,7 @@ def read_package(root: Path, *, check_audio: bool = True) -> Package:
             raise PackageError(NO_REFERENCES)
         return Package(root, None)
 
-    m = read_manifest(root)
+    m = read_manifest(root, formats)
     problems: list[str] = [f"manifest.json: missing {k}" for k in MANIFEST_REQUIRED if k not in m]
     lt = m.get("label_types")
     if not isinstance(lt, list) or not lt or not set(lt) <= {"asr", "diar"}:
@@ -221,7 +231,7 @@ def read_package(root: Path, *, check_audio: bool = True) -> Package:
             problems.append("files.csv lists no files")
 
     refs_dir = root / "refs"
-    side = {"uids.jsonl", ATTRIBUTES} if m.get("format_version") == 2 else {"uids.jsonl"}
+    side = {"uids.jsonl", ATTRIBUTES} if m.get("format_version") != 1 else {"uids.jsonl"}
     refs = sorted(p for p in refs_dir.iterdir() if p.is_file() and p.name not in side and _visible(p)) \
         if refs_dir.is_dir() else []
     if len(refs) != 1:
@@ -296,7 +306,11 @@ def attribute_names(a: dict[str, Any]) -> list[str]:
 # ---------------------------------------------------------------- what Bench already has
 
 def stored_original(session: Session, sha256: str, ext_hint: str | None = None) -> Path | None:
-    """Bench's stored original with this sha256, whichever dataset brought it."""
+    """The original with this sha256 in the Dataset Catalog's store, else Bench's own, whichever dataset
+    brought it."""
+    in_store = paths.store_audio(sha256)
+    if in_store is not None:
+        return in_store
     exts = [ext_hint] if ext_hint else []
     exts += list(session.scalars(select(AudioFile.ext).where(AudioFile.sha256 == sha256).distinct()))
     for ext in dict.fromkeys(e for e in exts if e):
@@ -323,19 +337,41 @@ def missing_files(session: Session, pkg: Package) -> list[str]:
 
 # ---------------------------------------------------------------- versions
 
-def versions_of(session: Session, key: str | None) -> list[Dataset]:
-    """Datasets from one source, oldest version first (failed ingests left out)."""
+def version_number(d: Dataset, key: str | None) -> int:
+    """The dataset's version in the chain of `key`: the catalog version for one published as a version of that
+    catalog dataset, else its export_version."""
+    uid = dataset_catalog.catalog_uid(key)
+    if uid and d.catalog_dataset_id == uid:
+        return d.catalog_version or 0
+    return d.export_version or 0
+
+
+def chain_key(ds: Dataset) -> str | None:
+    """The source key of the dataset's version chain: its source, else the catalog dataset it was published to."""
+    if ds.source_key:
+        return ds.source_key
+    return dataset_catalog.SOURCE_PREFIX + ds.catalog_dataset_id if ds.catalog_dataset_id else None
+
+
+def versions_of(session: Session, key: str | None, *, failed: bool = False) -> list[Dataset]:
+    """Datasets from one source, oldest version first (failed ingests left out unless asked for). For a catalog
+    dataset, the Bench datasets published as its versions are in the chain too."""
     if not key:
         return []
-    rows = session.scalars(select(Dataset).where(Dataset.source_key == key, Dataset.status != "failed")).all()
-    return sorted(rows, key=lambda d: (d.export_version or 0, d.id))
+    uid = dataset_catalog.catalog_uid(key)
+    stmt = select(Dataset).where(or_(Dataset.source_key == key, Dataset.catalog_dataset_id == uid) if uid
+                                 else Dataset.source_key == key)
+    if not failed:
+        stmt = stmt.where(Dataset.status != "failed")
+    return sorted(session.scalars(stmt).all(), key=lambda d: (version_number(d, key), d.id))
 
 
 def previous_version(session: Session, pkg: Package) -> Dataset | None:
     """The newest earlier version of the package's dataset (below its export_version when there is one)."""
-    vs = versions_of(session, source_key(pkg.source))
+    key = source_key(pkg.source)
+    vs = versions_of(session, key)
     ev = pkg.export_version
-    earlier = [d for d in vs if ev is None or (d.export_version or 0) < ev] or vs
+    earlier = [d for d in vs if ev is None or version_number(d, key) < ev] or vs
     return earlier[-1] if earlier else None
 
 
@@ -427,12 +463,17 @@ def preview(session: Session, pkg: Package) -> dict[str, Any]:
 
 # ---------------------------------------------------------------- staging
 
-def stage(session: Session, upload_id: str, upload_dir: Path) -> ReferenceImport:
-    root = find_root(upload_dir)
-    pkg = read_package(root)
+def stage(session: Session, upload_id: str | None, upload_dir: Path, *,
+          catalog: dict[str, Any] | None = None) -> ReferenceImport:
+    """Stage an uploaded package, or (with `catalog`: {"dataset_id", "n", "dataset_name"}) a catalog version's
+    folder on the store's mount, which is the package root as it is."""
+    root = upload_dir if catalog else find_root(upload_dir)
+    pkg = read_package(root, formats=CATALOG_FORMAT_VERSIONS if catalog else KNOWN_FORMAT_VERSIONS)
     prev = preview(session, pkg)
     if prev["missing_files"]:
         raise PackageError(_missing_message(prev["missing_files"]))
+    if catalog:
+        prev["catalog"] = catalog
     imp = ReferenceImport(status="staged", name=pkg.name[:200], upload_id=upload_id, path=str(root),
                           manifest=pkg.manifest, preview=prev)
     session.add(imp)
@@ -440,9 +481,19 @@ def stage(session: Session, upload_id: str, upload_dir: Path) -> ReferenceImport
     return imp
 
 
+def catalog_of(imp: ReferenceImport) -> dict[str, Any] | None:
+    """{"dataset_id", "n", "dataset_name"} of an import staged from the Dataset Catalog, else None."""
+    return (imp.preview or {}).get("catalog") or None
+
+
+def _formats(imp: ReferenceImport) -> tuple[int, ...]:
+    return CATALOG_FORMAT_VERSIONS if catalog_of(imp) else KNOWN_FORMAT_VERSIONS
+
+
 def _missing_message(missing: list[str]) -> str:
-    return (f"{len(missing)} file(s) are listed in files.csv but are neither in audio/ nor already stored in "
-            f"Concord Bench: {', '.join(missing[:20])}" + (" ..." if len(missing) > 20 else ""))
+    where = "in the Dataset Catalog's store" if dataset_catalog.enabled() else "in Concord Bench"
+    return (f"{len(missing)} file(s) are listed in files.csv but are neither in audio/ nor already stored {where}: "
+            f"{', '.join(missing[:20])}" + (" ..." if len(missing) > 20 else ""))
 
 
 def import_json(imp: ReferenceImport) -> dict[str, Any]:
@@ -505,7 +556,7 @@ def accept(session: Session, imp: ReferenceImport, *, name: str | None = None, t
     """A new dataset from a staged package, filled by the ingest job; `finish` completes it."""
     from ..runs import jobs
 
-    pkg = read_package(Path(imp.path))
+    pkg = read_package(Path(imp.path), formats=_formats(imp))
     source = build_source(session, imp, pkg)
     m = pkg.manifest or {}
     prev = previous_version(session, pkg)
@@ -522,6 +573,8 @@ def accept(session: Session, imp: ReferenceImport, *, name: str | None = None, t
                  description=m.get("description"), tags=list(tags if tags is not None else m.get("tags") or []),
                  status="ingesting", provenance=provenance, source_key=source_key(pkg.source),
                  export_version=pkg.export_version, previous_version_id=prev.id if prev else None)
+    if (cat := catalog_of(imp)) is not None:
+        ds.catalog_dataset_id, ds.catalog_version = cat["dataset_id"], cat["n"]
     session.add(ds)
     session.flush()
     job = jobs.enqueue(session, "ingest", {"dataset_id": ds.id, "source": str(source), "cleanup": False,
@@ -542,7 +595,7 @@ def finish(session: Session, import_id: int, dataset_id: int, log=print) -> dict
     root = Path(imp.path)
     oc = OutputCache(session, log)
     if imp.manifest is not None and root.is_dir():
-        pkg = read_package(root, check_audio=False)
+        pkg = read_package(root, check_audio=False, formats=_formats(imp))
         result["uids"] = assign_uids(session, ds, pkg.uids)
         if pkg.attributes:
             result["attributes"] = apply_attributes(session, ds, pkg.attributes)
@@ -551,11 +604,25 @@ def finish(session: Session, import_id: int, dataset_id: int, log=print) -> dict
             f"outputs imported {result['outputs']['imported']}, skipped {sum(result['outputs']['skipped'].values())}"
             + (f"; labels on {result['attributes']['files']} file(s) and {result['attributes']['segments']} "
                "speaker segment(s)" if "attributes" in result else ""))
+    if (cat := catalog_of(imp)) is not None:
+        result["use"] = add_use(cat["dataset_id"], cat["n"], ds.id, log)
     imp.status, imp.result, imp.decided_at = "accepted", result, utcnow()
     session.commit()
     oc.flush()  # the imported outputs, into the catalog's index
     discard_files(imp)
     return result
+
+
+def add_use(catalog_id: str, n: int, dataset_id: int, log=print) -> bool:
+    """Record the Bench dataset as a use of the catalog version, so the catalog shows where it is used. The audio
+    is held by the ingest already, so a catalog that doesn't answer only leaves the use out."""
+    try:
+        with dataset_catalog.calling() as dc:
+            dc.add_use(catalog_id, n, str(dataset_id))
+        return True
+    except (dataset_catalog.Unavailable, dataset_catalog.DatasetCatalogError) as exc:
+        log(f"warning: the Dataset Catalog did not record this dataset as a use of v{n}: {exc}")
+        return False
 
 
 def fail(session: Session, import_id: int, error: str) -> None:

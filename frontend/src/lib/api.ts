@@ -124,6 +124,10 @@ export interface Dataset {
   export_version: number | null;
   previous_version_id: number | null;
   versions?: { id: number; name: string; export_version: number | null; status: string; created_at: string }[];
+  /** The Dataset Catalog version it was imported from (published: false) or published as (true). */
+  catalog: CatalogLink | null;
+  /** Made from a catalog version (or a zip of one): published from Concord Label, not from here. */
+  from_catalog: boolean;
   previous_plan?: PreviousPlan | null;
   /** Detail: the dataset's enhanced copies; list: a short form of them. */
   enhanced?: EnhancedCopy[] | { enh_model_id: number; display_name: string; status: string; progress: number }[];
@@ -188,6 +192,45 @@ export interface Hardware {
   reused?: boolean;
 }
 
+// ---------------------------------------------------------------- the Dataset Catalog (DATASET_CATALOG_PLAN.md §9)
+
+export interface CatalogLink {
+  dataset_id: string;
+  n: number;
+  published: boolean;
+  url: string;
+}
+
+/** A version in the Dataset Catalog; `importable` when it has references, `bench` the Bench datasets made from it. */
+export interface CatalogVersion {
+  dataset_id: string;
+  n: number;
+  parent_n: number | null;
+  parent_deleted: boolean;
+  label_types: string[];
+  labels: string[];
+  counts: { files: number; segments: number; hours: number };
+  published_by: string;
+  published_at: string;
+  format_version: number;
+  importable: boolean;
+  bench: { id: number; name: string; status: string; published: boolean }[];
+}
+
+export interface CatalogDataset {
+  id: string;
+  name: string;
+  language: string | null;
+  description: string | null;
+  tags: string[];
+  created_by: string;
+  updated_at: string;
+  latest: CatalogVersion | null;
+  /** Detail only: every version, newest first, and its page in the catalog UI. */
+  versions?: CatalogVersion[];
+  url?: string;
+}
+
 // ---------------------------------------------------------------- reference packages (CONTRACTS.md §2, §4)
 
 export interface PackageSource {
@@ -248,6 +291,8 @@ export interface ImportPreview {
   outputs: number;
   missing_files: string[];
   changes?: { files_added: number; files_removed: number; segments_before: number; segments_now: number };
+  /** Staged from a Dataset Catalog version (read from the store's mount), not from an upload. */
+  catalog?: { dataset_id: string; n: number; dataset_name: string };
 }
 
 export interface ReferenceImport {
@@ -256,6 +301,7 @@ export interface ReferenceImport {
   name: string;
   preview: ImportPreview;
   result: {
+    use?: boolean;
     uids?: { matched: number; unmatched: number };
     outputs?: { lines: number; imported: number; already_cached: number; skipped: Record<string, number> };
   };

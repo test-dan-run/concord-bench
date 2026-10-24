@@ -1,17 +1,20 @@
 // Datasets → Import reference package (SPLIT_PLAN.md §4.3, CONTRACTS.md §2): upload a package (zip or
-// folder) or find one Concord Label pushed, check the preview, then accept it into a new dataset
-// (a new version when it comes from the same source as an earlier one) or reject it.
+// folder), pick a version from the Dataset Catalog when it is set up (DATASET_CATALOG_PLAN.md §9.2), or
+// find one Concord Label pushed; check the preview, then accept it into a new dataset (a new version when
+// it comes from the same source as an earlier one) or reject it.
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { api, type ReferenceImport } from "../../lib/api";
+import { useConfig } from "../../lib/config";
 import { ago, bytes, hours, num } from "../../lib/format";
 import { skippedSummary, sortImports, sourceLine } from "../../lib/peer";
 import { pickedFromDrop, pickedFromInput, uploadFiles, type PickedFile } from "../../lib/upload";
 import * as I from "../../components/icons";
 import { TagInput } from "../../components/TagInput";
 import { Button, Chip, cx, Empty, ErrorNote, Fact, PageHeader, Panel, Spinner } from "../../components/ui";
+import { CatalogImport } from "./CatalogImport";
 
 const TEMPLATE = "reference_package.zip";
 
@@ -21,6 +24,7 @@ function labelChips(types: string[]) {
 
 export function ImportReference() {
   const qc = useQueryClient();
+  const { data: cfg } = useConfig();
   const [drag, setDrag] = useState(false);
   const [progress, setProgress] = useState<[number, number] | null>(null);
   const imports = useQuery({
@@ -47,11 +51,11 @@ export function ImportReference() {
       <PageHeader
         crumbs={<><Link to="/datasets">Datasets</Link> / Import reference package</>}
         title="Import reference package"
-        subtitle="Reviewed references from Concord Label, another tool or by hand. Each accepted package becomes a new dataset; a package from the same source becomes a new version, so scored references never change."
+        subtitle="Reviewed references from the Dataset Catalog, Concord Label, another tool or by hand. Each accepted package becomes a new dataset; a package from the same source becomes a new version, so scored references never change."
       />
       <div className="flex flex-col xl:flex-row gap-5 items-start">
         <div className="flex-1 w-full flex flex-col gap-5 min-w-0">
-          <Panel title="Waiting for a decision" subtitle="Packages you uploaded and packages Concord Label pushed. Nothing is stored as a dataset until you accept.">
+          <Panel title="Waiting for a decision" subtitle="Packages you uploaded or picked from the Dataset Catalog, and packages Concord Label pushed. Nothing is stored as a dataset until you accept.">
             {imports.isLoading && <Spinner />}
             <ErrorNote error={imports.error} />
             {imports.data && waiting.length === 0 && <Empty>No staged packages.</Empty>}
@@ -120,6 +124,7 @@ export function ImportReference() {
               <I.Download size={12} /> Template package ({TEMPLATE})
             </a>
           </Panel>
+          {cfg?.dataset_catalog.enabled && <CatalogImport uiUrl={cfg.dataset_catalog.ui_url} />}
           <Panel title="Pushed from Concord Label">
             <span className="text-xs text-muted">
               Concord Label's “Send to Bench” uploads packages here when its BENCH_URL points at this app. They wait above until you accept them.

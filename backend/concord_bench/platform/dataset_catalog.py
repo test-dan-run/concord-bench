@@ -136,3 +136,26 @@ def from_catalog(ds: Dataset) -> bool:
     """Made from a catalog version (imported from the catalog, or from a zip of one)."""
     return catalog_uid(ds.source_key) is not None
 
+
+
+def ui_url() -> str:
+    return get_settings().dataset_catalog_ui
+
+
+def link(ds: Dataset) -> dict[str, Any] | None:
+    """The catalog version the dataset was imported from or published as, with its page in the catalog UI."""
+    if not ds.catalog_dataset_id or not ds.catalog_version:
+        return None
+    return {"dataset_id": ds.catalog_dataset_id, "n": ds.catalog_version, "published": not from_catalog(ds),
+            "url": f"{ui_url()}/{ds.catalog_dataset_id}/v/{ds.catalog_version}"}
+
+
+def remove_use(ds: Dataset) -> None:
+    """Take the dataset off its catalog version's uses (a version or dataset deleted since is fine)."""
+    if not ds.catalog_dataset_id or not ds.catalog_version:
+        return
+    try:
+        with calling() as dc:
+            dc.remove_use(ds.catalog_dataset_id, ds.catalog_version, str(ds.id))
+    except NotFound:
+        pass

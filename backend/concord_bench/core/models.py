@@ -96,6 +96,10 @@ class Dataset(Base):
     source_key: Mapped[str | None] = mapped_column(String(300), index=True)
     export_version: Mapped[int | None] = mapped_column(Integer)
     previous_version_id: Mapped[int | None] = mapped_column(ForeignKey("dataset.id", ondelete="SET NULL"))
+    # The Dataset Catalog version this dataset was imported from or published as (DATASET_CATALOG_PLAN.md §9).
+    # Bench records a `use` on it, with the dataset id as ref, while the dataset exists.
+    catalog_dataset_id: Mapped[str | None] = mapped_column(String(32), index=True)
+    catalog_version: Mapped[int | None] = mapped_column(Integer)
 
     files: Mapped[list[AudioFile]] = relationship(back_populates="dataset", cascade="all, delete-orphan")
 

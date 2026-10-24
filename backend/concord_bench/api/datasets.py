@@ -17,6 +17,7 @@ from ..core import paths
 from ..core.db import get_session
 from ..core.models import AudioFile, Dataset, EnhancedCopy, Job, JobStatus, Model, Run, RunTask, Segment, Slice
 from ..core.settings import REPO_ROOT
+from ..datasets import refpackage
 from ..datasets.ingest import NO_REFERENCES, inspect_source
 from ..platform import catalog, dataset_catalog
 from ..runs import enhance, jobs
@@ -154,13 +155,15 @@ def dataset_json(session: Session, ds: Dataset, detail: bool = False) -> dict[st
         "flagged": {k: len(v) for k, v in (rep.get("flagged") or {}).items()},
         "provenance": ds.provenance or {}, "export_version": ds.export_version,
         "previous_version_id": ds.previous_version_id,
+        # The Dataset Catalog version it was imported from or published as; from_catalog: made from one (or
+        # from a zip of one), so it is published from Concord Label, not from here.
+        "catalog": dataset_catalog.link(ds), "from_catalog": dataset_catalog.from_catalog(ds),
     }
     if detail:
-        d["versions"] = [{"id": v.id, "name": v.name, "export_version": v.export_version, "status": v.status,
-                          "created_at": v.created_at.isoformat()}
-                         for v in session.scalars(select(Dataset).where(Dataset.source_key == ds.source_key)
-                                                  .order_by(Dataset.export_version, Dataset.id))] \
-            if ds.source_key else []
+        key = refpackage.chain_key(ds)
+        d["versions"] = [{"id": v.id, "name": v.name, "export_version": refpackage.version_number(v, key),
+                          "status": v.status, "created_at": v.created_at.isoformat()}
+                         for v in refpackage.versions_of(session, key, failed=True)]
         d["previous_plan"] = previous_plan(session, ds)
         d["report"] = rep
         d["runs"] = session.scalar(select(func.count(Run.id)).where(Run.dataset_id == ds.id))
@@ -378,12 +381,14 @@ def delete_enhanced(copy_id: int, session: Session = Depends(get_session)) -> di
 @router.delete("/datasets/{dataset_id}", status_code=204)
 def delete_dataset(dataset_id: int, session: Session = Depends(get_session)) -> None:
     """With the Dataset Catalog set up, the holds on the dataset's audio are released first, except on files
-    another Bench dataset has; a catalog that doesn't answer keeps the dataset (and its holds)."""
+    another Bench dataset has, and the dataset is taken off its catalog version's uses. A catalog that doesn't
+    answer keeps the dataset (and its holds)."""
     ds = get_dataset(session, dataset_id)
     if dataset_catalog.enabled():
         try:
             dataset_catalog.release_unused(
                 session, session.scalars(select(AudioFile.sha256).where(AudioFile.dataset_id == ds.id)), ds.id)
+            dataset_catalog.remove_use(ds)
         except (dataset_catalog.Unavailable, dataset_catalog.DatasetCatalogError) as exc:
             raise HTTPException(503, f"{exc}. The dataset is kept, so its audio stays held in the store; try "
                                      "again when the catalog answers.") from None

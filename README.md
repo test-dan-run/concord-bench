@@ -10,16 +10,22 @@ databases. They agree only on the formats and endpoints in [CONTRACTS.md](CONTRA
 files in `contracts/`. [SPLIT_PLAN.md](SPLIT_PLAN.md) describes the split. [PLAN.md](PLAN.md) §5 (Phase 1)
 and [HANDOFF.md](HANDOFF.md) describe what Bench does.
 
-Concord Bench does not register, verify, start or call models directly. The platform's **model catalog**
+Concord Bench does not register, verify, start or call models directly. The platform's **Model Catalog**
 (`../../platform/catalog/README.md`) does: Bench lists the catalog's models, leases the ones a job needs,
 sends every inference call through the catalog's gateway (`aicore` with `AICORE_CATALOG`), and shares its
 outputs with Concord Label through the catalog's output index.
+
+The same catalog service also runs the platform's **Dataset Catalog** (`../../platform/catalog/README.md`,
+Dataset Catalog). When `DATASET_STORE` is set, Bench keeps its original audio in the Dataset Catalog's
+store, imports datasets that Concord Label published there, and publishes its own datasets there (see
+Dataset Catalog below).
 
 ## Quickstart
 
 ```bash
 # prerequisites: uv, just, Node 22+, ffmpeg; the platform repo at ../../platform (rendered), with the
-# model catalog running (`just catalog-serve` there, http://127.0.0.1:8700) for anything that runs a model
+# catalog service running (`just catalog-serve` there, http://127.0.0.1:8700) for anything that runs a model
+# or uses the Dataset Catalog
 just setup            # uv sync + npm install
 just dev              # API :8600 + worker + Vite :5173, then open http://localhost:5173
 just test             # backend and frontend unit tests, no GPU or platform needed
@@ -42,7 +48,7 @@ speech models (register and verify models in the catalog's UI, linked from the M
 | API (and the built frontend) | 8600 (`CONCORD_PORT`) |
 | Vite dev server | 5173 (`CONCORD_WEB_PORT`) |
 | Concord Label, for reference | 8620, Vite 5174 |
-| Model catalog (platform), for reference | 8700 (`CATALOG_URL`) |
+| Catalog service (platform): the Model Catalog and the Dataset Catalog, for reference | 8700 (`CATALOG_URL`) |
 
 `GET /api/config` reports `app` (`concord-bench`), `version`, `contract_version` and `peer`
 (CONTRACTS.md §1). `peer` describes Concord Label at `LABEL_URL`: Bench asks its `/api/config` with a
@@ -66,7 +72,7 @@ own data directory and database.
   flags to Label" on the dataset page all name the catalog dataset id. `just e2e-handoff` in the Label
   repository runs this round trip with both images and the catalog service.
 - **Offline.** Bench no longer writes offline kits (EVALUATE_PLAN.md §9). Models go to an air-gapped
-  machine as a model catalog bundle, and the Bench image goes with `docker save` (see Air-gapped machines).
+  machine as a Model Catalog bundle, and the Bench image goes with `docker save` (see Air-gapped machines).
   Concord Label still has its own copy of the old kit code.
 - **Contracts.** `just check-contracts` checks `contracts/samples`. `CONTRACTS.md` and `contracts/` are
   kept identical to Label's copies by hand, and nothing compares the two repositories.
@@ -78,8 +84,11 @@ own data directory and database.
 ```
 backend/concord_bench/
   core/        settings, paths (the only module that knows where files live), SQLite models, db
-  datasets/    audio (ffmpeg probe and decode, clipping, 16 kHz derive, peaks), annotation parsers, labels, ingest
-  platform/    the model catalog (records, leases, plans, index, peer reads; replay stand-in)
+  datasets/    audio (ffmpeg probe and decode, clipping, 16 kHz derive, peaks), annotation parsers, labels, ingest,
+               reference packages, catalog.py (import from and publish to the Dataset Catalog) and store.py
+               (`just move-originals`)
+  platform/    catalog.py, the Model Catalog (records, leases, plans, index, peer reads; replay stand-in), and
+               dataset_catalog.py, the Dataset Catalog (uploads, holds, uses)
   adapters/    openai_asr, openai_chat_audio, oip_segmenter, enhance; record and replay transport
   runs/        job queue and worker, executor (ASR, seg, pipelines), enhanced copies, output cache, references, scoring
   metrics/     normalisers, wer (jiwer), der, jer and vad (pyannote.metrics), cpwer (meeteval), rtf, attribution
@@ -87,7 +96,8 @@ backend/concord_bench/
                cards and regions, tag-overlap suggestions
   api/         FastAPI routers
   migrations/  Alembic (bench_0001...; bench_0004 moved models to the catalog; bench_0005 dropped offline export;
-               bench_0006 to bench_0008 added metrics and hardware, enhanced copies and saved slices)
+               bench_0006 to bench_0008 added metrics and hardware, enhanced copies and saved slices;
+               bench_0009 added the dataset's catalog dataset id and version)
   acceptance.py, recording.py   the Phase 1 acceptance flow, and `just record` on top of it
 frontend/src/  React, TanStack Query, Table and Virtual, Tailwind (AeroAudio tokens in index.css)
 fixtures/      synth/ (kokoro-tts dialogue specs and committed turns), generated/ (audio, refs, templates),
@@ -99,14 +109,17 @@ tests/         pytest; `-m live` for tests against running services
 Concord Label started as a copy of this repository. The modules both apps still have (core, datasets,
 registry, platform, adapters, runs/cache.py, runs/jobs.py, runs/worker.py, and the frontend's shared
 components and lib) are listed in SPLIT_PLAN.md §2.2. When you fix one of them here, check the same code in
-Concord Label. (`registry/` and `platform/services.py` are gone since the model catalog, and `offline/`
-is gone from Bench since EVALUATE_PLAN.md §9; Label keeps its copy for now.)
+Concord Label. (`registry/` and `platform/services.py` are gone since the Model Catalog, and `offline/`
+is gone from Bench since EVALUATE_PLAN.md §9; Label keeps its copy for now.) The Dataset Catalog work
+changed several of these modules in different ways in the two apps. Label's AGENTS.md, "Code shared with
+Concord Bench", lists which ones now differ.
 
 ## How it works
 
 - **Datasets.** Upload a folder or zip (chunked), or point at a local folder. Every dataset needs
   references: an upload whose annotations match no audio file is refused (label such audio in Concord
-  Label). Originals are copied to `CONCORD_DATA/originals/<sha256>`; models and playback use a derived
+  Label). Originals go to the Dataset Catalog's store when `DATASET_STORE` is set (see Dataset Catalog
+  below), and to `CONCORD_DATA/originals/<sha256>` when it isn't; models and playback use a derived
   16 kHz mono FLAC. There is no length limit, but each file (or reference segment) goes to a model in one
   request, so a very long file works only if the model takes it: VAD and diarisation receive the audio as
   JSON numbers, about 1.25 GB per hour of audio. Annotations are matched to
@@ -126,7 +139,31 @@ is gone from Bench since EVALUATE_PLAN.md §9; Label keeps its copy for now.)
   Seg-model outputs in the package go into the output cache when their `build_key` is the build the catalog
   runs now (CONTRACTS.md §2.5; rows without one are skipped), and into the catalog's index. Label calls
   only `GET /api/datasets/by-catalog/<catalog dataset id>/scores` (CONTRACTS.md §4).
-- **Models** come from the model catalog: it registers them (display name, tags, "derived from"),
+- **Dataset Catalog** (platform DATASET_CATALOG_PLAN.md §9, §12). It is on when `DATASET_STORE` is set
+  to the store's folder as Bench sees it (read-only), and Bench talks to the catalog service at
+  `CATALOG_URL` as the app `concord-bench`. With it off, Bench keeps its originals in `CONCORD_DATA` and
+  hides the Dataset Catalog's pages and panels.
+  - *Audio in the store.* Ingest uploads each original to the store (only the files the store lacks are
+    sent) and places a hold on it, and Bench reads originals from the store. The derived FLAC, peaks and
+    enhanced copies stay in `CONCORD_DATA`. Deleting a dataset releases the holds that no other Bench
+    dataset needs. While the catalog service is down, an upload fails and a delete answers 503, and the
+    dataset is kept. Datasets that are already in Bench keep working.
+  - *Import.* **Import reference package**, From Dataset Catalog, lists the catalog's datasets and the
+    versions that have references. Bench can't import a version with audio only. A version is staged from
+    its folder in the store, with the same preview a zip gets, and no audio is copied. Accepting it makes a
+    Bench dataset that holds the version's audio and records a use on the version, so the catalog shows
+    where it is used. A later version of the same catalog dataset becomes `<name> v<N>`.
+  - *Publish.* The dataset page's Dataset Catalog panel publishes a dataset from an annotated upload or a
+    zip, as version 1 of a new catalog dataset or as the next version of an existing one. After a zip
+    import, the import page links to this panel. Bench writes the version from its own segments and
+    labels, uploads any audio the store lacks, and records a use. When another app published a newer
+    version since the page loaded, Bench asks whether to publish anyway. A dataset is published once. A dataset made from a catalog version isn't published from Bench, because
+    its references are corrected in Concord Label.
+  - *Moving old audio.* `just move-originals` uploads every file in `CONCORD_DATA/originals/` to the
+    store, holds the ones a Bench dataset uses, and renames the folder to `originals.moved/`. It never
+    deletes audio. Delete `originals.moved/` yourself once you are satisfied. If the store refuses a file,
+    the command lists it and leaves `originals/` in place, and running it again finishes the job.
+- **Models** come from the Model Catalog: it registers them (display name, tags, "derived from"),
   verifies them on its check clip and records their capabilities (ASR, VAD, diarisation) and timing
   (word, segment or text) per build. The Models page lists the catalog's speech models read-only, with
   state (running, stopped, starting, queued), capabilities, cold start and build key, and links to the
@@ -185,22 +222,27 @@ is gone from Bench since EVALUATE_PLAN.md §9; Label keeps its copy for now.)
   stage that caused it, and shows which stage to upgrade. The enhancement page compares placements and
   plays clips where enhancement changed the transcript. "Flag reference as wrong" on the ASR page marks a reference segment; flagged references are
   listed on the dataset page. Scores keep using them until the references are corrected. For a dataset
-  from Concord Label, the error pages link to the file in Label ("Open in Label") and the dataset page
-  sends the flags back ("Send flags to Label", or download the flags file, CONTRACTS.md §3).
+  that is a Dataset Catalog version (imported from it or published to it), the error pages link to the file
+  in Label ("Open in Label") and the dataset page sends the flags back ("Send flags to Label", or download
+  the flags file, CONTRACTS.md §3). Both name the catalog dataset id. A dataset that came from Label before
+  contract version 3 keeps its flags in Bench, and its page says why.
 
 ## Settings
 
 Environment variables (or `.env`, see [.env.example](.env.example)): `CONCORD_DATA`, `PLATFORM_DIR`,
-`AICORE_ENDPOINTS`, `AI_HOST`, `CATALOG_URL` (or `AICORE_CATALOG`; the model catalog, default
-`http://127.0.0.1:8700`, `http://catalog:8700` in the image), `CATALOG_UI_URL` (linked from the Models page;
-default `CATALOG_URL`), `PUBLIC_URL` (where Label reads Bench's outputs, registered with the catalog;
-default `http://127.0.0.1:8600`), `REPLAY_DIR`, `RECORD_DIR`, `CONCORD_IMAGE`, `CONCORD_HOME`, `LABEL_URL`
-(Concord Label's base URL, e.g. `http://localhost:8620`; unset means no Label links), `INFER_CONCURRENCY`
+`AICORE_ENDPOINTS`, `AI_HOST`, `CATALOG_URL` (or `AICORE_CATALOG`; the catalog service, default
+`http://127.0.0.1:8700`, `http://catalog:8700` in the image), `CATALOG_UI_URL` (linked from the Models
+page and the Dataset Catalog panels; default `CATALOG_URL`), `DATASET_STORE` (the Dataset Catalog's store
+as Bench sees it, read-only; unset means no Dataset Catalog), `PUBLIC_URL` (where Label reads Bench's
+outputs, registered with the catalog; default `http://127.0.0.1:8600`), `REPLAY_DIR`, `RECORD_DIR`,
+`CONCORD_IMAGE`, `CONCORD_HOME`, `LABEL_URL` (Concord Label's base URL, e.g. `http://localhost:8620`;
+unset means no Label links), `INFER_CONCURRENCY`
 (model calls a job keeps in flight, as JSON by catalog model id, engine or `default`; built in:
 `{"vllm": 8, "default": 2}`). Because calls overlap, RTF is wall time: each output's `latency_s` is its
 share of the seconds the job spent computing, not its request's own latency. Bench sets
 `AICORE_CATALOG` for `aicore` from `CATALOG_URL`, so every model call goes through the catalog's gateway.
-Each app has its own data directory and database; nothing is shared on disk. Bench's schema versions
+Each app has its own data directory and database. The only thing the apps share on disk is the Dataset
+Catalog's store, which both of them only read. Bench's schema versions
 start with `bench_`, and Bench refuses to start (the API, the worker and `just migrate`) on a database
 it did not write — Concord Label's, or one from the single Concord app before the split — without
 changing it. Point `CONCORD_DATA` at an empty folder to start fresh.
@@ -213,7 +255,7 @@ copy them there again when they change.
 - `just fixtures` rebuilds `fixtures/generated` from `fixtures/synth/dialogues.yaml`. Turns already in
   `fixtures/synth/turns/` are reused (kokoro on a GPU is not bit-exact), so the output is identical;
   delete a turn file to synthesise it again (needs `kokoro-tts` up).
-- `just record` runs the acceptance flow through the live model catalog (which starts what it needs) and
+- `just record` runs the acceptance flow through the live Model Catalog (which starts what it needs) and
   rewrites `fixtures/recorded/` (responses, the endpoint map they were taken with, and `summary.json` with
   the catalog's capabilities of each model, which the replay stand-in serves). Recordings are keyed by
   params hash without the image; the check clip now lives with the catalog (`platform/catalog/fixtures`).
@@ -222,11 +264,13 @@ copy them there again when they change.
 
 - `just test`: backend (pytest) and frontend (vitest) unit tests, including the Phase 1 acceptance flow
   on recorded responses (`tests/test_acceptance.py`). No catalog is needed: tests use aicore's
-  `FakeCatalog` (leases, index, plans in memory) or the replay stand-in.
+  `FakeCatalog` (leases, index, plans in memory) or the replay stand-in, and `FakeDatasetCatalog` for the
+  Dataset Catalog.
 - `just e2e`: Playwright smoke tests on replayed fixtures. The API runs in the `concord-bench:0.2.0` image
   (build it first with `just build`) with this checkout's backend, tests and `frontend/dist` mounted;
   browsers run in the Playwright image.
-- `just e2e-handoff` in the Label repository: the round trip between the two images.
+- `just e2e-handoff` in the Label repository: the round trip between the two images through the catalog
+  service (upload in Label, publish, import here, flag back to Label).
 - `just test-live`, `just test-perf`: against the live catalog and its services, and at realistic size.
 
 ## Image
@@ -241,14 +285,16 @@ docker run -d --name concord-bench --network ai-net -p 127.0.0.1:8600:8600 \
 
 The image sets `CATALOG_URL=http://catalog:8700`, `PUBLIC_URL=http://concord-bench:8600` (where Label reads
 Bench's outputs) and `AI_HOST={name}`. The platform is mounted for the aicore endpoint map
-(`AICORE_ENDPOINTS`). In development, run Bench on the host instead.
+(`AICORE_ENDPOINTS`). To use the Dataset Catalog, also mount its store read-only and point `DATASET_STORE`
+at it, e.g. `-v "$HOME/ai-data/datasets":/datasets:ro -e DATASET_STORE=/datasets`. In development, run
+Bench on the host instead.
 
 ## Air-gapped machines
 
 Bench does not write offline kits any more (EVALUATE_PLAN.md §9). To run it on a machine with no internet
 access:
 
-1. Export the models from the model catalog (`POST /api/exports` or its UI) and import the bundle on the
+1. Export the models from the Model Catalog (`POST /api/exports` or its UI) and import the bundle on the
    target with `python -m catalog import <bundle>` (platform `catalog/README.md`, Export and import).
 2. Save the Bench image here with `docker save concord-bench:0.2.0 -o concord-bench.tar`, copy it over, and
    load it there with `docker load -i concord-bench.tar`.
@@ -261,7 +307,7 @@ trimmed to Concord Bench (SPLIT_PLAN.md milestone S3), with Bench's side of refe
 (S4), the links to Concord Label (S5), GPU leases shared with Label (S6), and offline kits holding either
 or both apps (S7). The split (SPLIT_PLAN.md) is built.
 
-Since then, models come from the platform's model catalog (MODEL_CATALOG_REDESIGN.md): registration and
+Since then, models come from the platform's Model Catalog (MODEL_CATALOG_REDESIGN.md): registration and
 checks moved there, jobs lease models from it, outputs are keyed by build and shared with Label through
 its index, and pipeline grids run stage by stage. The offline export is removed (EVALUATE_PLAN.md §9).
 
@@ -270,10 +316,16 @@ sortable leaderboards, speech enhancement as an ablation, slices by label, and t
 pipeline and enhancement error pages, and reference packages that carry labels (contract version 2).
 EVALUATE_PLAN.md §14 lists where the build differs from that plan.
 
+Bench's side of the platform's Dataset Catalog (DATASET_CATALOG_PLAN.md in the platform repository,
+milestones D4 and D6) is built: originals in the store, import from and publish to the catalog,
+`just move-originals`, and contract version 3, where datasets move between the apps through the catalog.
+That plan's "What was built" section lists where the build differs from it.
+
 Known limits:
 - Enhancement quality scores (DNSMOS, SNR estimates, SI-SDR and PESQ on Bench's datasets) are not built
   (EVALUATE_PLAN.md §1). The Models page shows only the catalog's SI-SDR on its own check clip.
-- Datasets can't be updated in place. A dataset that needs new labels or references is uploaded again.
+- Datasets can't be updated in place. A dataset that needs new labels or references is uploaded again,
+  but it can now be published as the next version of the same Dataset Catalog dataset.
 - KWS is not built (Q6). Only its hooks exist: the enums, the `keyword_event` table, task-keyed
   registries and a task-driven benchmark tab bar.
 - The fixture set is synthesised speech (kokoro-tts): good for correctness, not realism.

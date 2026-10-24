@@ -251,7 +251,7 @@ class Run(Base):
     # Per-file inference outputs gathered by the run, consumed by scoring (keys are audio_file ids).
     outputs: Mapped[dict[str, Any]] = mapped_column(default=dict)
     rtf_by_stage: Mapped[dict[str, Any]] = mapped_column(default=dict)
-    # What each model ran on, per catalog model id, as the model catalog reported it (platform.catalog
+    # What each model ran on, per catalog model id, as the Model Catalog reported it (platform.catalog
     # `hardware`): device (gpu | cpu | hosted), declared VRAM, engine, the host's GPU and CPU, runtime
     # precision and batch size, peak VRAM. Fields the catalog does not report are absent.
     hardware: Mapped[dict[str, Any]] = mapped_column(default=dict)

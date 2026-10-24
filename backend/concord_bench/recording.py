@@ -1,9 +1,9 @@
 """`just record`: run the acceptance flow against live services and record every model response.
 
 Writes `fixtures/recorded/<service>/<key>.json`, a copy of the endpoint map the responses were taken
-with (`endpoints.generated.yaml`: the replay stand-in for the model catalog is built from it), and
+with (`endpoints.generated.yaml`: the replay stand-in for the Model Catalog is built from it), and
 `summary.json` with the catalog's capabilities of each model (`models`, which replay serves) and the scores
-of the recorded run for regression checks. Needs the model catalog running (AICORE_CATALOG / CATALOG_URL).
+of the recorded run for regression checks. Needs the Model Catalog running (AICORE_CATALOG / CATALOG_URL).
 """
 
 from __future__ import annotations

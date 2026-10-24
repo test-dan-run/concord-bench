@@ -120,7 +120,7 @@ Seg model (VAD or diarisation) outputs on whole files, one per line. A catalog v
 Model Catalog's output index shares model outputs between the apps. A package zip may still carry them:
 
 ```
-{"model": model id in the model catalog (the platform service name), "image": image tag (for display),
+{"model": model id in the Model Catalog (the platform service name), "image": image tag (for display),
  "build_key": the catalog's build key of the build that produced it,
  "sha256": audio sha256,
  "params": {"adapter": "OIPSegmenter", ...the adapter's options},
@@ -128,10 +128,10 @@ Model Catalog's output index shares model outputs between the apps. A package zi
  "output": {"segments": [[start, end], ...], "speakers": ["spk0", ...] or null}}
 ```
 
-`build_key` is the model catalog's build key (16 hex characters: image, config and weights; see the
+`build_key` is the Model Catalog's build key (16 hex characters: image, config and weights; see the
 platform's `catalog/README.md`) of the model's build that produced the output. `params` is exactly the
 writer's seg adapter params for that call, written out in full (not a hash): `adapter` is the adapter class
-name, and any other key is an adapter option. Packages written before the model catalog have no
+name, and any other key is an adapter option. Packages written before the Model Catalog have no
 `build_key` and carry the image tag in `params` as `image`; readers ignore `params.image`.
 
 The receiver computes its own cache key and stores an output only when `build_key` is the build of that

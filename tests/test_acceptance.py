@@ -1,6 +1,6 @@
 """Phase 1 acceptance (HANDOFF §3.7) end to end on recorded model responses (no GPU, no platform).
 
-1. Upload the labelled fixture dataset; pick 2 ASR + 3 VAD / diarisation models from the model catalog (the
+1. Upload the labelled fixture dataset; pick 2 ASR + 3 VAD / diarisation models from the Model Catalog (the
    replay stand-in) with 0 typed fields.
 2. Run single-model benchmarks and the full pipeline grid incl. the oracle, stage by stage; every stored
    number is recomputed here with the reference libraries called directly (jiwer, pyannote.metrics, meeteval).

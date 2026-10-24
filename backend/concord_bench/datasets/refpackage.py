@@ -10,7 +10,7 @@ a person, staged with a preview, then accepted into a new dataset through the no
   annotations. A package without a manifest is ingested as it is, like an annotated upload.
 - `finish` runs after the ingest: provenance, Label's segment uids (for flags back, §3), the file and speaker
   labels of `refs/attributes.json` (format version 2, §2.7), and seg-model outputs imported into the output
-  cache when they come from the build the model catalog runs now (`build_key`, §2.5), recorded in the
+  cache when they come from the build the Model Catalog runs now (`build_key`, §2.5), recorded in the
   catalog's output index too. Labels on the records themselves (§2.3) come in with the ingest.
 
 References that have been scored are never changed: a package from the same source as an earlier
@@ -708,7 +708,7 @@ def _params_match(adapter, rec_params: dict[str, Any]) -> bool:
 
 def import_outputs(session: Session, ds: Dataset, pkg: Package, oc: Any = None) -> dict[str, Any]:
     """outputs/seg.jsonl rows into the output cache, keyed the way `runs.cache` keys a whole-file call of
-    that model, when the model catalog knows the model as a segmenter and `build_key` is the build it runs
+    that model, when the Model Catalog knows the model as a segmenter and `build_key` is the build it runs
     now (CONTRACTS.md §2.5). Others are skipped and counted; rows without a build key (written before the
     catalog) too."""
     from .. import adapters

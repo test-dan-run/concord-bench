@@ -133,7 +133,7 @@ def test_complete_package_accepts_into_a_dataset_with_provenance(client, session
     imp = client.get(f"/api/reference-imports/{staged['id']}").json()
     assert imp["status"] == "accepted" and imp["dataset_id"] == d["id"]
     assert imp["result"]["uids"] == {"matched": 3, "unmatched": 0}
-    # outputs/seg.jsonl: pyannote-diarization is not in this (empty) model catalog, so it is skipped
+    # outputs/seg.jsonl: pyannote-diarization is not in this (empty) Model Catalog, so it is skipped
     assert imp["result"]["outputs"]["imported"] == 0 and imp["result"]["outputs"]["skipped"]["unknown_model"] == 1
     assert not (data_dir / "uploads" / upload_id).exists() and not (data_dir / "imports" / str(staged["id"])).exists()
     # the manifest, files.csv, uids and outputs were never read as annotations

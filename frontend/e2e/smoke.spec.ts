@@ -216,7 +216,7 @@ test("bring-your-own screens load; Bench has no Label or Training pages", async 
   await expect(page.getByRole("heading", { name: "Upload dataset" })).toBeVisible();
   await expect(page.getByRole("link", { name: "asr.jsonl" })).toBeVisible();
   await expect(page.getByRole("radio", { name: /Audio only/ })).toHaveCount(0);
-  // Models come from the model catalog (the replay stand-in here): read-only, no registration screens.
+  // Models come from the Model Catalog (the replay stand-in here): read-only, no registration screens.
   await page.goto("/models");
   await expect(page.getByText("faster-whisper-large-v3 · openai / audio.transcriptions")).toBeVisible();
   await expect(page.getByRole("link", { name: "Open the Model Catalog" })).toBeVisible();

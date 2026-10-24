@@ -1,4 +1,4 @@
-"""Jobs and the model catalog's leases (platform/catalog/README.md), against aicore's FakeCatalog and a stub
+"""Jobs and the Model Catalog's leases (platform/catalog/README.md), against aicore's FakeCatalog and a stub
 whose lease queues before it is granted: holder, release, `waiting` with queue position, blocked states,
 preferring jobs whose models are running, and stage dependencies."""
 
@@ -67,13 +67,13 @@ def test_jobs_without_models_take_no_lease(session, cat, monkeypatch):
 
 
 @pytest.mark.parametrize("record, reason", [
-    (None, "ghost is not in the model catalog"),
+    (None, "ghost is not in the Model Catalog"),
     (catalog_model("ghost", ["asr"], status="stale"), "not verified for its current build yet (capabilities stale)"),
-    ({**catalog_model("ghost", ["asr"]), "capabilities": None}, "has not been verified by the model catalog"),
+    ({**catalog_model("ghost", ["asr"]), "capabilities": None}, "has not been verified by the Model Catalog"),
     ({**catalog_model("ghost", ["asr"], status="failed"),
       "capabilities": {"status": "failed", "report": {"lines": [{"name": "route", "status": "fail",
                                                                  "reason": "no /v1/audio/transcriptions"}]}}},
-     "failed verification in the model catalog (route: no /v1/audio/transcriptions)"),
+     "failed verification in the Model Catalog (route: no /v1/audio/transcriptions)"),
     ({**catalog_model("ghost", ["asr"]), "registered": False}, "not registered"),
 ])
 def test_unknown_or_unverified_model_blocks(session, cat, monkeypatch, record, reason):

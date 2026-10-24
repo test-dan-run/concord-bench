@@ -18,7 +18,7 @@ Job types:
 - score      {run_id, normaliser, collar, skip_overlap?}
                                           rescoring with a platform normaliser (through the catalog's gateway)
 
-Models come from the model catalog (platform/catalog/README.md). A job that needs models
+Models come from the Model Catalog (platform/catalog/README.md). A job that needs models
 (`required_services`, catalog model ids) takes one catalog lease on them as `bench:job-<id>`; the aicore
 client heartbeats it until the job ends, so neither the catalog nor Concord Label's jobs stop them
 mid-run. A lease the catalog cannot grant yet waits in its queue: the job is `waiting` (queue position and
@@ -197,7 +197,7 @@ def lease_info(d: dict[str, Any]) -> dict[str, Any]:
 
 def lease_note(d: dict[str, Any]) -> str:
     if d.get("state") == "starting":
-        return f"starting {', '.join(d.get('models') or [])} in the model catalog"
+        return f"starting {', '.join(d.get('models') or [])} in the Model Catalog"
     pos = f" #{d['position']}" if d.get("position") else ""
     return f"waiting for compute{pos}" + (f": {d['waiting_for']}" if d.get("waiting_for") else "")
 
@@ -321,12 +321,12 @@ def _take_lease(session: Session, job: Job, ctx: JobContext) -> Lease | None:
         needed = prepare(session, job, ctx)
         if not needed:
             return None
-    ctx.log(f"leasing {', '.join(needed)} from the model catalog as {holder_for(job.id)}")
+    ctx.log(f"leasing {', '.join(needed)} from the Model Catalog as {holder_for(job.id)}")
     try:
         lease = catalog.request_lease(holder_for(job.id), needed)
     except Exception as exc:
         if catalog.unavailable(exc):
-            raise JobBlocked(f"the model catalog refused the lease: {exc}") from None
+            raise JobBlocked(f"the Model Catalog refused the lease: {exc}") from None
         raise
     if lease.data.get("state") in LEASE_DONE:
         lease.release()
@@ -352,7 +352,7 @@ def _current_build(model_id: str) -> dict[str, Any]:
     except catalog.CatalogUnavailable as exc:
         raise JobBlocked(str(exc)) from None
     if rec is None:
-        raise JobBlocked(f"{model_id} is not in the model catalog")
+        raise JobBlocked(f"{model_id} is not in the Model Catalog")
     if not rec.get("build_key"):
         raise JobBlocked(f"the catalog has no build key for {model_id} yet (its weights are still being hashed, "
                          "or its image is missing); retry shortly")

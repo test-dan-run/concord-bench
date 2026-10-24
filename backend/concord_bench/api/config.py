@@ -40,7 +40,7 @@ def get_config() -> dict[str, Any]:
         "default_collar": DEFAULT_COLLAR,
         "collars": [0.0, 0.1, 0.25, 0.5],
         "replay": s.replay_dir is not None,
-        # The model catalog: models, leases and the gateway; `ui_url` is where models are registered.
+        # The Model Catalog: models, leases and the gateway; `ui_url` is where models are registered.
         "catalog": {"url": s.catalog_url.rstrip("/"), "ui_url": s.catalog_ui},
         # The Dataset Catalog (DATASET_CATALOG_PLAN.md §9): set up when DATASET_STORE is set. The pages show
         # import from the catalog and publishing only then.

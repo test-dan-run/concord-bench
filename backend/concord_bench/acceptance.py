@@ -1,7 +1,7 @@
 """The scripted Phase 1 acceptance run (HANDOFF §3.7), through the HTTP API.
 
 1. Upload the labelled fixture dataset (audio + speaker-attributed STM) by local path.
-2. Pick >= 2 ASR and >= 2 VAD / diarisation models from the model catalog, typing no fields (the catalog
+2. Pick >= 2 ASR and >= 2 VAD / diarisation models from the Model Catalog, typing no fields (the catalog
    has registered and verified them; Bench only lists them).
 3. Run single-model benchmarks and the full pipeline grid incl. the oracle, stage by stage, after
    previewing the catalog's plan.

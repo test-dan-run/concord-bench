@@ -1,4 +1,4 @@
-// Models come from the model catalog: registration, verification and the model contract live in its own
+// Models come from the Model Catalog: registration, verification and the model contract live in its own
 // UI. This page lists the catalog's speech models read-only, by type (ASR, VAD / diarisation, speech
 // enhancement), with their state, what the catalog's verifier found, cold start, declared VRAM and build,
 // and how many Bench runs use each.

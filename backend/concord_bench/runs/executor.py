@@ -1,6 +1,6 @@
 """Inference: single-model ASR / seg runs, the stages of a pipeline grid, and pipeline assembly.
 
-Every model call goes through the output cache (`runs.cache`), which also asks the model catalog's
+Every model call goes through the output cache (`runs.cache`), which also asks the Model Catalog's
 output index, so an output either Concord app already has is not computed again. `run.outputs` records
 which cache rows a run used, per audio file, so scoring (and rescoring with another normaliser or collar)
 needs no inference.

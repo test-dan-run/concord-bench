@@ -1,4 +1,4 @@
-"""The inference cache (`model_output`) and the model catalog's output index.
+"""The inference cache (`model_output`) and the Model Catalog's output index.
 
 An output is keyed on (model, build key, audio sha256, span, params hash): the build key is the exact
 build the catalog reports for the model (image + config + weights), and the params hash is

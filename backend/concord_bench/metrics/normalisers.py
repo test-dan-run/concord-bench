@@ -6,7 +6,7 @@ means bumping its version and old scores stay explainable.
   whitespace collapsed. "Don't" -> "dont", "state-of-the-art" -> "state of the art".
 - `whisper_en`: OpenAI Whisper's English normaliser (spelling, contractions, numbers).
 - `platform:<service>`: any platform `text.transform` service, applied before `basic`, called through
-  the model catalog's gateway (aicore with AICORE_CATALOG), which starts it when it is stopped. Offered as an
+  the Model Catalog's gateway (aicore with AICORE_CATALOG), which starts it when it is stopped. Offered as an
   extra, never the default: the platform's `text-normalizer` adds casing and punctuation, which is
   the opposite of WER normalisation, so `basic` runs after it.
 """

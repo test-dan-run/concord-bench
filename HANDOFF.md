@@ -236,8 +236,14 @@ All numbers, model names, dataset names and transcripts in the design are illust
 
 ---
 
-> **Note (Oct 2026, model catalog).** Sections above that describe registering models (Add model, the
+> **Note (Oct 2026, Model Catalog).** Sections above that describe registering models (Add model, the
 > compatibility check, the Model contract page) and starting services with `stack.py` describe the app
-> before the platform's model catalog (`platform/MODEL_CATALOG_REDESIGN.md`). Registration and checks now
+> before the platform's Model Catalog (`platform/MODEL_CATALOG_REDESIGN.md`). Registration and checks now
 > live in the catalog's UI; Bench lists catalog models, leases them per job, calls them through the
 > catalog's gateway and runs pipeline grids stage by stage. README.md describes the current flow.
+
+> **Note (Oct 2026, Dataset Catalog).** Datasets now move between Bench and Label through the platform's
+> Dataset Catalog (`platform/DATASET_CATALOG_PLAN.md`, contract version 3). Original audio is kept once, in
+> the catalog's store, when `DATASET_STORE` is set. Label publishes a dataset as a catalog version, and
+> Bench imports the version or publishes its own datasets. The "Import / export progress" between Label
+> installs (Sync) is unchanged. README.md describes the current flow.

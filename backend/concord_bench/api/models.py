@@ -1,4 +1,4 @@
-"""Models: the model catalog's speech models, read-only. Registration, verification and the model
+"""Models: the Model Catalog's speech models, read-only. Registration, verification and the model
 contract live in the catalog's own UI (platform/catalog/README.md); Bench keeps a row per model it has
 used (runs and pipelines point at it), refreshed from the catalog's record whenever models are listed.
 """
@@ -26,7 +26,7 @@ def catalog_entry(rec: dict[str, Any] | None, m: Model | None, runs: int = 0) ->
     caps = (rec.get("capabilities") if rec is not None else src.get("capabilities")) or {}
     tasks = [t for t in caps.get("tasks") or [] if t in ("asr", "vad", "diar", "kws", "enhance")]
     cid = rec["id"] if rec is not None else m.catalog_id
-    why = catalog.unusable_reason(rec, cid) if rec is not None else "not in the model catalog (or it is unreachable)"
+    why = catalog.unusable_reason(rec, cid) if rec is not None else "not in the Model Catalog (or it is unreachable)"
     return {
         "catalog_id": cid, "model_id": m.id if m else None, "in_catalog": rec is not None,
         "display_name": (rec or {}).get("display_name") or (m.display_name if m else cid),

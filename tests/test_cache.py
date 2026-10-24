@@ -1,4 +1,4 @@
-"""The output cache and the model catalog's output index (platform/catalog/README.md): local rows keyed by
+"""The output cache and the Model Catalog's output index (platform/catalog/README.md): local rows keyed by
 build, index lookups batched per call list, outputs another app holds read from it and copied with their
 provenance, Bench's own outputs recorded, and a catalog that is down. aicore's FakeCatalog keeps the index."""
 

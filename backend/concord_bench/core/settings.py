@@ -25,8 +25,8 @@ class Settings(BaseSettings):
     aicore_endpoints: Path | None = None
     # localhost on the host; `{name}` inside a container on ai-net.
     ai_host: str = "localhost"
-    # The model catalog (platform/catalog/README.md): model records, leases, the output index and the
-    # gateway every model call goes through. CATALOG_URL, else AICORE_CATALOG.
+    # The catalog service (platform/catalog/README.md): the Model Catalog's model records, leases, output index
+    # and the gateway every model call goes through, and the Dataset Catalog. CATALOG_URL, else AICORE_CATALOG.
     catalog_url: str = Field(default="http://127.0.0.1:8700",
                              validation_alias=AliasChoices("CATALOG_URL", "AICORE_CATALOG"))
     # The catalog's UI (models, registration, contract checks), linked from the Models page. Unset: catalog_url.

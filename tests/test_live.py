@@ -1,4 +1,4 @@
-"""Against the live model catalog and platform services (`just test-live`): the catalog (AICORE_CATALOG or
+"""Against the live Model Catalog and platform services (`just test-live`): the catalog (AICORE_CATALOG or
 CATALOG_URL) must be running; the lease starts what the tests need."""
 
 from __future__ import annotations

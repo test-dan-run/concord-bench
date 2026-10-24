@@ -5,7 +5,7 @@
 # The platform's aicore client is a sibling repo, so it comes in through a named build context:
 #   docker build --build-context platform=../../platform --target bench -t concord-bench:0.2.0 .
 #
-# Running: join ai-net, where the model catalog answers at http://catalog:8700 (it starts models and
+# Running: join ai-net, where the Model Catalog answers at http://catalog:8700 (it starts models and
 # routes every call), with the platform directory mounted at /platform for the aicore endpoint map.
 # To use the Dataset Catalog, mount its store read-only and point DATASET_STORE at it, e.g.
 #   -v "$HOME/ai-data/datasets":/datasets:ro -e DATASET_STORE=/datasets
@@ -51,7 +51,7 @@ WORKDIR /srv/apps/concord
 COPY README.md ./
 COPY fixtures/generated/templates fixtures/generated/templates
 COPY --from=web /web/dist frontend/dist
-# CATALOG_URL: the model catalog on ai-net; PUBLIC_URL: where Concord Label reads Bench's outputs.
+# CATALOG_URL: the catalog service (Model Catalog and Dataset Catalog) on ai-net; PUBLIC_URL: where Concord Label reads Bench's outputs.
 ENV CONCORD_HOME=/srv/apps/concord CONCORD_DATA=/data PLATFORM_DIR=/platform \
     AI_HOST={name} AICORE_ENDPOINTS=/platform/clients/aicore/src/aicore/endpoints.generated.yaml \
     CATALOG_URL=http://catalog:8700 PUBLIC_URL=http://concord-bench:8600

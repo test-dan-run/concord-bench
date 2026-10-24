@@ -1,5 +1,5 @@
 """Shared fixtures. Every test gets its own CONCORD_DATA and database; nothing needs the platform or the
-model catalog (an in-memory `FakeCatalog` stands in, or the replay stand-in built from the recording)."""
+Model Catalog (an in-memory `FakeCatalog` stands in, or the replay stand-in built from the recording)."""
 
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ def dialogue_files() -> dict:
 
 @pytest.fixture(autouse=True)
 def fake_catalog(request):
-    """No test reaches a real model catalog: an empty in-memory FakeCatalog answers unless a test installs
+    """No test reaches a real Model Catalog: an empty in-memory FakeCatalog answers unless a test installs
     its own (`catalog.use`) or replays recordings (the `replay` fixture); live tests use the real one."""
     from aicore.catalog import FakeCatalog
 
@@ -126,7 +126,7 @@ def dataset_store(tmp_path, monkeypatch, data_dir):
 @pytest.fixture
 def replay(monkeypatch, data_dir):
     """Recorded responses instead of live services, with the endpoint map they were recorded with; the
-    model catalog is the replay stand-in built from that map and summary.json."""
+    Model Catalog is the replay stand-in built from that map and summary.json."""
     from concord_bench.core.settings import reset_settings
     from concord_bench.platform import catalog
 

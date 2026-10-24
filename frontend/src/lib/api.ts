@@ -68,7 +68,7 @@ export interface AppConfig {
   default_collar: number;
   collars: number[];
   replay: boolean;
-  /** The model catalog: models, leases and the gateway; `ui_url` is where models are registered and verified. */
+  /** The Model Catalog: models, leases and the gateway; `ui_url` is where models are registered and verified. */
   catalog: { url: string; ui_url: string };
   /** The Dataset Catalog: set up when DATASET_STORE is set; `ui_url` is its pages in the catalog UI. */
   dataset_catalog: { enabled: boolean; ui_url: string };
@@ -174,7 +174,7 @@ export interface SavedSlice {
 
 export type SliceFilter = { key: string; value: string | number | boolean } | { key: string; min?: number; max?: number };
 
-/** Where a model ran, as the model catalog reported it (EVALUATE_PLAN.md §3.4); absent fields are unknown. */
+/** Where a model ran, as the Model Catalog reported it (EVALUATE_PLAN.md §3.4); absent fields are unknown. */
 export interface Hardware {
   device?: "gpu" | "cpu" | "hosted";
   vram_gb?: number;
@@ -370,7 +370,7 @@ export interface DatasetReport {
 
 export type ModelState = "running" | "stopped" | "starting" | "stopping" | "queued" | "failed";
 
-/** A model from the model catalog (GET /models), joined with Bench's row once it has been used. */
+/** A model from the Model Catalog (GET /models), joined with Bench's row once it has been used. */
 export interface CatalogModel {
   catalog_id: string;
   model_id: number | null;

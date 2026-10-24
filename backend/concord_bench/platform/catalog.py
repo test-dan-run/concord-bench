@@ -1,4 +1,4 @@
-"""The model catalog as Concord Bench uses it (platform/catalog/README.md), through `aicore.catalog`.
+"""The Model Catalog as Concord Bench uses it (platform/catalog/README.md), through `aicore.catalog`.
 
 Bench registers, verifies, starts and calls no model service itself:
 - model records (state, capabilities of the current build, cold start, build key) come from one
@@ -114,7 +114,7 @@ def records(refresh: bool = False) -> dict[str, dict[str, Any]]:
         recs = {r["id"]: r for r in get().models(all=True)}
     except Exception as exc:
         if unavailable(exc):
-            raise CatalogUnavailable(f"model catalog at {get().url} not reachable: {exc}") from None
+            raise CatalogUnavailable(f"Model Catalog at {get().url} not reachable: {exc}") from None
         raise
     with _lock:
         _records = (time.monotonic(), recs)
@@ -151,17 +151,17 @@ def speech_model(rec: dict[str, Any]) -> bool:
 def unusable_reason(rec: dict[str, Any] | None, model_id: str = "") -> str | None:
     """Why a job cannot lease this model, or None when it can."""
     if rec is None:
-        return f"{model_id} is not in the model catalog"
+        return f"{model_id} is not in the Model Catalog"
     if not rec.get("registered", True):
-        return f"{rec['id']} is not registered in the model catalog"
+        return f"{rec['id']} is not registered in the Model Catalog"
     caps = rec.get("capabilities")
     if not caps:
-        return f"{rec['id']} has not been verified by the model catalog yet"
+        return f"{rec['id']} has not been verified by the Model Catalog yet"
     status = caps.get("status")
     if status == "failed":
         lines = (caps.get("report") or {}).get("lines") or []
         why = "; ".join(f"{ln.get('name')}: {ln.get('reason')}" for ln in lines if ln.get("status") == "fail")
-        return f"{rec['id']} failed verification in the model catalog" + (f" ({why})" if why else "")
+        return f"{rec['id']} failed verification in the Model Catalog" + (f" ({why})" if why else "")
     if status != "verified":
         return f"{rec['id']} is not verified for its current build yet (capabilities {status})"
     return None
@@ -199,7 +199,7 @@ def ensure_model(session: Session, model_id: str, rec: dict[str, Any] | None = N
         existing = session.scalar(select(Model).where(Model.catalog_id == model_id))
         if existing is not None:
             return existing
-        raise ModelUnusable(f"{model_id} is not in the model catalog")
+        raise ModelUnusable(f"{model_id} is not in the Model Catalog")
     m = session.scalar(select(Model).where(Model.catalog_id == rec["id"]))
     if m is None:
         m = Model(catalog_id=rec["id"], display_name=rec.get("display_name") or rec["id"])
@@ -309,7 +309,7 @@ def plan(stages: list[dict[str, Any]], pipeline: str = "staged") -> dict[str, An
         return get().plan(stages, pipeline)
     except Exception as exc:
         if unavailable(exc):
-            raise CatalogUnavailable(f"model catalog: {exc}") from None
+            raise CatalogUnavailable(f"Model Catalog: {exc}") from None
         raise
 
 
@@ -318,9 +318,9 @@ def register_app() -> None:
     url = get_settings().public_url.rstrip("/")
     try:
         get().register_app(APP, url)
-        log.info("registered with the model catalog as %s at %s", APP, url)
+        log.info("registered with the Model Catalog as %s at %s", APP, url)
     except Exception as exc:  # noqa: BLE001 - startup must not depend on the catalog
-        log.warning("could not register with the model catalog (%s); other apps cannot read Bench's outputs "
+        log.warning("could not register with the Model Catalog (%s); other apps cannot read Bench's outputs "
                     "until it is reachable and Bench restarts", exc)
 
 

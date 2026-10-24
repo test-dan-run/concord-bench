@@ -1,18 +1,19 @@
 # Concord contracts
 
-**Contract version 1.** This file and `contracts/` are kept identical in the Concord Bench and Concord Label
+**Contract version 2.** This file and `contracts/` are kept identical in the Concord Bench and Concord Label
 repositories (SPLIT_PLAN.md §2.3). They are the only things the two apps must agree on: the apps share no
 code. `just check-contracts` validates the samples and, when the other repository sits next to this one,
 fails on any difference between the two copies.
 
-A change to anything below bumps the contract version and lands in both repositories. An app refuses a
+A change to anything below bumps the contract version and lands in both repositories. Version 2 added
+labels to the reference package (format version 2, §2.3 and §2.7). An app refuses a
 format version it does not know, with a message naming the versions it does know. Fields an app does not
 know are ignored, so a newer writer can add fields without a version bump.
 
 | Contract | Written by | Read by | Samples |
 |---|---|---|---|
 | 1. `GET /api/config` | both | both | `samples/api/config.*.json` |
-| 2. Reference package, format version 1 | Label, people, other tools | Bench | `samples/reference-package-*` |
+| 2. Reference package, format version 2 (version 1 is still read) | Label, people, other tools | Bench | `samples/reference-package-*` |
 | 3. Flags file, format version 1 | Bench | Label | `samples/flags.json` |
 | 4. Bench endpoints Label calls | Bench serves | Label | `samples/api/bench.*.json` |
 | 5. Label endpoints Bench calls or links to | Label serves | Bench | `samples/api/label.*.json` |
@@ -30,7 +31,7 @@ Both apps serve it. Fields used by the other app:
 |---|---|
 | `app` | `"concord-bench"` or `"concord-label"` |
 | `version` | the app's version |
-| `contract_version` | the version of this file the app implements (`1`) |
+| `contract_version` | the version of this file the app implements (`2`) |
 | `peer` | `{"url": "<other app's base URL>" or null, "reachable": bool, "contract_version": int or null}` |
 
 An app calls the other only when `peer.reachable` is true and both contract versions match. Otherwise the
@@ -38,7 +39,7 @@ links of SPLIT_PLAN.md §5 are hidden and a push is refused before any upload st
 
 ---
 
-## 2. Reference package (`concord-reference-package`, format version 1)
+## 2. Reference package (`concord-reference-package`, format version 2)
 
 Hands reviewed references from Label to Bench. A package is a folder, or a `.zip` of that folder (the
 folder may be the zip's root or its only top-level directory).
@@ -50,6 +51,7 @@ folder may be the zip's root or its only top-level directory).
   audio/<path>         originals; may be left out for files the receiver already has
   refs/<one file>      the references
   refs/uids.jsonl      optional
+  refs/attributes.json optional, format version 2
   outputs/seg.jsonl    optional
 ```
 
@@ -58,7 +60,7 @@ folder may be the zip's root or its only top-level directory).
 | Field | Required | Meaning |
 |---|---|---|
 | `format` | yes | `"concord-reference-package"` |
-| `format_version` | yes | `1` |
+| `format_version` | yes | `2`. Readers also take `1`, which is version 2 without labels (no `attributes` on records and no `refs/attributes.json`). |
 | `name` | yes | dataset name suggested to the receiver |
 | `created_at` | yes | when the package was written |
 | `language`, `description` | no | as on a dataset |
@@ -87,7 +89,7 @@ not match its `sha256` fails the import.
 
 ### 2.3 References
 
-Exactly one references file under `refs/` (besides `uids.jsonl`), matched to audio by stem. Every
+Exactly one references file under `refs/` (besides `uids.jsonl` and `attributes.json`), matched to audio by stem. Every
 format the receiver's annotated upload reads is accepted (templates: `fixtures/generated/templates`).
 Label writes one of these three:
 
@@ -98,6 +100,12 @@ Label writes one of these three:
 | `refs/refs.rttm` | speaker without text (`label_types` diar) | RTTM `SPEAKER <stem> 1 <start> <duration> <NA> <NA> <speaker> <NA> <NA>` |
 
 Only confirmed segments are written; times are the segments' own (unpadded) times.
+
+In format version 2, a record in `refs/segments.jsonl` or `refs/segments.seglst.json` may carry
+`"attributes": {"<name>": value, ...}`: labels of that one segment, which Bench breaks scores down by. A
+value is a string, a number or true / false. A nested object is read with dotted names, so
+`{"accent": {"region": "north"}}` is the label `accent.region`. Labels of a whole file or of a speaker go in
+`refs/attributes.json` (§2.7) instead, because an RTTM file has no place for them.
 
 ### 2.4 `refs/uids.jsonl` (optional)
 
@@ -132,6 +140,26 @@ without `build_key`.
 
 A folder without `manifest.json` is read like an annotated upload: audio anywhere in the folder,
 annotation files anywhere, matched by stem. No provenance.
+
+### 2.7 `refs/attributes.json` (optional, format version 2)
+
+Labels of whole files and of speakers, keyed by the file's path in `files.csv`:
+
+```
+{"files": {"<path>": {"<name>": value, ...}, ...},
+ "speakers": {"<path>": {"<speaker>": {"<name>": value, ...}, ...}, ...}}
+```
+
+Both keys are optional. Values follow §2.3: a string, a number or true / false, and nested objects are read
+with dotted names. `<speaker>` is the speaker name as written in the references file.
+
+- A file label, e.g. `{"condition": "noisy"}`, applies to the whole file and to every segment in it.
+- A speaker label is read with the prefix `speaker.`, so `{"gender": "F"}` under speaker `agent` is the
+  label `speaker.gender` on each of `agent`'s segments in that file.
+- A label on a record (§2.3) wins over a file or speaker label of the same name on that segment.
+
+A path that is not in `files.csv`, or a value that is not an object where one is expected, fails the
+import.
 
 ---
 

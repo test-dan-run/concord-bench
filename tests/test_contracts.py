@@ -22,9 +22,9 @@ def test_samples_follow_the_contract():
 
 def test_checker_catches_a_bad_package(tmp_path):
     check = _checker()
-    (tmp_path / "manifest.json").write_text('{"format": "concord-reference-package", "format_version": 2}')
+    (tmp_path / "manifest.json").write_text('{"format": "concord-reference-package", "format_version": 3}')
     problems = check.check_package(tmp_path)
-    assert any("format_version 2" in p for p in problems)
+    assert any("format_version 3" in p for p in problems)
     assert any("files.csv missing" in p for p in problems)
 
 

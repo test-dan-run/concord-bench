@@ -1,4 +1,5 @@
-"""Check the contract samples, and compare this repository's contracts with the other app's (CONTRACTS.md).
+"""Check the contract samples, and compare this repository's contracts with the other app's (CONTRACTS.md, at
+the repository root or in docs/).
 
     python contracts/check.py [--peer PATH]
 
@@ -19,7 +20,8 @@ import json
 import sys
 from pathlib import Path, PurePosixPath
 
-CONTRACT_VERSION = 1
+CONTRACT_VERSION = 2
+FORMAT_VERSIONS = (1, 2)  # reference package format versions a reader takes
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parent
 REF_FORMATS = {".json", ".jsonl", ".csv", ".txt", ".rttm", ".stm", ".tsv"}
@@ -66,8 +68,9 @@ def check_package(root: Path) -> list[str]:
             problems.append(f"manifest.json: missing {k}")
     if m.get("format") != "concord-reference-package":
         problems.append(f"manifest.json: format {m.get('format')!r}")
-    if m.get("format_version") != 1:
-        problems.append(f"manifest.json: format_version {m.get('format_version')!r} (known: 1)")
+    version = m.get("format_version")
+    if version not in FORMAT_VERSIONS:
+        problems.append(f"manifest.json: format_version {version!r} (known: {', '.join(map(str, FORMAT_VERSIONS))})")
     if not set(m.get("label_types") or []) <= {"asr", "diar"} or not m.get("label_types"):
         problems.append(f"manifest.json: label_types {m.get('label_types')!r}")
     if m.get("audio_included") not in ("all", "partial", "none"):
@@ -117,10 +120,15 @@ def check_package(root: Path) -> list[str]:
     if m.get("audio_included") == "partial" and not 0 < included < len(rows):
         problems.append("audio_included is 'partial' but audio/ has none or all of the files")
 
-    refs = [p for p in (root / "refs").glob("*") if p.is_file() and p.name != "uids.jsonl"] \
+    side = {"uids.jsonl", "attributes.json"} if version == 2 else {"uids.jsonl"}
+    refs = [p for p in (root / "refs").glob("*") if p.is_file() and p.name not in side] \
         if (root / "refs").is_dir() else []
     if len(refs) != 1:
-        problems.append(f"refs/ must hold exactly one references file besides uids.jsonl (found {len(refs)})")
+        problems.append(f"refs/ must hold exactly one references file besides {' and '.join(sorted(side))} "
+                        f"(found {len(refs)})")
+    attrs = root / "refs" / "attributes.json"
+    if version == 2 and attrs.is_file():
+        problems += check_attributes(json.loads(attrs.read_text(encoding="utf-8")), set(stems.values()))
     uids = root / "refs" / "uids.jsonl"
     if uids.is_file():
         for n, line in enumerate(uids.read_text(encoding="utf-8").splitlines(), 1):
@@ -139,6 +147,29 @@ def check_package(root: Path) -> list[str]:
                 bk = rec.get("build_key")
                 if bk is not None and not (isinstance(bk, str) and len(bk) >= 16 and all(c in HEX for c in bk)):
                     problems.append(f"outputs/seg.jsonl line {n}: build_key must be the catalog's hex build key")
+    return problems
+
+
+def _labels_ok(obj: object) -> bool:
+    """A labels object (CONTRACTS.md §2.3): strings, numbers, true / false, or nested labels objects."""
+    return isinstance(obj, dict) and all(isinstance(v, (str, int, float, bool)) or _labels_ok(v) for v in obj.values())
+
+
+def check_attributes(a: object, paths: set[str]) -> list[str]:
+    """Problems with refs/attributes.json (CONTRACTS.md §2.7), given the files.csv paths."""
+    if not isinstance(a, dict) or set(a) - {"files", "speakers"}:
+        return ["refs/attributes.json: must be an object with files and / or speakers"]
+    problems = []
+    for path, labels in (a.get("files") or {}).items():
+        if path not in paths:
+            problems.append(f"refs/attributes.json: files.{path} is not a files.csv path")
+        elif not _labels_ok(labels):
+            problems.append(f"refs/attributes.json: files.{path} must be an object of labels")
+    for path, speakers in (a.get("speakers") or {}).items():
+        if path not in paths:
+            problems.append(f"refs/attributes.json: speakers.{path} is not a files.csv path")
+        elif not isinstance(speakers, dict) or not all(_labels_ok(v) for v in speakers.values()):
+            problems.append(f"refs/attributes.json: speakers.{path} must map each speaker to an object of labels")
     return problems
 
 
@@ -169,16 +200,22 @@ def check_samples() -> list[str]:
             continue
         if f.name.startswith("config.") and body.get("contract_version") != CONTRACT_VERSION:
             problems.append(f"api/{f.name}: contract_version {body.get('contract_version')}")
-    text = (REPO / "CONTRACTS.md").read_text(encoding="utf-8")
+    text = contracts_doc(REPO).read_text(encoding="utf-8")
     if f"**Contract version {CONTRACT_VERSION}.**" not in text:
         problems.append(f"CONTRACTS.md does not say contract version {CONTRACT_VERSION}")
     return problems
 
 
+def contracts_doc(root: Path) -> Path:
+    """A repository's CONTRACTS.md: in docs/ where the repository keeps its docs there, else at the root."""
+    docs = root / "docs" / "CONTRACTS.md"
+    return docs if docs.is_file() else root / "CONTRACTS.md"
+
+
 def compare(peer: Path) -> list[str]:
     """Differences between this repository's CONTRACTS.md + contracts/ and the peer's."""
     problems = []
-    if not filecmp.cmp(REPO / "CONTRACTS.md", peer / "CONTRACTS.md", shallow=False):
+    if not filecmp.cmp(contracts_doc(REPO), contracts_doc(peer), shallow=False):
         problems.append("CONTRACTS.md differs")
     mine = {p.relative_to(REPO).as_posix() for p in (REPO / "contracts").rglob("*")
             if p.is_file() and "__pycache__" not in p.parts}
@@ -194,7 +231,7 @@ def compare(peer: Path) -> list[str]:
 def find_peer() -> Path | None:
     for name in ("Concord", "concord-label", "concord-bench"):
         cand = REPO.parent / name
-        if cand.resolve() != REPO and (cand / "CONTRACTS.md").is_file():
+        if cand.resolve() != REPO and contracts_doc(cand).is_file():
             return cand
     return None
 

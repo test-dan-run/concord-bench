@@ -14,7 +14,9 @@ speaker -> diarisation, both -> cpWER as well. Records without times cover the w
 
 Any other field on a record is a label for slicing (EVALUATE_PLAN.md §7.1), kept in `RefRecord.meta`.
 Nested objects are flattened to dotted keys, so a NeMo manifest's `"attribute": {"gender": "F"}` becomes
-`attribute.gender`; lists are dropped. `datasets.labels` decides which labels are usable.
+`attribute.gender`; lists are dropped. An `attributes` object (a reference package's labels, CONTRACTS.md
+§2.3) is read without its own name, so `"attributes": {"gender": "F"}` is `gender`, and it wins over a field
+of the same name. `datasets.labels` decides which labels are usable.
 
 The registry is keyed by format id, and each format lists the tasks it can feed, so a KWS format is
 one more entry (Q6).
@@ -118,7 +120,9 @@ def _record_from_obj(obj: dict[str, Any], default_stem: str | None) -> RefRecord
         raise ValueError(f"end {end} before start {start}")
     if text is None and spk_key is None:
         raise ValueError("needs text and/or speaker")
-    meta = flatten({k: v for k, v in obj.items() if k not in _KNOWN})
+    meta = flatten({k: v for k, v in obj.items() if k not in _KNOWN and k != "attributes"})
+    if isinstance(obj.get("attributes"), dict):
+        meta.update(flatten(obj["attributes"]))
     return RefRecord(stem, start, end, str(obj[spk_key]) if spk_key else None,
                      str(text) if text is not None else None, meta)
 

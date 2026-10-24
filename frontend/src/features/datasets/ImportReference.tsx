@@ -165,6 +165,7 @@ function StagedImport({ imp }: { imp: ReferenceImport }) {
         <Fact k="Audio" v={hours(p.hours)} />
         <Fact k="Segments" v={num(p.segments)} />
         <Fact k="References" v={p.refs_file ?? "annotation files in the folder"} />
+        <Fact k="Labels for slicing" v={p.labels.length ? p.labels.join(", ") : "none"} />
         {review && <Fact k="Review" v={review} />}
         {p.models && p.models.length > 0 && <Fact k="Pseudo-label models" v={p.models.join(", ")} />}
         {p.outputs > 0 && <Fact k="Seg-model outputs" v={`${p.outputs} (imported when the image matches)`} />}

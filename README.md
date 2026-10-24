@@ -119,6 +119,8 @@ is gone from Bench since EVALUATE_PLAN.md §9; Label keeps its copy for now.)
   (or Bench's stored originals, by sha256) and its one references file. The dataset keeps where the
   references came from; a package from the same source is a new dataset `<name> v<N>` linked to the
   earlier versions, and the dataset page offers to run the models benchmarked on the previous version.
+  Format version 2 packages also carry labels for slicing, on the records and in `refs/attributes.json`
+  (file and speaker labels, CONTRACTS.md §2.7); version 1 is still read.
   Seg-model outputs in the package go into the output cache when their `build_key` is the build the catalog
   runs now (CONTRACTS.md §2.5; rows without one are skipped), and into the catalog's index. Label calls
   `POST /api/fingerprints/missing`, the chunked upload, `POST /api/reference-imports` and
@@ -261,9 +263,8 @@ its index, and pipeline grids run stage by stage. The offline export is removed 
 
 The revised Evaluate design (EVALUATE_PLAN.md) is built, with MER, WIL, WIP, tcpWER, hardware per run,
 sortable leaderboards, speech enhancement as an ablation, slices by label, and the deeper diarisation,
-pipeline and enhancement error pages. EVALUATE_PLAN.md §14 lists where the build differs from that plan.
-Reference package version 2, which carries labels from Concord Label (E5b), waits until the Label
-repository is free to change.
+pipeline and enhancement error pages, and reference packages that carry labels (contract version 2).
+EVALUATE_PLAN.md §14 lists where the build differs from that plan.
 
 Known limits:
 - Enhancement quality scores (DNSMOS, SNR estimates, SI-SDR and PESQ on Bench's datasets) are not built

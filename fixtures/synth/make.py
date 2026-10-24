@@ -266,7 +266,9 @@ TEMPLATE_PACKAGE_FILE = "d04"  # the smallest dialogue keeps the template downlo
 
 def write_reference_template(dest: Path, stem: str) -> None:
     """A reference package (CONTRACTS.md §2) written by hand: manifest without a source, files.csv,
-    audio/, one references file. Byte-identical between runs (fixed zip timestamps)."""
+    audio/, one references file, and labels in refs/attributes.json (the file's condition, and each
+    speaker's gender from its kokoro voice, `af_*` or `am_*`). Byte-identical between runs (fixed zip
+    timestamps)."""
     files = json.loads((OUT / "dataset" / "truth.json").read_text())
     f = files[stem]
     audio = OUT / "dataset" / "audio" / f["file"]
@@ -274,7 +276,7 @@ def write_reference_template(dest: Path, stem: str) -> None:
     turns = f["turns"][:3]
     top = "reference_package"
     manifest = {
-        "format": "concord-reference-package", "format_version": 1, "name": "Template reference package",
+        "format": "concord-reference-package", "format_version": 2, "name": "Template reference package",
         "created_at": "2026-10-22T00:00:00Z", "language": "en", "tags": ["template"],
         "description": "A reference package made by hand. Replace the audio, files.csv and refs/ with yours.",
         "scope": "complete", "label_types": ["asr", "diar"],
@@ -287,11 +289,15 @@ def write_reference_template(dest: Path, stem: str) -> None:
     w.writerow([f["file"], hashlib.sha256(audio.read_bytes()).hexdigest(), f["duration"], info.samplerate])
     seglst = [{"session_id": stem, "speaker": t["speaker"], "start_time": t["start"], "end_time": t["end"],
                "words": t["text"]} for t in turns]
+    attributes = {"files": {f["file"]: {"condition": f["condition"]}},
+                  "speakers": {f["file"]: {spk: {"gender": "F" if voice[1] == "f" else "M"}
+                                           for spk, voice in sorted(f["voices"].items())}}}
     entries = {
         "manifest.json": (json.dumps(manifest, indent=1) + "\n").encode(),
         "files.csv": files_csv.getvalue().encode(),
         f"audio/{f['file']}": audio.read_bytes(),
         "refs/segments.seglst.json": (json.dumps(seglst, indent=1) + "\n").encode(),
+        "refs/attributes.json": (json.dumps(attributes, indent=1) + "\n").encode(),
         "README.md": REFERENCE_TEMPLATE_README.encode(),
     }
     with zipfile.ZipFile(dest, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -309,7 +315,7 @@ Concord Label writes them; you can also make one by hand or with another tool. Z
 the folder itself).
 
     reference_package/
-      manifest.json      format "concord-reference-package", format_version 1, name, created_at,
+      manifest.json      format "concord-reference-package", format_version 2, name, created_at,
                          label_types (asr and/or diar), counts {files, segments, hours},
                          audio_included (all | partial | none); optional language, tags, description,
                          scope, review, models, normaliser
@@ -317,6 +323,11 @@ the folder itself).
       audio/<path>       the audio; a file Concord Bench already has (same sha256) may be left out
       refs/<one file>    the references, in any format the annotated upload reads (see the other
                          templates), matched to the audio by file name without the extension
+      refs/attributes.json  optional labels to break scores down by:
+                         {"files": {"<path>": {"condition": "clean"}},
+                          "speakers": {"<path>": {"<speaker>": {"gender": "F"}}}}
+                         Speaker labels are named speaker.<name>, e.g. speaker.gender. A record in a
+                         JSONL or SegLST references file can also carry its own "attributes" object.
 
 Add `"source": {"app", "install_id", "dataset_uid", "dataset_name"}` and `"export_version": 1, 2, ...`
 to the manifest when the same dataset will be sent again: a package from the same source becomes a new

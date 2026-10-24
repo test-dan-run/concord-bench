@@ -8,9 +8,10 @@ a person, staged with a preview, then accepted into a new dataset through the no
 - `accept` builds the ingest source from `audio/` (or Bench's own originals, by sha256) plus the one
   references file, so the manifest, `files.csv`, `uids.jsonl` and `outputs/` are never read as
   annotations. A package without a manifest is ingested as it is, like an annotated upload.
-- `finish` runs after the ingest: provenance, Label's segment uids (for flags back, §3) and seg-model
-  outputs imported into the output cache when they come from the build the model catalog runs now
-  (`build_key`, §2.5), recorded in the catalog's output index too.
+- `finish` runs after the ingest: provenance, Label's segment uids (for flags back, §3), the file and speaker
+  labels of `refs/attributes.json` (format version 2, §2.7), and seg-model outputs imported into the output
+  cache when they come from the build the model catalog runs now (`build_key`, §2.5), recorded in the
+  catalog's output index too. Labels on the records themselves (§2.3) come in with the ingest.
 
 References that have been scored are never changed: a package from the same source as an earlier
 dataset (`source.install_id` + `source.dataset_uid`) becomes a new dataset, `<name> v<N>`, linked to
@@ -35,11 +36,14 @@ from sqlalchemy.orm import Session
 from ..core import paths
 from ..core.models import AudioFile, Dataset, Job, ModelOutput, ReferenceImport, Segment, utcnow
 from . import audio as audio_mod
+from . import labels as labels_mod
 from .ingest import NO_REFERENCES, SKIP_DIRS, extract_zips, inspect_source
-from .parsers import ANNOTATION_EXTS, parse_file
+from .parsers import ANNOTATION_EXTS, flatten, parse_file
 
 FORMAT = "concord-reference-package"
-KNOWN_FORMAT_VERSIONS = (1,)
+KNOWN_FORMAT_VERSIONS = (1, 2)
+ATTRIBUTES = "attributes.json"  # refs/attributes.json, format version 2 (CONTRACTS.md §2.7)
+SPEAKER_PREFIX = "speaker."
 MANIFEST_REQUIRED = ("format", "format_version", "name", "created_at", "label_types", "counts", "audio_included")
 SOURCE_FIELDS = ("app", "install_id", "dataset_uid", "dataset_name")
 FILES_HEADER = ["path", "sha256", "duration", "sample_rate"]
@@ -62,6 +66,7 @@ class Package:
     uids: list[dict[str, Any]] = field(default_factory=list)
     outputs: list[dict[str, Any]] = field(default_factory=list)
     outputs_invalid: int = 0
+    attributes: dict[str, Any] = field(default_factory=dict)  # refs/attributes.json
 
     @property
     def source(self) -> dict[str, Any] | None:
@@ -216,10 +221,12 @@ def read_package(root: Path, *, check_audio: bool = True) -> Package:
             problems.append("files.csv lists no files")
 
     refs_dir = root / "refs"
-    refs = sorted(p for p in refs_dir.iterdir() if p.is_file() and p.name != "uids.jsonl" and _visible(p)) \
+    side = {"uids.jsonl", ATTRIBUTES} if m.get("format_version") == 2 else {"uids.jsonl"}
+    refs = sorted(p for p in refs_dir.iterdir() if p.is_file() and p.name not in side and _visible(p)) \
         if refs_dir.is_dir() else []
     if len(refs) != 1:
-        problems.append(f"refs/ must hold exactly one references file besides uids.jsonl (found {len(refs)})")
+        problems.append(f"refs/ must hold exactly one references file besides {' and '.join(sorted(side))} "
+                        f"(found {len(refs)})")
     elif refs[0].suffix.lower() not in ANNOTATION_EXTS:
         problems.append(f"refs/{refs[0].name}: not a references format Bench reads "
                         f"({', '.join(sorted(ANNOTATION_EXTS))})")
@@ -235,6 +242,13 @@ def read_package(root: Path, *, check_audio: bool = True) -> Package:
         if bad:
             problems.append(f"refs/uids.jsonl: {bad} line(s) are not JSON objects")
         pkg.uids = uids
+    if ATTRIBUTES in side and (refs_dir / ATTRIBUTES).is_file():
+        try:
+            pkg.attributes = json.loads((refs_dir / ATTRIBUTES).read_text(encoding="utf-8"))
+        except (ValueError, UnicodeDecodeError) as exc:
+            problems.append(f"refs/{ATTRIBUTES} is not JSON: {exc}")
+        else:
+            problems += attribute_problems(pkg.attributes, {f["path"] for f in pkg.files})
     if (root / "outputs" / "seg.jsonl").is_file():
         pkg.outputs, pkg.outputs_invalid = _read_jsonl(root / "outputs" / "seg.jsonl")
 
@@ -246,6 +260,37 @@ def read_package(root: Path, *, check_audio: bool = True) -> Package:
         if bad_audio:
             raise PackageError(f"bytes do not match their sha256 in files.csv: {', '.join(bad_audio[:20])}")
     return pkg
+
+
+def _labels_ok(obj: Any) -> bool:
+    """A labels object (CONTRACTS.md §2.3): strings, numbers, true / false, or nested labels objects."""
+    return isinstance(obj, dict) and all(isinstance(v, (str, int, float, bool)) or _labels_ok(v) for v in obj.values())
+
+
+def attribute_problems(a: Any, paths_: set[str]) -> list[str]:
+    """What is wrong with refs/attributes.json (CONTRACTS.md §2.7), given the files.csv paths."""
+    if not isinstance(a, dict) or set(a) - {"files", "speakers"}:
+        return [f"refs/{ATTRIBUTES}: must be an object with files and / or speakers"]
+    problems = []
+    for path, labels in (a.get("files") or {}).items():
+        if path not in paths_:
+            problems.append(f"refs/{ATTRIBUTES}: files.{path} is not a files.csv path")
+        elif not _labels_ok(labels):
+            problems.append(f"refs/{ATTRIBUTES}: files.{path} must be an object of labels")
+    for path, speakers in (a.get("speakers") or {}).items():
+        if path not in paths_:
+            problems.append(f"refs/{ATTRIBUTES}: speakers.{path} is not a files.csv path")
+        elif not isinstance(speakers, dict) or not all(_labels_ok(v) for v in speakers.values()):
+            problems.append(f"refs/{ATTRIBUTES}: speakers.{path} must map each speaker to an object of labels")
+    return problems
+
+
+def attribute_names(a: dict[str, Any]) -> list[str]:
+    """The label names refs/attributes.json gives, speaker labels with their prefix."""
+    names = {k for labels in (a.get("files") or {}).values() for k in flatten(labels)}
+    names |= {SPEAKER_PREFIX + k for spk in (a.get("speakers") or {}).values() for labels in spk.values()
+              for k in flatten(labels)}
+    return sorted(names)
 
 
 # ---------------------------------------------------------------- what Bench already has
@@ -303,11 +348,13 @@ def dataset_name_for(session: Session, pkg: Package) -> str:
 
 # ---------------------------------------------------------------- preview
 
-def _count_refs(pkg: Package) -> tuple[int, list[str]]:
+def _count_refs(pkg: Package) -> tuple[int, list[str], list[str]]:
+    """(reference records, label types they feed, names of the labels on them)."""
     if pkg.refs is None:
         found = inspect_source(pkg.root)
         tasks = found["tasks"]
         records = sum(t["records"] for t in tasks.values())
+        names = [lb["key"] for lb in found["labels"]]
     else:
         res = parse_file(pkg.refs, f"refs/{pkg.refs.name}")
         if res.errors and not res.records:
@@ -318,15 +365,16 @@ def _count_refs(pkg: Package) -> tuple[int, list[str]]:
             raise PackageError(f"refs/{pkg.refs.name}: no reference matches a file in files.csv (matched by stem)")
         tasks = {r.kind for r in recs}
         records = len(recs)
+        names = sorted({k for r in recs for k in labels_mod.of(r.meta)})
     kinds = set(tasks)
     labels = [t for t, need in (("asr", {"asr", "spk_asr"}), ("diar", {"diar", "spk_asr"})) if kinds & need]
-    return records, labels
+    return records, labels, names
 
 
 def preview(session: Session, pkg: Package) -> dict[str, Any]:
     """What the import page shows (CONTRACTS.md §4 sample `bench.reference-imports.response.json`)."""
     m = pkg.manifest or {}
-    segments, found_labels = _count_refs(pkg)
+    segments, found_labels, record_labels = _count_refs(pkg)
     if pkg.manifest is not None:
         shas = [f["sha256"] for f in pkg.files]
         n_files = len(pkg.files)
@@ -363,6 +411,7 @@ def preview(session: Session, pkg: Package) -> dict[str, Any]:
         "tags": list(m.get("tags") or []), "created_at": m.get("created_at"), "review": m.get("review"),
         "models": m.get("models"), "normaliser": m.get("normaliser"), "audio_included": m.get("audio_included"),
         "refs_file": f"refs/{pkg.refs.name}" if pkg.refs else None, "uids": len(pkg.uids),
+        "labels": sorted(set(record_labels) | set(attribute_names(pkg.attributes))),
         "outputs": len(pkg.outputs), "missing_files": missing_files(session, pkg) if pkg.manifest else [],
     }
     if prev is not None:
@@ -495,9 +544,13 @@ def finish(session: Session, import_id: int, dataset_id: int, log=print) -> dict
     if imp.manifest is not None and root.is_dir():
         pkg = read_package(root, check_audio=False)
         result["uids"] = assign_uids(session, ds, pkg.uids)
+        if pkg.attributes:
+            result["attributes"] = apply_attributes(session, ds, pkg.attributes)
         result["outputs"] = import_outputs(session, ds, pkg, oc)
         log(f"reference package: {result['uids']['matched']} of {len(pkg.uids)} segment uids matched; "
-            f"outputs imported {result['outputs']['imported']}, skipped {sum(result['outputs']['skipped'].values())}")
+            f"outputs imported {result['outputs']['imported']}, skipped {sum(result['outputs']['skipped'].values())}"
+            + (f"; labels on {result['attributes']['files']} file(s) and {result['attributes']['segments']} "
+               "speaker segment(s)" if "attributes" in result else ""))
     imp.status, imp.result, imp.decided_at = "accepted", result, utcnow()
     session.commit()
     oc.flush()  # the imported outputs, into the catalog's index
@@ -537,6 +590,39 @@ def assign_uids(session: Session, ds: Dataset, uids: list[dict[str, Any]]) -> di
         matched += 1
     session.flush()
     return {"matched": matched, "unmatched": len(uids) - matched}
+
+
+def apply_attributes(session: Session, ds: Dataset, a: dict[str, Any]) -> dict[str, int]:
+    """File labels onto the files and speaker labels (`speaker.<name>`) onto each of that speaker's segments
+    (CONTRACTS.md §2.7). A label that came on the records wins over one of the same name from here. The
+    dataset's label summary is then made again from every segment."""
+    files = {f.rel_path: f for f in session.scalars(select(AudioFile).where(AudioFile.dataset_id == ds.id))}
+    n_files = n_segments = 0
+    file_keys: set[str] = set()
+    for path, labels in (a.get("files") or {}).items():
+        f = files.get(path)
+        if f is None:
+            continue
+        flat = flatten(labels)
+        file_keys |= flat.keys()
+        f.meta = {**flat, **(f.meta or {})}
+        n_files += 1
+    for path, speakers in (a.get("speakers") or {}).items():
+        f = files.get(path)
+        for seg in (f.segments if f else []):
+            labels = speakers.get(seg.speaker) if seg.speaker is not None else None
+            if labels:
+                seg.meta = {**{SPEAKER_PREFIX + k: v for k, v in flatten(labels).items()}, **(seg.meta or {})}
+                n_segments += 1
+    records = [({**(f.meta or {}), **(s.meta or {})}, s.start <= 0.01 and s.end >= (f.duration or 0.0) - 0.01)
+               for f in files.values() for s in f.segments]
+    summary = labels_mod.summarize(records)
+    for entry in summary:
+        if entry["key"] in file_keys:
+            entry["level"] = "file"
+    ds.report = {**(ds.report or {}), "labels": summary}
+    session.flush()
+    return {"files": n_files, "segments": n_segments}
 
 
 def _params_match(adapter, rec_params: dict[str, Any]) -> bool:

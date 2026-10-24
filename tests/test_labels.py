@@ -52,6 +52,15 @@ def test_nemo_manifest_attributes_become_labels(tmp_path):
     assert "duration" not in meta and "text" not in meta and "audio_filepath" not in meta
 
 
+def test_an_attributes_object_is_read_without_its_name(tmp_path):
+    """CONTRACTS.md §2.3: a reference package record's labels; they win over a plain field of the same name."""
+    (tmp_path / "refs.jsonl").write_text(json.dumps(
+        {"file": "a.wav", "start": 0, "end": 1, "text": "hi", "noise": "low", "room": "b",
+         "attributes": {"noise": "high", "accent": {"region": "north"}}}) + "\n")
+    meta = parse_file(tmp_path / "refs.jsonl").records[0].meta
+    assert meta == {"noise": "high", "room": "b", "accent.region": "north"}
+
+
 def test_label_kinds():
     assert labels.kind_of(["F", "M", "F"]) == ("discrete", None)
     assert labels.kind_of([True, False]) == ("discrete", None)

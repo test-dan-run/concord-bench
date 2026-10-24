@@ -25,8 +25,8 @@ The redesign adds four things the app does not have today:
 - **Deeper error analysis** for diarisation, pipelines and enhancement.
 
 The work is split into milestones E0 to E7, plus one platform milestone P1 (§10). The owner's decisions are
-in §1, and the few questions still open are in §12. As of 2026-10-24, every Bench milestone is built except
-E5b, and §14 lists where the build differs from this plan.
+in §1, and the few questions still open are in §12. As of 2026-10-24, every milestone is built, and §14
+lists where the build differs from this plan.
 
 ---
 
@@ -357,8 +357,11 @@ and ethnicity. The old dataset keeps its scores and can be deleted once the new 
 
 ### 7.2 Labels in the reference package
 
-The reference package (CONTRACTS.md §2) has no place for labels today. The contract is shared with Concord
-Label and kept identical in both repositories, so this step waits until the Label repository is free.
+Built on 2026-10-24 as CONTRACTS.md §2.3 and §2.7. The steps below are the plan, and §14 lists what changed
+when it was built.
+
+The reference package (CONTRACTS.md §2) had no place for labels. The contract is shared with Concord
+Label and kept identical in both repositories, so this step changes both.
 
 1. Bump the reference package format to version 2 and keep reading version 1.
 2. Add an optional `attributes` object to each record in `refs/segments.jsonl` and
@@ -497,9 +500,9 @@ developer.
 About 7 to 9 weeks in total for Bench. E5a can start right after E0, and E1, E2, E5 and E6 can run side by
 side with E3. E4 needs E3. P1 is independent, and Bench shows more hardware fields once it lands.
 
-Status on 2026-10-24: E0, E1, E2, E3, E4, E5a, E5c, E6 and E7 are built and committed. E5b waits until the
-Concord Label repository is free to change, because it needs the reference package to change in both
-repositories at once. P1 is the platform's to do, and Bench shows its fields once the catalog returns them.
+Status on 2026-10-24: every Bench milestone, E0 to E7, is built and committed. E5b's Label half is on the
+Label repository's `reference-package-v2` branch. P1 is the platform's to do, and Bench shows its fields
+once the catalog returns them.
 
 ---
 
@@ -592,6 +595,19 @@ and the list below records each place where the code took a different route.
   made the fake catalog in the tests activate the lease again.
 - **Upload plan.** Building the upload page's plan showed that the upload API had been dropping the catalog
   ids of the chosen diarisation and ASR models, and the fix is in the E3 commit.
-- **E5b (§7.2) is not built.** Reference package version 2 needs changes in Concord Label as well, and the
-  Label repository is being edited, so it waits. Labels reach Bench today through the annotation files of
-  an upload, e.g., the nested `attribute` of a NeMo manifest.
+- **File labels in the reference package (§7.2).** The plan's `refs/speakers.json` became
+  `refs/attributes.json`, with `files` and `speakers` keyed by the `files.csv` path. File labels need a place
+  outside the records, because an RTTM package has no records to carry them, and diarisation slices by
+  file labels. Paths match `refs/uids.jsonl`, where the plan had stems. Speaker labels are named
+  `speaker.<name>`.
+- **Contract version 2 (§7.2).** CONTRACTS.md says that any change bumps the contract version, so both apps
+  now report version 2, and a Bench and a Label on different versions hide the links between them.
+  Bench's `contracts/check.py` had fallen behind Label's copy, which finds CONTRACTS.md in Label's `docs/`
+  folder. Without that, Bench's `just check-contracts` skipped the comparison, so it now uses Label's copy.
+- **What Label sends (§7.2).** Label keeps no labels per segment or per speaker, so it sends each file's
+  metadata as file labels and nothing else. Its ingest now keeps only metadata that has the same value on
+  every record of a file, where before the last record's value won, and its parser flattens nested
+  objects as Bench's does.
+- **The handoff test.** `just e2e-handoff` in Label had been failing since the model catalog, because it
+  sent catalog ids to Bench's plan endpoint as `asr_model_ids`. It now sends `asr_models` and also checks
+  that the file labels arrive.

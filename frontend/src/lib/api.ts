@@ -241,6 +241,8 @@ export interface ImportPreview {
   audio_included: string | null;
   refs_file: string | null;
   uids: number;
+  /** Label names for slicing: on the records, and from refs/attributes.json (CONTRACTS.md §2.3, §2.7). */
+  labels: string[];
   outputs: number;
   missing_files: string[];
   changes?: { files_added: number; files_removed: number; segments_before: number; segments_now: number };

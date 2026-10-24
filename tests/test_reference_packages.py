@@ -16,6 +16,7 @@ from pathlib import Path
 import pytest
 from sqlalchemy import select
 
+from concord_bench import CONTRACT_VERSION
 from concord_bench.core.models import AudioFile, Dataset, Model, ModelOutput, ReferenceImport, Run, Score, Segment
 from concord_bench.runs import jobs
 from conftest import GEN, ROOT, truth
@@ -228,15 +229,81 @@ def _copy_complete(tmp_path: Path) -> Path:
     return dest
 
 
+# ---------------------------------------------------------------- labels (format version 2)
+
+def test_file_and_speaker_labels_from_attributes_json(client, session):
+    staged = stage(client, SAMPLES / "reference-package-complete")
+    assert staged["preview"]["labels"] == ["channel", "condition", "speaker.accent.region", "speaker.gender"]
+    d = accept(client, staged["id"])
+    f = session.scalar(select(AudioFile).where(AudioFile.dataset_id == d["id"]))
+    assert f.meta == {"condition": "clean", "channel": "phone"}
+    segs = segments_of(session, d["id"])
+    assert [(s.speaker, s.meta.get("speaker.gender"), s.meta.get("speaker.accent.region")) for s in segs] == [
+        ("agent", "F", "south"), ("caller", "M", "north"), ("agent", "F", "south")]
+    imp = client.get(f"/api/reference-imports/{staged['id']}").json()
+    assert imp["result"]["attributes"] == {"files": 1, "segments": 3}
+    labels = {lb["key"]: lb for lb in d["report"]["labels"]}
+    assert labels["condition"]["level"] == "file" and labels["condition"]["have"] == 3
+    assert labels["speaker.gender"]["level"] == "utterance"
+    assert [v["value"] for v in labels["speaker.gender"]["values"]] == ["F", "M"]
+
+
+def test_labels_on_records_are_read_without_the_attributes_name(client, session):
+    import_complete(client)  # the "any" sample carries no audio
+    staged = stage(client, SAMPLES / "reference-package-any")
+    assert staged["preview"]["labels"] == ["noise"]
+    d = accept(client, staged["id"])
+    assert [s.meta.get("noise") for s in segments_of(session, d["id"])] == ["street", "none"]
+    assert [lb["key"] for lb in d["report"]["labels"]] == ["noise"]
+
+
+def test_a_record_label_wins_over_a_speaker_or_file_label(client, session, tmp_path):
+    pkg = _copy_complete(tmp_path)
+    refs = json.loads((pkg / "refs" / "segments.seglst.json").read_text())
+    refs[0]["attributes"] = {"speaker": {"gender": "X"}, "condition": "noisy"}
+    (pkg / "refs" / "segments.seglst.json").write_text(json.dumps(refs))
+    d = accept(client, stage(client, pkg)["id"])
+    first = segments_of(session, d["id"])[0]
+    assert first.meta["speaker.gender"] == "X" and first.meta["condition"] == "noisy"
+    f = session.scalar(select(AudioFile).where(AudioFile.dataset_id == d["id"]))
+    assert f.meta["condition"] == "clean"  # the file label; the record's own label applies to its segment
+
+
+@pytest.mark.parametrize(("attrs", "problem"), [
+    ({"files": {"nope.wav": {"a": 1}}}, "files.nope.wav is not a files.csv path"),
+    ({"speakers": {"check_clip.wav": {"agent": "F"}}}, "must map each speaker to an object of labels"),
+    ({"files": {"check_clip.wav": {"a": [1, 2]}}}, "must be an object of labels"),
+    (["not", "an", "object"], "must be an object with files and / or speakers"),
+])
+def test_bad_attributes_json_is_refused(client, tmp_path, attrs, problem):
+    pkg = _copy_complete(tmp_path)
+    (pkg / "refs" / "attributes.json").write_text(json.dumps(attrs))
+    r = client.post("/api/reference-imports", json={"upload_id": upload_folder(client, pkg)})
+    assert r.status_code == 400 and problem in r.json()["detail"], r.text
+    assert _checker().check_package(pkg)  # the contract checker agrees
+
+
+def test_format_version_1_still_imports_and_has_no_attributes_file(client, session, tmp_path):
+    pkg = _copy_complete(tmp_path)
+    m = json.loads((pkg / "manifest.json").read_text())
+    m["format_version"] = 1
+    (pkg / "manifest.json").write_text(json.dumps(m))
+    r = client.post("/api/reference-imports", json={"upload_id": upload_folder(client, pkg)})
+    assert r.status_code == 400 and "exactly one references file besides uids.jsonl (found 2)" in r.json()["detail"]
+    (pkg / "refs" / "attributes.json").unlink()
+    d = accept(client, stage(client, pkg)["id"])
+    assert d["report"]["labels"] == [] and len(segments_of(session, d["id"])) == 3
+
+
 def test_unknown_format_version_is_refused_naming_the_known_ones(client, tmp_path, data_dir):
     pkg = _copy_complete(tmp_path)
     m = json.loads((pkg / "manifest.json").read_text())
-    m["format_version"] = 2
+    m["format_version"] = 3
     (pkg / "manifest.json").write_text(json.dumps(m))
     upload_id = upload_zip(client, zip_folder(pkg))
     r = client.post("/api/reference-imports", json={"upload_id": upload_id})
     assert r.status_code == 400
-    assert "format_version 2" in r.json()["detail"] and "format version 1" in r.json()["detail"]
+    assert "format_version 3" in r.json()["detail"] and "format version 1, 2" in r.json()["detail"]
     assert client.get("/api/reference-imports").json() == []
     assert not (data_dir / "uploads" / upload_id).exists()  # a refused upload is not kept
 
@@ -480,7 +547,7 @@ class FakeResponse:
         return self._body
 
 
-def fake_label(monkeypatch, contract_version: int = 1) -> list[str]:
+def fake_label(monkeypatch, contract_version: int = CONTRACT_VERSION) -> list[str]:
     """LABEL_URL set and Label answering /api/config (counted)."""
     from concord_bench import peer
     from concord_bench.core.settings import reset_settings
@@ -511,7 +578,7 @@ def test_config_peer_unset_unreachable_and_reachable(client, monkeypatch):
     calls = fake_label(monkeypatch)
     for _ in range(3):
         assert client.get("/api/config").json()["peer"] == {"url": "http://label.test:8610", "reachable": True,
-                                                            "contract_version": 1}
+                                                            "contract_version": CONTRACT_VERSION}
     assert calls == ["http://label.test:8610/api/config"]  # cached between page loads
     # an app that is not Label is not a peer
     monkeypatch.setattr(peer.httpx, "get", lambda url, timeout: FakeResponse(200, _sample("config.bench.json")))
@@ -524,7 +591,7 @@ def test_open_in_label_needs_the_same_contract_version(client, session, monkeypa
 
     d = import_complete(client)
     f = session.scalar(select(AudioFile).where(AudioFile.dataset_id == d["id"]))
-    fake_label(monkeypatch, contract_version=2)
+    fake_label(monkeypatch, contract_version=CONTRACT_VERSION - 1)
     assert peer.file_link_for(session, f.id, 2.9) is None
     fake_label(monkeypatch)
     assert peer.file_link_for(session, f.id, 2.9) == (

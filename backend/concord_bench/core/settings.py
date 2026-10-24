@@ -55,7 +55,9 @@ class Settings(BaseSettings):
     @field_validator("dataset_store", mode="before")
     @classmethod
     def _empty_is_unset(cls, v: object) -> object:
-        return None if isinstance(v, str) and not v.strip() else v
+        if isinstance(v, str):
+            return Path(v.strip()).expanduser() if v.strip() else None
+        return v
 
     @property
     def catalog_ui(self) -> str:

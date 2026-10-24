@@ -149,6 +149,16 @@ def test_an_empty_dataset_store_is_unset(monkeypatch, data_dir, value):
     assert get_settings().dataset_store is None and paths.store() is None
 
 
+def test_a_dataset_store_under_home_is_expanded(monkeypatch, data_dir):
+    from pathlib import Path
+
+    from concord_bench.core.settings import get_settings, reset_settings
+
+    monkeypatch.setenv("DATASET_STORE", "~/ai-data/datasets")
+    reset_settings()
+    assert get_settings().dataset_store == Path.home() / "ai-data" / "datasets"
+
+
 # ---------------------------------------------------------------- just move-originals (§12)
 
 

@@ -11,7 +11,8 @@ This file is the brief for building it. The interactive design is the visual ref
 | What | Where | Why |
 |---|---|---|
 | **Personal AI service platform — `README.md`** | The separate platform repository | **Source of truth for model API contracts and how model services are spun up.** Each model's server, protocol, route and launch settings come from that repo's per-model config. Do not re-implement or duplicate any of it here. |
-| Design canvas | https://claude.ai/code/artifact/0e026853-3c35-482e-9cb8-30605607c086 (private to the owner) | Every screen, clickable in Play mode. Sample data only. |
+| Design canvas | https://claude.ai/artifact/HN5frmSLm82zUCZ8hn32vP (private to the owner) | The current design, with the revised Evaluate screens (EVALUATE_PLAN.md). Every screen is clickable, and all data on it is sample data. |
+| First design canvas | https://claude.ai/code/artifact/0e026853-3c35-482e-9cb8-30605607c086 (private to the owner) | The Phase 1 design this document was written from. Where the two canvases differ, the current one wins. |
 | Design system | `speech_recognition_platform_design_system.md` (AeroAudio DS) | Colours, type, track layout, keyboard shortcuts. Summary in §7. |
 
 ### Model registration must be near-zero effort
@@ -98,6 +99,11 @@ Canvas artboards: `Main`, `Benchmarks-Pipelines`, `ASR-Errors`, `Diar-Errors`, `
 - Side panel: datasets to benchmark on, ranked by tag overlap, filtered to datasets that have labels for the detected tasks.
 
 ### 3.3 Benchmarks (`Main`, `Benchmarks-Pipelines`)
+> The revised Evaluate design (EVALUATE_PLAN.md, §4 and §6) replaces parts of §3.3 and §3.4. It adds sortable
+> leaderboards, a run dialog, speech enhancement as an ablation, slices by label, and deeper diarisation,
+> pipeline and enhancement error pages. The ablation grid moved to the pipeline error page as "Which stage
+> to upgrade".
+
 - Tabs: **ASR · Diarisation · Keyword spotting · ASR + diarisation pipelines**.
 - **Dataset picker**: search + toggle chips for every dataset; datasets without labels for the current tab are dashed and listed as "hidden from this table".
 - Single-task tabs: model × dataset table; best per dataset highlighted; Δ vs the previous run; "—" + **Run** when a model hasn't been evaluated on that dataset. Side panel shows the selected cell's breakdown (S/D/I for ASR; missed / false alarm / confusion for DER; hits / misses / false alarms for KWS) and links to the matching error-analysis page.
@@ -135,9 +141,13 @@ The design version documents both protocols (OpenAI-compatible and KServe OIP v2
 | Metric | Definition / notes | Suggested library |
 |---|---|---|
 | WER, CER, S/D/I | After the selected text normaliser | `jiwer` |
-| DER | Missed + false alarm + confusion; 0.25 s collar by default (selectable) | `pyannote.metrics` |
+| MER, WIL, WIP | Match error rate, word information lost and word information preserved, from the same alignment as WER. Corpus values come from summed hits, substitutions, deletions and insertions, not from averaged rates. WIP is the one where higher is better. | `jiwer` |
+| DER | Missed + false alarm + confusion; 0.25 s collar by default (selectable). "Score overlapping speech" off skips overlapped regions. | `pyannote.metrics` |
 | JER | Per-speaker Jaccard error | `pyannote.metrics` |
 | cpWER | Concatenated minimum-permutation WER (speaker-attributed) | `meeteval` |
+| tcpWER | cpWER that also counts a word wrong when it falls outside a time collar around its reference word; collar 2, 5 or 10 s, 5 s by default | `meeteval` |
+| Slice interval | 95% interval of a slice's score from 1000 seeded bootstrap resamples, by utterance for ASR and by file for diarisation and pipelines. A slice is "reliably worse" when its whole interval is worse than the overall score, and slices with too few utterances or files are not judged. | — |
+| Enhancement change | A model's score on an enhanced copy minus its score on the original audio, in percentage points | — |
 | VAD error | Missed speech + false-alarm speech | — |
 | KWS | F1, precision, recall, FA/hour at the operating threshold; DET curve from threshold 0 | — |
 | RTF | Processing time ÷ audio duration, per stage and summed for pipelines | — |

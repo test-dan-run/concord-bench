@@ -1,7 +1,8 @@
 # Concord Bench
 
 Benchmark speech models (ASR, VAD and speaker diarisation) served by the personal AI platform on
-reference datasets you upload, and read their errors.
+reference datasets you upload, and read their errors. Speech enhancement models can be added to any
+benchmark as an ablation, and scores can be broken down by the labels that come with the references.
 
 Concord Bench is one of two apps. Its partner, **Concord Label**, turns unlabelled audio into reviewed
 references (pseudo-labelling, annotation, live evaluation). The two apps share no code and keep separate
@@ -76,14 +77,16 @@ own data directory and database.
 ```
 backend/concord_bench/
   core/        settings, paths (the only module that knows where files live), SQLite models, db
-  datasets/    audio (ffmpeg probe and decode, clipping, 16 kHz derive, peaks), annotation parsers, ingest
+  datasets/    audio (ffmpeg probe and decode, clipping, 16 kHz derive, peaks), annotation parsers, labels, ingest
   platform/    the model catalog (records, leases, plans, index, peer reads; replay stand-in)
-  adapters/    openai_asr, openai_chat_audio, oip_segmenter; record and replay transport
-  runs/        job queue and worker, executor (ASR, seg, pipelines), output cache, references, scoring
+  adapters/    openai_asr, openai_chat_audio, oip_segmenter, enhance; record and replay transport
+  runs/        job queue and worker, executor (ASR, seg, pipelines), enhanced copies, output cache, references, scoring
   metrics/     normalisers, wer (jiwer), der, jer and vad (pyannote.metrics), cpwer (meeteval), rtf, attribution
-  analysis/    top words, substitution pairs, slices, diarisation cards, tag-overlap suggestions
+  analysis/    top words, substitution pairs, slices by label (bootstrap intervals, heatmap), diarisation
+               cards and regions, tag-overlap suggestions
   api/         FastAPI routers
-  migrations/  Alembic (bench_0001...; bench_0004 moved models to the catalog; bench_0005 dropped offline export)
+  migrations/  Alembic (bench_0001...; bench_0004 moved models to the catalog; bench_0005 dropped offline export;
+               bench_0006 to bench_0008 added metrics and hardware, enhanced copies and saved slices)
   acceptance.py, recording.py   the Phase 1 acceptance flow, and `just record` on top of it
 frontend/src/  React, TanStack Query, Table and Virtual, Tailwind (AeroAudio tokens in index.css)
 fixtures/      synth/ (kokoro-tts dialogue specs and committed turns), generated/ (audio, refs, templates),
@@ -124,7 +127,8 @@ is gone from Bench since EVALUATE_PLAN.md §9; Label keeps its copy for now.)
   verifies them on its check clip and records their capabilities (ASR, VAD, diarisation) and timing
   (word, segment or text) per build. The Models page lists the catalog's speech models read-only, with
   state (running, stopped, starting, queued), capabilities, cold start and build key, and links to the
-  catalog's UI (`CATALOG_UI_URL`). Bench makes its own `model` row when a model is first used, so runs and
+  catalog's UI (`CATALOG_UI_URL`). Enhancement models (the catalog's `enhance` task) have their own tab,
+  with the SI-SDR the catalog measured on its check clip and a "generative" chip when the catalog flags one. Bench makes its own `model` row when a model is first used, so runs and
   pipelines keep pointing at it, and keeps the last record it saw so old runs read fine while the catalog is
   down. Pickers rank catalog models by shared tags; unverified ones are shown but not offered.
 - **Runs.** One worker process works through the `job` table. A job that needs models takes one catalog lease
@@ -139,7 +143,8 @@ is gone from Bench since EVALUATE_PLAN.md §9; Label keeps its copy for now.)
   catalog's output index once per file or stage: an output Label already has is read from Label
   (`POST <owner>/api/outputs/batch`) and copied in with its provenance. New outputs are recorded in the
   index. Outputs from before the catalog have no build key: old runs still score, but they never match.
-  A run records the builds it used (`run.builds`).
+  A run records the builds it used (`run.builds`), the hardware the catalog reports for each model
+  (`run.hardware`, with "-" in the UI for fields the catalog doesn't report yet) and its wall time.
 - **Pipelines** run stage by stage (MODEL_CATALOG_REDESIGN.md, "Job planning"): Run evaluation first
   shows the catalog's plan (stages, model loads, outputs already in the index, estimated load time). Then
   one seg-stage job per segmenter runs over every file of the dataset, one ASR-stage job per ASR model
@@ -149,14 +154,33 @@ is gone from Bench since EVALUATE_PLAN.md §9; Label keeps its copy for now.)
   "oracle") gives segments; short ones are merged, each is padded by 0.1 s and transcribed, and the result
   is a speaker-attributed hypothesis. cpWER error attribution: ASR = A, segmentation = B − A, speaker =
   C − B (PLAN.md §5 M4).
+- **Speech enhancement** (EVALUATE_PLAN.md §5). An enhancement model builds an enhanced copy of a dataset
+  once, and every ASR, diarisation and pipeline run that asks for that enhancer reads the copy. Files up to
+  60 s go to the model whole, and longer ones go in 30 s chunks joined with a crossfade. Every output must
+  be within 10 ms of its input's length, and it is padded or trimmed to the exact length, or the file fails.
+  Enhanced files are stored by sha256 like other derived audio, so the output cache works on them as it
+  does on the originals. In a pipeline, the copy goes in before diarisation (both stages hear it) or after
+  (only ASR hears it, cut at the segments diarised on the original). Copies are listed, added, cancelled
+  and deleted on the dataset page, and a deleted copy's runs keep their scores.
+- **Labels and slices** (EVALUATE_PLAN.md §7). Extra fields on the reference records become labels,
+  including nested ones such as a NeMo manifest's `"attribute": {"gender": ..., "ethnicity": ...}`
+  (read as `attribute.gender`). Each label is sorted into discrete, continuous (binned) or unused. Error
+  pages break every score down by label with a 95% bootstrap interval, mark slices that are reliably worse
+  than the whole dataset, and cross two labels in a heatmap. A slice can be saved on its dataset.
 - **Outputs for Concord Label.** At startup Bench registers itself with the catalog as `bench` at
   `PUBLIC_URL` (a catalog that is down is tolerated), and serves `POST /api/outputs/batch` so Label reads
   outputs the index says Bench has instead of computing them again.
 - **Metrics.** WER and CER via jiwer after a normaliser (`basic` by default, `whisper_en`, `none`, or any
-  platform `text.transform` service the catalog knows, called through its gateway, followed by `basic`). DER, JER and VAD error via pyannote.metrics
-  with a NIST-style collar (seconds each side, 0.25 s by default). cpWER via meeteval.
-- **Errors.** ASR, diarisation and pipeline error pages sort, filter, expand and play every utterance or
-  file. "Flag reference as wrong" on the ASR page marks a reference segment; flagged references are
+  platform `text.transform` service the catalog knows, called through its gateway, followed by `basic`),
+  with MER, WIL and WIP from the same alignment. DER, JER and VAD error via pyannote.metrics with a
+  NIST-style collar (seconds each side, 0.25 s by default), with or without overlapping speech. cpWER and
+  tcpWER (collar 2, 5 or 10 s) via meeteval. Scores store a version (`SCORE_VERSION`), and a score from an
+  older version is computed again when it is read.
+- **Errors.** ASR, diarisation, pipeline and enhancement error pages sort, filter, expand and play every
+  utterance or file. The diarisation page shows where errors gather (overlap, speaker changes, short
+  turns), speaker counts and who was mistaken for whom. The pipeline page traces each wrong word to the
+  stage that caused it, and shows which stage to upgrade. The enhancement page compares placements and
+  plays clips where enhancement changed the transcript. "Flag reference as wrong" on the ASR page marks a reference segment; flagged references are
   listed on the dataset page. Scores keep using them until the references are corrected. For a dataset
   from Concord Label, the error pages link to the file in Label ("Open in Label") and the dataset page
   sends the flags back ("Send flags to Label", or download the flags file, CONTRACTS.md §3).
@@ -233,10 +257,18 @@ or both apps (S7). The split (SPLIT_PLAN.md) is built.
 
 Since then, models come from the platform's model catalog (MODEL_CATALOG_REDESIGN.md): registration and
 checks moved there, jobs lease models from it, outputs are keyed by build and shared with Label through
-its index, and pipeline grids run stage by stage. The offline export is removed (EVALUATE_PLAN.md §9), and
-the revised Evaluate design is being built from EVALUATE_PLAN.md (milestones E0 to E7).
+its index, and pipeline grids run stage by stage. The offline export is removed (EVALUATE_PLAN.md §9).
+
+The revised Evaluate design (EVALUATE_PLAN.md) is built, with MER, WIL, WIP, tcpWER, hardware per run,
+sortable leaderboards, speech enhancement as an ablation, slices by label, and the deeper diarisation,
+pipeline and enhancement error pages. EVALUATE_PLAN.md §14 lists where the build differs from that plan.
+Reference package version 2, which carries labels from Concord Label (E5b), waits until the Label
+repository is free to change.
 
 Known limits:
+- Enhancement quality scores (DNSMOS, SNR estimates, SI-SDR and PESQ on Bench's datasets) are not built
+  (EVALUATE_PLAN.md §1). The Models page shows only the catalog's SI-SDR on its own check clip.
+- Datasets can't be updated in place. A dataset that needs new labels or references is uploaded again.
 - KWS is not built (Q6). Only its hooks exist: the enums, the `keyword_event` table, task-keyed
   registries and a task-driven benchmark tab bar.
 - The fixture set is synthesised speech (kokoro-tts): good for correctness, not realism.

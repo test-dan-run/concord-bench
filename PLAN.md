@@ -130,6 +130,11 @@ Follows HANDOFF §6, with one deliberate split: **inference outputs are stored s
 
 ## 5. Phase 1 — milestones
 
+> **Note (Oct 2026).** Phase 1 is built. The revised Evaluate design that followed it (MER, WIL, WIP,
+> tcpWER, hardware per run, speech enhancement as an ablation, slices by label, and deeper error analysis)
+> has its own plan and milestones, E0 to E7, in [EVALUATE_PLAN.md](EVALUATE_PLAN.md) §10. All of them are
+> built except E5b, and EVALUATE_PLAN.md §14 lists where the build differs from that plan.
+
 Each milestone ends in something runnable. The riskiest parts come first: metric correctness, then service orchestration.
 
 **KWS hooks (Q6).** These are kept throughout Phase 1 so KWS can be added later as a new adapter, parser, metric module and tab, with no schema or layout changes:

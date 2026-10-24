@@ -25,7 +25,8 @@ The redesign adds four things the app does not have today:
 - **Deeper error analysis** for diarisation, pipelines and enhancement.
 
 The work is split into milestones E0 to E7, plus one platform milestone P1 (§10). The owner's decisions are
-in §1, and the few questions still open are in §12.
+in §1, and the few questions still open are in §12. As of 2026-10-24, every Bench milestone is built except
+E5b, and §14 lists where the build differs from this plan.
 
 ---
 
@@ -496,6 +497,10 @@ developer.
 About 7 to 9 weeks in total for Bench. E5a can start right after E0, and E1, E2, E5 and E6 can run side by
 side with E3. E4 needs E3. P1 is independent, and Bench shows more hardware fields once it lands.
 
+Status on 2026-10-24: E0, E1, E2, E3, E4, E5a, E5c, E6 and E7 are built and committed. E5b waits until the
+Concord Label repository is free to change, because it needs the reference package to change in both
+repositories at once. P1 is the platform's to do, and Bench shows its fields once the catalog returns them.
+
 ---
 
 ## 11. Testing
@@ -551,3 +556,42 @@ None. Every question from 2026-10-23 and 2026-10-24 is answered and worked into 
 | Labels with many values or IDs make useless slices | The kind rules in §7.1 skip them, and the upload page shows what was skipped |
 | The reference package change breaks Concord Label | Version 2 with version 1 still read, sample files tested in both repositories, `just check-contracts`, done only when the Label repository is free (§7.2) |
 | Removing offline code leaves Bench's and Label's shared copies further apart | Expected, since Label keeps its copy of the code for now. The contract files are identical again (§9) |
+
+---
+
+## 14. What was built, and where it differs from the plan
+
+Written on 2026-10-24, after E0 to E6 (without E5b) were built. The sections above still describe the plan,
+and the list below records each place where the code took a different route.
+
+- **Where enhanced audio is stored (§5.2).** Enhanced files are written to the same store as every other
+  derived file, `data/derived/<sha256>.flac`, with peaks next to them, and the plan's
+  `data/derived/enh/<copy_id>/` folders are not used. Each `enhanced_file` row points at its original with
+  `audio_file_id` and has no `rel_path`. Storing by sha256 means the output cache, playback and peaks work
+  on enhanced audio with no change.
+- **Unchanged output (§5.2).** When an enhancer returns audio identical to its input, the copy's file points
+  at the original's audio, and the copy's size leaves that file out. The e2e tests use an identity enhancer
+  for this reason, so the recorded model outputs replay on the enhanced copy.
+- **Deleting a copy (§5.2).** A delete keeps any audio that another live copy or an original also uses.
+- **More columns on `enhanced_copy` (§5.2).** The table also stores the image, hardware, chunking parameters
+  and their hash, the error, the file count, the audio and processing seconds, and the RTF. Each
+  `enhanced_file` stores its latency.
+- **Enhancement fields live on the run (§5.3, §5.4).** `Run.enh_model_id`, `Run.enh_copy_id` and
+  `Run.enh_placement` replace the planned `Pipeline.enh_copy_id` and `Pipeline.enh_placement`. A pipeline
+  stays a pair of a diariser and an ASR model, and one pipeline has a run per enhancer and placement.
+- **Run evaluation dialog (§4).** The dialog has no Compute select, because the catalog decides where each
+  model runs.
+- **New pipeline run (§6).** The button opens the same plan panel as Run evaluation, with pipelines chosen
+  and the enhancement ablation fieldset, in place of the planned four-column popup.
+- **Scores are versioned.** `SCORE_VERSION` is stored with each score's aggregates, and a score from an
+  older version is computed again when it is read. Version 2 added MER, WIL, WIP, tcpWER and the pipeline
+  error causes. Version 3 decides "within 0.5 s of a speaker change" per word, because per segment it
+  counted nearly every word in conversations with quick turn-taking. Reference words have no times, so each
+  word's time is spread evenly over its segment.
+- **Peak VRAM (§3.4).** Bench reads it from the lease just before releasing the lease. Reading it afterwards
+  made the fake catalog in the tests activate the lease again.
+- **Upload plan.** Building the upload page's plan showed that the upload API had been dropping the catalog
+  ids of the chosen diarisation and ASR models, and the fix is in the E3 commit.
+- **E5b (§7.2) is not built.** Reference package version 2 needs changes in Concord Label as well, and the
+  Label repository is being edited, so it waits. Labels reach Bench today through the annotation files of
+  an upload, e.g., the nested `attribute` of a NeMo manifest.

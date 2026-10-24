@@ -1,6 +1,6 @@
 """Reference packages into Bench (CONTRACTS.md §2, §4; SPLIT_PLAN.md §4.3, §10): every sample package
 imports with the expected segments, label types and provenance; versions; refusals; outputs into the
-cache; the flags file; fingerprints; scores by source; the peer in /api/config."""
+cache; the flags file; the push endpoints gone; scores by catalog dataset; the peer in /api/config."""
 
 from __future__ import annotations
 
@@ -99,12 +99,13 @@ def import_complete(client) -> dict:
 # ---------------------------------------------------------------- the sample packages
 
 
-def test_complete_package_preview_matches_the_contract_sample(client):
+def test_complete_package_preview(client):
     staged = stage(client, SAMPLES / "reference-package-complete")
-    sample = _sample("bench.reference-imports.response.json")
-    assert set(sample) <= set(staged) and staged["status"] == "staged"
-    for k, v in sample["preview"].items():
-        assert staged["preview"][k] == v, k
+    manifest = json.loads((SAMPLES / "reference-package-complete" / "manifest.json").read_text())
+    assert staged["status"] == "staged"
+    want = {"name": "Help desk calls", "source": manifest["source"], "export_version": 1, "files": 1, "new_files": 1,
+            "hours": 0.002933, "segments": 3, "label_types": ["asr", "diar"], "previous_version": None}
+    assert {k: staged["preview"][k] for k in want} == want
     assert staged["preview"]["outputs"] == 1 and staged["preview"]["uids"] == 3
     listed = client.get("/api/reference-imports?status=staged").json()
     assert [i["id"] for i in listed] == [staged["id"]]
@@ -298,12 +299,12 @@ def test_format_version_1_still_imports_and_has_no_attributes_file(client, sessi
 def test_unknown_format_version_is_refused_naming_the_known_ones(client, tmp_path, data_dir):
     pkg = _copy_complete(tmp_path)
     m = json.loads((pkg / "manifest.json").read_text())
-    m["format_version"] = 3
+    m["format_version"] = 4
     (pkg / "manifest.json").write_text(json.dumps(m))
     upload_id = upload_zip(client, zip_folder(pkg))
     r = client.post("/api/reference-imports", json={"upload_id": upload_id})
     assert r.status_code == 400
-    assert "format_version 3" in r.json()["detail"] and "format version 1, 2" in r.json()["detail"]
+    assert "format_version 4" in r.json()["detail"] and "format version 1, 2, 3" in r.json()["detail"]
     assert client.get("/api/reference-imports").json() == []
     assert not (data_dir / "uploads" / upload_id).exists()  # a refused upload is not kept
 
@@ -439,7 +440,8 @@ def test_flags_file_passes_the_contract_checker(client, session, tmp_path):
     assert _checker().check_flags(path) == []
     doc = r.json()
     sample = json.loads((SAMPLES / "flags.json").read_text())
-    assert set(doc) == set(sample) and doc["source"] == sample["source"] and doc["export_version"] == 1
+    assert set(doc) == set(sample) and doc["format_version"] == 2 and doc["dataset_name"] == "Help desk calls"
+    assert (doc["catalog_dataset_id"], doc["catalog_version"]) == (sample["catalog_dataset_id"], 1)
     assert doc["created_at"].endswith("Z")
     assert [(f["uid"], f["file_sha256"], f["start"], f["end"], f["note"]) for f in doc["flags"]] == [
         (LABEL_UIDS[1], CLIP_SHA, 2.9, 6.81, "'parcel' is 'package'"), (None, CLIP_SHA, 7.11, 9.96, None)]
@@ -472,16 +474,15 @@ def test_flags_pushed_to_a_reachable_label(client, session, monkeypatch):
 # ---------------------------------------------------------------- endpoints Label calls
 
 
-def test_fingerprints_missing(client):
-    req = _sample("bench.fingerprints-missing.request.json")
-    assert client.post("/api/fingerprints/missing", json=req).json() == {"missing": req["sha256"]}
-    import_complete(client)
-    assert client.post("/api/fingerprints/missing", json=req).json() == _sample("bench.fingerprints-missing.response.json")
+def test_push_endpoints_are_out_of_the_contract(client):
+    """Contract version 3 dropped the push from Label; the uploads stay for Bench's own pages."""
+    assert client.post("/api/fingerprints/missing", json={"sha256": [CLIP_SHA]}).status_code in (404, 405)
+    assert client.post("/api/uploads").status_code == 200
 
 
-def fixture_package(dest: Path, version: int = 1) -> Path:
+def fixture_package(dest: Path, version: int = 1, catalog_id: str | None = None) -> Path:
     """A reference package of the six usable fixture dialogues with the STM references the recorded
-    responses were taken with (so ASR runs replay)."""
+    responses were taken with (so ASR runs replay). With `catalog_id`, a version of that Dataset Catalog dataset."""
     t = truth()
     audio = GEN / "dataset" / "audio"
     (dest / "audio").mkdir(parents=True)
@@ -500,40 +501,53 @@ def fixture_package(dest: Path, version: int = 1) -> Path:
     (dest / "manifest.json").write_text(json.dumps({
         "format": "concord-reference-package", "format_version": 1, "name": "Synth calls",
         "created_at": "2026-10-22T09:00:00Z", "language": "en",
-        "source": {"app": "concord-label", "install_id": "inst1", "dataset_uid": "uid-synth",
-                   "dataset_name": "Synth calls"},
+        "source": {"app": "concord-label", "install_id": "dataset-catalog" if catalog_id else "inst1",
+                   "dataset_uid": catalog_id or "uid-synth", "dataset_name": "Synth calls"},
         "export_version": version, "scope": "complete", "label_types": ["asr", "diar"],
         "counts": {"files": len(rows), "segments": 0, "hours": 0.01}, "audio_included": "all"}))
     return dest
 
 
-def test_scores_by_source(replay, client, session, tmp_path, monkeypatch):
-    assert client.get("/api/datasets/by-source/uid-synth/scores").status_code == 404
-    d = accept(client, stage(client, fixture_package(tmp_path / "pkg"))["id"])
+def test_scores_by_catalog(replay, client, session, tmp_path, monkeypatch):
+    cid = "c0ffee" + "0" * 26
+    assert client.get(f"/api/datasets/by-catalog/{cid}/scores").status_code == 404
+    d = accept(client, stage(client, fixture_package(tmp_path / "pkg", catalog_id=cid))["id"])
+    assert d["catalog"]["dataset_id"] == cid and d["catalog"]["n"] == 1
     r = client.post("/api/benchmarks/plan", json={"dataset_id": d["id"], "asr_models": ["whisper-large-v3"],
                                                   "mode": "stages"})
     assert r.json()["queued"] == 1
     jobs.run_pending()
-    body = client.get("/api/datasets/by-source/uid-synth/scores?install_id=inst1&normaliser=basic").json()
-    sample = _sample("bench.scores-by-source.response.json")
+    body = client.get(f"/api/datasets/by-catalog/{cid}/scores?normaliser=basic").json()
+    sample = _sample("bench.scores-by-catalog.response.json")
     assert set(body) == set(sample) and set(body["dataset"]) == set(sample["dataset"])
-    assert body["dataset"] == {"id": d["id"], "name": "Synth calls", "export_version": 1}
+    assert body["dataset"] == {"id": d["id"], "name": "Synth calls", "catalog_version": 1}
     (s,) = body["scores"]
     assert set(s) == set(sample["scores"][0])
     assert s["model"] == "whisper-large-v3" and s["normaliser"].startswith("basic@") and 0 <= s["wer"] < 0.5
     assert s["created_at"].endswith("Z")
-    assert client.get("/api/datasets/by-source/uid-synth/scores?install_id=other").status_code == 404
+    assert client.get(f"/api/datasets/by-catalog/{'f' * 32}/scores").status_code == 404
     # no score with that normaliser: the latest score
-    assert client.get("/api/datasets/by-source/uid-synth/scores?normaliser=nope").json()["scores"][0]["score_id"] \
+    assert client.get(f"/api/datasets/by-catalog/{cid}/scores?normaliser=nope").json()["scores"][0]["score_id"] \
         == s["score_id"]
+    # a package from Label's own install (contract version 2) has no catalog dataset: no scores, no links
+    old = accept(client, stage(client, fixture_package(tmp_path / "old"))["id"])
+    assert old["catalog"] is None
     # Open in Label on the ASR error page, only once Label answers with the same contract version
     utt = client.get(f"/api/errors/asr/utterances?score_id={s['score_id']}&limit=1").json()["rows"][0]
     assert client.get(f"/api/errors/asr/utterances/{utt['id']}").json()["label_url"] is None
     fake_label(monkeypatch)
     detail = client.get(f"/api/errors/asr/utterances/{utt['id']}").json()
     sha = session.get(AudioFile, utt["file_id"]).sha256
-    assert detail["label_url"] == (f"http://label.test:8610/label/file/by-sha/{sha}?dataset_uid=uid-synth"
+    assert detail["label_url"] == (f"http://label.test:8610/label/file/by-sha/{sha}?catalog_dataset_id={cid}"
                                    f"&t={round(utt['start'], 3)}")
+    old_file = session.scalar(select(AudioFile).where(AudioFile.dataset_id == old["id"]))
+    assert peer_link(session, old_file.id) is None
+
+
+def peer_link(session, audio_file_id: int) -> str | None:
+    from concord_bench import peer
+
+    return peer.file_link_for(session, audio_file_id)
 
 
 # ---------------------------------------------------------------- the peer in /api/config
@@ -595,4 +609,5 @@ def test_open_in_label_needs_the_same_contract_version(client, session, monkeypa
     assert peer.file_link_for(session, f.id, 2.9) is None
     fake_label(monkeypatch)
     assert peer.file_link_for(session, f.id, 2.9) == (
-        f"http://label.test:8610/label/file/by-sha/{CLIP_SHA}?dataset_uid=8d4e2b6a1c9f4e3a9b7c5d1e2f3a4b5c&t=2.9")
+        f"http://label.test:8610/label/file/by-sha/{CLIP_SHA}?catalog_dataset_id=8d4e2b6a1c9f4e3a9b7c5d1e2f3a4b5c"
+        "&t=2.9")

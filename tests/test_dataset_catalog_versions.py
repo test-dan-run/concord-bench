@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import shutil
+from pathlib import Path
 
 import pytest
 from sqlalchemy import select
@@ -216,8 +217,19 @@ def test_a_format_version_3_version_with_references_imports(client, dataset_stor
     assert d["label_types"] == ["asr", "diar"] and d["has_speaker_text"]
 
 
-def test_a_zip_still_imports_with_the_store_set_up(client, dataset_store):
-    staged = client.post("/api/reference-imports", json={"upload_id": upload_zip(client, zip_folder(HELP_DESK))})
+def label_download(tmp_path) -> Path:
+    """The sample package as Label builds it for download: its source is Label's own install, not a catalog
+    version."""
+    pkg = tmp_path / "label-download"
+    shutil.copytree(HELP_DESK, pkg)
+    m = json.loads((pkg / "manifest.json").read_text())
+    (pkg / "manifest.json").write_text(json.dumps({**m, "source": {**m["source"], "install_id": "3f2a9c1e5b7d4a60"}}))
+    return pkg
+
+
+def test_a_zip_still_imports_with_the_store_set_up(client, dataset_store, tmp_path):
+    staged = client.post("/api/reference-imports",
+                         json={"upload_id": upload_zip(client, zip_folder(label_download(tmp_path)))})
     assert staged.status_code == 201, staged.text
     d = accept(client, staged.json()["id"])
     assert d["catalog"] is None and d["from_catalog"] is False
@@ -292,8 +304,9 @@ def test_publish_an_upload_as_v1_and_import_it_back_unchanged(client, session, d
     assert [(b["id"], b["published"]) for b in v1["bench"]] == [(ds.id, True), (back["id"], False)]
 
 
-def test_labels_and_uids_from_a_zip_survive_publishing(client, session, dataset_store):
-    staged = client.post("/api/reference-imports", json={"upload_id": upload_zip(client, zip_folder(HELP_DESK))})
+def test_labels_and_uids_from_a_zip_survive_publishing(client, session, dataset_store, tmp_path):
+    staged = client.post("/api/reference-imports",
+                         json={"upload_id": upload_zip(client, zip_folder(label_download(tmp_path)))})
     d = accept(client, staged.json()["id"])
     did = publish(client, d["id"])["version"]["dataset_id"]
     folder = dataset_store.version_dir(did, 1)
@@ -345,7 +358,10 @@ def test_datasets_made_from_catalog_versions_are_published_from_label(client, da
     (pkg / "manifest.json").write_text(json.dumps({**manifest, "audio_included": "all"}))
     z = accept(client, client.post("/api/reference-imports", json={"upload_id": upload_zip(client, zip_folder(pkg))})
                .json()["id"])
-    assert z["from_catalog"] and z["catalog"] is None
+    # it names that version, so flags and Label links work, but it isn't a use of the version
+    assert z["from_catalog"] and (z["catalog"]["dataset_id"], z["catalog"]["n"]) == (did, 1)
+    assert not z["catalog"]["published"]
+    assert [u["ref"] for u in dataset_store.version(did, 1)["uses"]] == [str(d["id"])]
     assert client.post(f"/api/datasets/{z['id']}/publish", json={}).status_code == 400
 
 

@@ -21,7 +21,7 @@ A Dataset Catalog version (DATASET_CATALOG_PLAN.md §9.2) is staged straight fro
 mount (`datasets.catalog`), with its audio found by sha256 in the store. The catalog fills in its `source`
 (install id `dataset-catalog`, the catalog dataset id) and `export_version` (the version number), so the
 Bench datasets made from one catalog dataset form one chain, together with the ones published as its
-versions (`Dataset.catalog_dataset_id`).
+versions (`Dataset.catalog_dataset_id`). A zip of a catalog version is linked to that version the same way.
 """
 
 from __future__ import annotations
@@ -48,10 +48,10 @@ from .ingest import NO_REFERENCES, SKIP_DIRS, extract_zips, inspect_source
 from .parsers import ANNOTATION_EXTS, flatten, parse_file
 
 FORMAT = "concord-reference-package"
-KNOWN_FORMAT_VERSIONS = (1, 2)
-# A catalog version may be format version 3 (contracts/datasets/version.md in the platform): version 2 that
-# also allows audio only, which Bench can't import (NO_REFERENCES). Zips stay at CONTRACTS.md's versions.
-CATALOG_FORMAT_VERSIONS = (1, 2, 3)
+# Format version 3 (CONTRACTS.md §2; the platform's contracts/datasets/version.md) is version 2 that also allows a
+# package with audio only, which Bench refuses (NO_REFERENCES).
+KNOWN_FORMAT_VERSIONS = (1, 2, 3)
+AUDIO_ONLY_FROM = 3
 ATTRIBUTES = "attributes.json"  # refs/attributes.json, format version 2 (CONTRACTS.md §2.7)
 SPEAKER_PREFIX = "speaker."
 MANIFEST_REQUIRED = ("format", "format_version", "name", "created_at", "label_types", "counts", "audio_included")
@@ -149,7 +149,7 @@ def _read_jsonl(path: Path) -> tuple[list[dict[str, Any]], int]:
     return good, bad
 
 
-def read_manifest(root: Path, formats: tuple[int, ...] = KNOWN_FORMAT_VERSIONS) -> dict[str, Any]:
+def read_manifest(root: Path) -> dict[str, Any]:
     try:
         m = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
     except (ValueError, UnicodeDecodeError) as exc:
@@ -157,14 +157,14 @@ def read_manifest(root: Path, formats: tuple[int, ...] = KNOWN_FORMAT_VERSIONS) 
     if not isinstance(m, dict) or m.get("format") != FORMAT:
         raise PackageError(f"manifest.json: format must be {FORMAT!r} (got {m.get('format') if isinstance(m, dict) else m!r})")
     v = m.get("format_version")
-    if v not in formats:
-        known = ", ".join(str(k) for k in formats)
+    if v not in KNOWN_FORMAT_VERSIONS:
+        known = ", ".join(str(k) for k in KNOWN_FORMAT_VERSIONS)
         raise PackageError(f"reference package format_version {v!r} is not supported: this Concord Bench reads "
                            f"format version {known}")
     return m
 
 
-def read_package(root: Path, *, check_audio: bool = True, formats: tuple[int, ...] = KNOWN_FORMAT_VERSIONS) -> Package:
+def read_package(root: Path, *, check_audio: bool = True) -> Package:
     """Validate a package folder (CONTRACTS.md §2). Raises PackageError listing what is wrong."""
     if not (root / "manifest.json").is_file():
         try:
@@ -178,9 +178,11 @@ def read_package(root: Path, *, check_audio: bool = True, formats: tuple[int, ..
             raise PackageError(NO_REFERENCES)
         return Package(root, None)
 
-    m = read_manifest(root, formats)
+    m = read_manifest(root)
     problems: list[str] = [f"manifest.json: missing {k}" for k in MANIFEST_REQUIRED if k not in m]
     lt = m.get("label_types")
+    if lt == [] and m.get("format_version", 0) >= AUDIO_ONLY_FROM:
+        raise PackageError(f"this version has audio only (no label_types), so it has no references. {NO_REFERENCES}")
     if not isinstance(lt, list) or not lt or not set(lt) <= {"asr", "diar"}:
         problems.append(f"manifest.json: label_types must be a non-empty subset of asr, diar (got {lt!r})")
     if m.get("audio_included") not in ("all", "partial", "none"):
@@ -321,7 +323,7 @@ def stored_original(session: Session, sha256: str, ext_hint: str | None = None) 
 
 
 def missing_originals(session: Session, sha256s: list[str]) -> list[str]:
-    """The sha256s Bench has no stored original for (POST /api/fingerprints/missing)."""
+    """The sha256s Bench has no stored original for (the preview's `new_files`)."""
     out = []
     for sha in dict.fromkeys(s.strip().lower() for s in sha256s):
         if stored_original(session, sha) is None:
@@ -468,7 +470,7 @@ def stage(session: Session, upload_id: str | None, upload_dir: Path, *,
     """Stage an uploaded package, or (with `catalog`: {"dataset_id", "n", "dataset_name"}) a catalog version's
     folder on the store's mount, which is the package root as it is."""
     root = upload_dir if catalog else find_root(upload_dir)
-    pkg = read_package(root, formats=CATALOG_FORMAT_VERSIONS if catalog else KNOWN_FORMAT_VERSIONS)
+    pkg = read_package(root)
     prev = preview(session, pkg)
     if prev["missing_files"]:
         raise PackageError(_missing_message(prev["missing_files"]))
@@ -484,10 +486,6 @@ def stage(session: Session, upload_id: str | None, upload_dir: Path, *,
 def catalog_of(imp: ReferenceImport) -> dict[str, Any] | None:
     """{"dataset_id", "n", "dataset_name"} of an import staged from the Dataset Catalog, else None."""
     return (imp.preview or {}).get("catalog") or None
-
-
-def _formats(imp: ReferenceImport) -> tuple[int, ...]:
-    return CATALOG_FORMAT_VERSIONS if catalog_of(imp) else KNOWN_FORMAT_VERSIONS
 
 
 def _missing_message(missing: list[str]) -> str:
@@ -556,7 +554,7 @@ def accept(session: Session, imp: ReferenceImport, *, name: str | None = None, t
     """A new dataset from a staged package, filled by the ingest job; `finish` completes it."""
     from ..runs import jobs
 
-    pkg = read_package(Path(imp.path), formats=_formats(imp))
+    pkg = read_package(Path(imp.path))
     source = build_source(session, imp, pkg)
     m = pkg.manifest or {}
     prev = previous_version(session, pkg)
@@ -575,6 +573,10 @@ def accept(session: Session, imp: ReferenceImport, *, name: str | None = None, t
                  export_version=pkg.export_version, previous_version_id=prev.id if prev else None)
     if (cat := catalog_of(imp)) is not None:
         ds.catalog_dataset_id, ds.catalog_version = cat["dataset_id"], cat["n"]
+    elif (pkg.source or {}).get("install_id") == dataset_catalog.INSTALL_ID:
+        # A zip of a catalog version (downloaded from the catalog): its flags and Label links name that version too
+        # (CONTRACTS.md §2.1). No use is recorded, because the version didn't come from the catalog service.
+        ds.catalog_dataset_id, ds.catalog_version = str(pkg.source["dataset_uid"]), pkg.export_version
     session.add(ds)
     session.flush()
     job = jobs.enqueue(session, "ingest", {"dataset_id": ds.id, "source": str(source), "cleanup": False,
@@ -595,7 +597,7 @@ def finish(session: Session, import_id: int, dataset_id: int, log=print) -> dict
     root = Path(imp.path)
     oc = OutputCache(session, log)
     if imp.manifest is not None and root.is_dir():
-        pkg = read_package(root, check_audio=False, formats=_formats(imp))
+        pkg = read_package(root, check_audio=False)
         result["uids"] = assign_uids(session, ds, pkg.uids)
         if pkg.attributes:
             result["attributes"] = apply_attributes(session, ds, pkg.attributes)

@@ -1,5 +1,6 @@
-"""Reference packages in (CONTRACTS.md §2, §4; SPLIT_PLAN.md §4.3) and the endpoints Concord Label calls:
-fingerprints, staged imports (accept / reject), and the latest scores of a source's newest version."""
+"""Reference packages in (CONTRACTS.md §2; SPLIT_PLAN.md §4.3): staged imports (accept / reject) for Bench's own
+import page, and the endpoint Concord Label calls (CONTRACTS.md §4): the latest scores on the newest version of a
+Dataset Catalog dataset."""
 
 from __future__ import annotations
 
@@ -18,16 +19,6 @@ from ..datasets.refpackage import PackageError
 from .datasets import _clean_tags, _upload_dir, dataset_json, job_brief
 
 router = APIRouter(tags=["reference packages"])
-
-
-class FingerprintsIn(BaseModel):
-    sha256: list[str] = Field(default_factory=list, max_length=200_000)
-
-
-@router.post("/fingerprints/missing")
-def fingerprints_missing(body: FingerprintsIn, session: Session = Depends(get_session)) -> dict[str, list[str]]:
-    """The sha256s Bench has no original for, so a sender can leave the others out of a package."""
-    return {"missing": refpackage.missing_originals(session, body.sha256)}
 
 
 # ---------------------------------------------------------------- staged imports
@@ -120,18 +111,18 @@ def _iso(dt) -> str | None:
     return dt.isoformat(timespec="seconds") + "Z" if dt else None
 
 
-@router.get("/datasets/by-source/{dataset_uid}/scores")
-def scores_by_source(dataset_uid: str, install_id: str | None = None, normaliser: str | None = None,
-                     session: Session = Depends(get_session)) -> dict[str, Any]:
-    """Per model, its latest finished ASR run on the newest version of the source's dataset, scored with
-    the requested normaliser when such a score exists, else its latest score (CONTRACTS.md §4)."""
-    stmt = select(Dataset).where(Dataset.status == "ready", Dataset.source_key.is_not(None))
-    cands = [d for d in session.scalars(stmt)
-             if ((d.provenance or {}).get("source") or {}).get("dataset_uid") == dataset_uid
-             and (install_id is None or ((d.provenance or {}).get("source") or {}).get("install_id") == install_id)]
+@router.get("/datasets/by-catalog/{dataset_id}/scores")
+def scores_by_catalog(dataset_id: str, normaliser: str | None = None,
+                      session: Session = Depends(get_session)) -> dict[str, Any]:
+    """Per model, its latest finished ASR run on the newest version Bench has of the Dataset Catalog dataset
+    (imported from it or published to it), scored with the requested normaliser when such a score exists, else
+    its latest score (CONTRACTS.md §4)."""
+    cands = list(session.scalars(select(Dataset).where(Dataset.status == "ready",
+                                                       Dataset.catalog_dataset_id == dataset_id,
+                                                       Dataset.catalog_version.is_not(None))))
     if not cands:
-        raise HTTPException(404, "Concord Bench has no dataset from that source")
-    ds = max(cands, key=lambda d: (d.export_version or 0, d.id))
+        raise HTTPException(404, "Concord Bench has no version of that Dataset Catalog dataset")
+    ds = max(cands, key=lambda d: (d.catalog_version or 0, d.id))
     latest: dict[int, Run] = {}
     for run in session.scalars(select(Run).where(Run.dataset_id == ds.id, Run.task == RunTask.asr,
                                                  Run.status == "done").order_by(Run.id)):
@@ -148,4 +139,4 @@ def scores_by_source(dataset_uid: str, install_id: str | None = None, normaliser
                        "wer": (sc.aggregates or {}).get("wer"), "normaliser": sc.normaliser, "run_id": run.id,
                        "score_id": sc.id, "created_at": _iso(sc.created_at)})
     scores.sort(key=lambda s: (s["wer"] is None, s["wer"] if s["wer"] is not None else 0, s["model"]))
-    return {"dataset": {"id": ds.id, "name": ds.name, "export_version": ds.export_version}, "scores": scores}
+    return {"dataset": {"id": ds.id, "name": ds.name, "catalog_version": ds.catalog_version}, "scores": scores}

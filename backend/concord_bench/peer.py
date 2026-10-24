@@ -3,6 +3,10 @@
 `LABEL_URL` names it. `status()` asks its `/api/config` with a short timeout and keeps the answer for
 30 s, so pages that show or hide Label links stay fast when Label is down. Bench calls Label, or links
 to it, only when it answered as `concord-label` with the contract version Bench implements.
+
+Links and flags name a dataset by its Dataset Catalog id (contract version 3): they exist for a Bench dataset
+imported from a catalog version or published as one (`Dataset.catalog_dataset_id`), and Label finds its working
+dataset by that id.
 """
 
 from __future__ import annotations
@@ -74,19 +78,12 @@ def linked() -> bool:
     return bool(s["reachable"]) and s["contract_version"] == CONTRACT_VERSION
 
 
-def label_source(ds: Dataset) -> dict[str, Any] | None:
-    """The provenance source when the dataset's references came from Concord Label."""
-    src = (ds.provenance or {}).get("source") or {}
-    return src if src.get("app") == PEER_APP and src.get("dataset_uid") else None
-
-
 def file_link(ds: Dataset, sha256: str, t: float = 0.0) -> str | None:
-    """`LABEL_URL/label/file/by-sha/<sha256>?dataset_uid=<uid>&t=<start>`, or None when the dataset is not
-    from Label or Label is not linked (CONTRACTS.md §5)."""
-    src = label_source(ds)
-    if src is None or not linked():
+    """`LABEL_URL/label/file/by-sha/<sha256>?catalog_dataset_id=<id>&t=<start>`, or None when the dataset has no
+    catalog dataset or Label is not linked (CONTRACTS.md §5)."""
+    if not ds.catalog_dataset_id or not linked():
         return None
-    return (f"{url()}/label/file/by-sha/{sha256}?dataset_uid={quote(str(src['dataset_uid']))}"
+    return (f"{url()}/label/file/by-sha/{sha256}?catalog_dataset_id={quote(ds.catalog_dataset_id)}"
             f"&t={round(max(t, 0.0), 3)}")
 
 
@@ -100,21 +97,23 @@ def file_link_for(session: Session, audio_file_id: int, t: float = 0.0) -> str |
 # ---------------------------------------------------------------- flags back to Label (CONTRACTS.md §3)
 
 def flags_file(session: Session, ds: Dataset) -> dict[str, Any]:
-    """The dataset's flagged references as a flags file. The uid is the sender's segment uid when the
-    package carried one (refs/uids.jsonl), else null."""
-    src = (ds.provenance or {}).get("source")
-    if not src:
-        raise PeerError("this dataset did not come from a reference package with a source, so its flags "
-                        "cannot go back")
+    """The dataset's flagged references as a flags file (format version 2), named by the dataset's catalog
+    dataset and version. The uid is the sender's segment uid when the version carried one (refs/uids.jsonl),
+    else null."""
+    if not ds.catalog_dataset_id or not ds.catalog_version:
+        raise PeerError("this dataset is not a Dataset Catalog version, so its flags cannot go back to Concord "
+                        "Label")
+    src = (ds.provenance or {}).get("source") or {}
     rows = session.execute(select(Segment, AudioFile).join(AudioFile)
                            .where(AudioFile.dataset_id == ds.id, Segment.flagged.is_(True))
                            .order_by(AudioFile.rel_path, Segment.start)).all()
     return {
         "format": "concord-flags",
-        "format_version": 1,
+        "format_version": 2,
         "created_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "source": src,
-        "export_version": ds.export_version,
+        "catalog_dataset_id": ds.catalog_dataset_id,
+        "catalog_version": ds.catalog_version,
+        "dataset_name": src.get("dataset_name") or ds.name,
         "flags": [{"uid": seg.uid if (seg.meta or {}).get("source_uid") else None, "file_sha256": f.sha256,
                    "start": seg.start, "end": seg.end, "note": seg.flag_note} for seg, f in rows],
     }
@@ -136,8 +135,8 @@ def push_flags(doc: dict[str, Any]) -> dict[str, Any]:
     except httpx.HTTPError as exc:
         raise PeerError(f"Concord Label did not answer: {type(exc).__name__}") from None
     if r.status_code == 404:
-        raise PeerError(f"Concord Label has no dataset {doc['source'].get('dataset_name')!r} "
-                        f"(uid {doc['source'].get('dataset_uid')})")
+        raise PeerError(f"Concord Label has no dataset made from or published to {doc['dataset_name']!r} "
+                        f"(catalog dataset {doc['catalog_dataset_id']})")
     if r.status_code >= 400:
         detail: Any = r.text[:300]
         with contextlib.suppress(ValueError, AttributeError):

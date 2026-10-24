@@ -121,7 +121,7 @@ function RunEvaluation({ tab, onClose }: { tab: string; onClose: () => void }) {
       subtitle={
         tab === "pipeline"
           ? "Pick models for each stage. Every combination runs; pipelines already scored are reused, not run again."
-          : "Pick a dataset and catalog models to run on it. The model catalog starts each model when its turn comes."
+          : "Pick a dataset and catalog models to run on it. The Model Catalog starts each model when its turn comes."
       }
       footer={
         <>

@@ -50,8 +50,8 @@ export function ModelsPage() {
       <PageHeader
         crumbs="Bring your own"
         title="Models"
-        subtitle="Speech models from the model catalog. Register, verify and tag models in the catalog; Bench lists them and leases them for its runs."
-        actions={cat ? <AnchorButton href={cat.ui_url} variant="primary" newTab>Open the model catalog</AnchorButton> : undefined}
+        subtitle="Speech models from the Model Catalog. Register, verify and tag models in the catalog; Bench lists them and leases them for its runs."
+        actions={cat ? <AnchorButton href={cat.ui_url} variant="primary" newTab>Open the Model Catalog</AnchorButton> : undefined}
       />
       <div role="tablist" aria-label="Model type" className="flex flex-wrap gap-1 border-b border-track">
         {TABS.map((t) => {
@@ -68,10 +68,10 @@ export function ModelsPage() {
       <Panel>
         {q.isLoading && <Spinner />}
         <ErrorNote error={q.error} />
-        {cat && !cat.available && <ErrorNote error={`The model catalog is not reachable (${cat.error}). Showing the models Bench has used, as last seen.`} />}
+        {cat && !cat.available && <ErrorNote error={`The Model Catalog is not reachable (${cat.error}). Showing the models Bench has used, as last seen.`} />}
         {q.data && models.length === 0 && (
           <Empty>
-            The catalog lists no {cur.label.toLowerCase()} models yet. Register one in the <a href={cat?.ui_url} target="_blank" rel="noreferrer">model catalog</a>.
+            The catalog lists no {cur.label.toLowerCase()} models yet. Register one in the <a href={cat?.ui_url} target="_blank" rel="noreferrer">Model Catalog</a>.
           </Empty>
         )}
         {models.length > 0 && (

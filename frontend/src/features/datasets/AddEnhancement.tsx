@@ -54,7 +54,7 @@ export function AddEnhancement({ datasets, initial, onClose }: { datasets: Datas
         ))}
       </div>
       {(models.isLoading || copies.isLoading) && <Spinner />}
-      {models.data && enhancers.length === 0 && <span className="text-[13px] text-muted">The model catalog has no speech enhancement models. Register one in the catalog first.</span>}
+      {models.data && enhancers.length === 0 && <span className="text-[13px] text-muted">The Model Catalog has no speech enhancement models. Register one in the catalog first.</span>}
       <div role="group" aria-label="Enhancement models" className="flex flex-col gap-1.5">
         {enhancers.map((m) => {
           const c = have.get(m.catalog_id);

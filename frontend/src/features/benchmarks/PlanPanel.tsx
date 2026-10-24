@@ -116,8 +116,8 @@ function CatalogPlan({ datasetId, value }: { datasetId: number; value: PlanValue
   });
   if (empty) return null;
   if (error) return <ErrorNote error={error} />;
-  if (!data) return <span className="text-xs text-muted">{isFetching ? "Asking the model catalog for a plan…" : ""}</span>;
-  if (data.error) return <span className="text-xs text-warn">No plan from the model catalog: {data.error}</span>;
+  if (!data) return <span className="text-xs text-muted">{isFetching ? "Asking the Model Catalog for a plan…" : ""}</span>;
+  if (data.error) return <span className="text-xs text-warn">No plan from the Model Catalog: {data.error}</span>;
   if (!data.plan) return null;
   const p = data.plan;
   const toBuild = (data.copies ?? []).filter((c) => c.status !== "ready");
@@ -214,7 +214,7 @@ export function PlanPanel({
         <span className="text-xs text-subtle px-2">
           No catalog models for this stage. Register one in the{" "}
           <a href={data.catalog.ui_url} target="_blank" rel="noreferrer">
-            model catalog
+            Model Catalog
           </a>
           .
         </span>
@@ -224,7 +224,7 @@ export function PlanPanel({
 
   return (
     <div className="flex flex-col gap-4">
-      {!data.catalog.available && <ErrorNote error={`The model catalog is not reachable (${data.catalog.error}).`} />}
+      {!data.catalog.available && <ErrorNote error={`The Model Catalog is not reachable (${data.catalog.error}).`} />}
       {group(
         "VAD / diarisation",
         "seg_models",
@@ -285,7 +285,7 @@ export function PlanPanel({
       {datasetId !== undefined && planCount(value, labels) > 0 && <CatalogPlan datasetId={datasetId} value={value} />}
       <span className="num text-xs text-muted">
         {planCount(value, labels)} run{planCount(value, labels) === 1 ? "" : "s"}
-        {value.enhancers.length ? ` · ${value.enhancers.length} enhanced cop${value.enhancers.length === 1 ? "y" : "ies"}` : ""} · the model catalog starts models as their turn comes
+        {value.enhancers.length ? ` · ${value.enhancers.length} enhanced cop${value.enhancers.length === 1 ? "y" : "ies"}` : ""} · the Model Catalog starts models as their turn comes
       </span>
     </div>
   );

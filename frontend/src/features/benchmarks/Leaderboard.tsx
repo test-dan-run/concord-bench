@@ -811,7 +811,7 @@ function Compute({ cell, variant, enhancers }: { cell: BenchCell; variant: Varia
         <Fact k="Scored" v={ago(cell.finished_at)} />
       </div>
       <span className="text-[11px] text-subtle leading-relaxed">
-        RTF leaves out the model load (cold start) and queueing; it counts only the time spent on the audio{variant.enh ? ", plus enhancement, which runs once per dataset and is shared by every model" : ""}. Fields the model catalog does not report are not shown.
+        RTF leaves out the model load (cold start) and queueing; it counts only the time spent on the audio{variant.enh ? ", plus enhancement, which runs once per dataset and is shared by every model" : ""}. Fields the Model Catalog does not report are not shown.
       </span>
     </Panel>
   );

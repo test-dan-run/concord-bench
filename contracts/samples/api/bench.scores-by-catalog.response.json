@@ -2,7 +2,7 @@
  "dataset": {
   "id": 7,
   "name": "Help desk calls v2",
-  "export_version": 2
+  "catalog_version": 2
  },
  "scores": [
   {

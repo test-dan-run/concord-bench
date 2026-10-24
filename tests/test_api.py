@@ -30,7 +30,7 @@ def upload_fixture(client, refs="stm") -> str:
 def test_config_names_the_app_and_contract(client):
     """CONTRACTS.md §1: app, version, contract version and peer (no Label link yet)."""
     cfg = client.get("/api/config").json()
-    assert cfg["app"] == "concord-bench" and cfg["version"] == "0.2.0" and cfg["contract_version"] == 2
+    assert cfg["app"] == "concord-bench" and cfg["version"] == "0.2.0" and cfg["contract_version"] == 3
     assert cfg["peer"] == {"url": None, "reachable": False, "contract_version": None}
     sample = json.loads((ROOT / "contracts" / "samples" / "api" / "config.bench.json").read_text())
     assert set(sample) <= set(cfg) and set(sample["peer"]) == set(cfg["peer"])

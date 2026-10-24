@@ -1,23 +1,30 @@
-"""Check the contract samples against CONTRACTS.md (at the repository root or in docs/).
+"""Check the contract samples in contracts/samples against CONTRACTS.md (at the repository root in Concord
+Bench, in docs/ in Concord Label).
 
     python contracts/check.py
 
-Standard library only, so the same file runs unchanged in Concord Bench and Concord Label. It does not
-compare this repository's copy with the other app's: the copies are kept identical by hand.
+Standard library only, so the same file runs unchanged in both apps. It doesn't compare this repository's copy
+with the other app's, because the copies are kept identical by hand. When PLATFORM_DIR names the platform
+repository, the platform's sample dataset versions (contracts/datasets/samples) are checked as packages too.
 
-`check_package(path)` is also used by both apps' tests on packages they write or read.
+`check_package(path)` is also used by both apps' tests on packages and versions they write or read.
 """
 
 from __future__ import annotations
 
+import argparse
 import csv
 import hashlib
 import json
+import os
 import sys
 from pathlib import Path, PurePosixPath
 
-CONTRACT_VERSION = 2
-FORMAT_VERSIONS = (1, 2)  # reference package format versions a reader takes
+CONTRACT_VERSION = 3
+FORMAT_VERSIONS = (1, 2, 3)  # reference package format versions a reader takes
+AUDIO_ONLY_FROM = 3  # the first format version that allows a package with audio only (empty label_types)
+FLAGS_FORMAT_VERSION = 2
+CATALOG_INSTALL = "dataset-catalog"  # source.install_id of every Dataset Catalog version
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parent
 REF_FORMATS = {".json", ".jsonl", ".csv", ".txt", ".rttm", ".stm", ".tsv"}
@@ -67,8 +74,10 @@ def check_package(root: Path) -> list[str]:
     version = m.get("format_version")
     if version not in FORMAT_VERSIONS:
         problems.append(f"manifest.json: format_version {version!r} (known: {', '.join(map(str, FORMAT_VERSIONS))})")
-    if not set(m.get("label_types") or []) <= {"asr", "diar"} or not m.get("label_types"):
-        problems.append(f"manifest.json: label_types {m.get('label_types')!r}")
+    label_types = m.get("label_types")
+    audio_only = label_types == [] and isinstance(version, int) and version >= AUDIO_ONLY_FROM
+    if not isinstance(label_types, list) or not set(label_types) <= {"asr", "diar"} or not (label_types or audio_only):
+        problems.append(f"manifest.json: label_types {label_types!r}")
     if m.get("audio_included") not in ("all", "partial", "none"):
         problems.append(f"manifest.json: audio_included {m.get('audio_included')!r}")
     if m.get("scope") not in (None, "complete", "any"):
@@ -76,6 +85,9 @@ def check_package(root: Path) -> list[str]:
     src = m.get("source")
     if src is not None:
         problems += [f"manifest.json: source.{k} missing" for k in SOURCE_FIELDS if not src.get(k)]
+        uid = str(src.get("dataset_uid") or "")
+        if src.get("install_id") == CATALOG_INSTALL and not (len(uid) == 32 and set(uid) <= HEX):
+            problems.append("manifest.json: source.dataset_uid of a catalog version must be its catalog dataset id")
         if not isinstance(m.get("export_version"), int) or m["export_version"] < 1:
             problems.append("manifest.json: export_version must be 1, 2, ... when source is given")
 
@@ -116,14 +128,19 @@ def check_package(root: Path) -> list[str]:
     if m.get("audio_included") == "partial" and not 0 < included < len(rows):
         problems.append("audio_included is 'partial' but audio/ has none or all of the files")
 
-    side = {"uids.jsonl", "attributes.json"} if version == 2 else {"uids.jsonl"}
-    refs = [p for p in (root / "refs").glob("*") if p.is_file() and p.name not in side] \
-        if (root / "refs").is_dir() else []
-    if len(refs) != 1:
+    side = {"uids.jsonl", "attributes.json"} if version != 1 else {"uids.jsonl"}
+    in_refs = [p for p in (root / "refs").glob("*") if p.is_file()] if (root / "refs").is_dir() else []
+    refs = [p for p in in_refs if p.name not in side]
+    if audio_only:
+        if in_refs:
+            problems.append(f"refs/ must be empty when label_types is empty (found {', '.join(p.name for p in in_refs)})")
+        if (m.get("counts") or {}).get("segments") not in (0, None):
+            problems.append("manifest.json: counts.segments must be 0 when label_types is empty")
+    elif len(refs) != 1:
         problems.append(f"refs/ must hold exactly one references file besides {' and '.join(sorted(side))} "
                         f"(found {len(refs)})")
     attrs = root / "refs" / "attributes.json"
-    if version == 2 and attrs.is_file():
+    if version != 1 and attrs.is_file():
         problems += check_attributes(json.loads(attrs.read_text(encoding="utf-8")), set(stems.values()))
     uids = root / "refs" / "uids.jsonl"
     if uids.is_file():
@@ -170,12 +187,19 @@ def check_attributes(a: object, paths: set[str]) -> list[str]:
 
 
 def check_flags(path: Path) -> list[str]:
+    """Problems with a flags file (CONTRACTS.md §3), format version 2."""
     f = json.loads(path.read_text(encoding="utf-8"))
     problems = []
-    if f.get("format") != "concord-flags" or f.get("format_version") != 1:
+    if f.get("format") != "concord-flags" or f.get("format_version") != FLAGS_FORMAT_VERSION:
         problems.append(f"{path.name}: format/format_version")
-    src = f.get("source") or {}
-    problems += [f"{path.name}: source.{k} missing" for k in SOURCE_FIELDS if not src.get(k)]
+    cid = f.get("catalog_dataset_id")
+    if not (isinstance(cid, str) and len(cid) == 32 and set(cid) <= HEX):
+        problems.append(f"{path.name}: catalog_dataset_id must be a catalog dataset id (32 hex characters)")
+    n = f.get("catalog_version")
+    if not isinstance(n, int) or isinstance(n, bool) or n < 1:
+        problems.append(f"{path.name}: catalog_version must be 1, 2, ...")
+    if "dataset_name" not in f:
+        problems.append(f"{path.name}: dataset_name missing")
     for n, flag in enumerate(f.get("flags") or [], 1):
         if set(FLAG_FIELDS) - flag.keys():
             problems.append(f"{path.name}: flag {n} needs {', '.join(FLAG_FIELDS)}")
@@ -188,6 +212,8 @@ def check_samples() -> list[str]:
     for pkg in sorted(s.glob("reference-package-*")):
         problems += [f"{pkg.name}: {p}" for p in check_package(pkg)]
     problems += check_flags(s / "flags.json")
+    for v in platform_versions():
+        problems += [f"platform {v.name}: {p}" for p in check_package(v)]
     for f in sorted((s / "api").glob("*.json")):
         try:
             body = json.loads(f.read_text(encoding="utf-8"))
@@ -202,18 +228,27 @@ def check_samples() -> list[str]:
     return problems
 
 
+def platform_versions() -> list[Path]:
+    """The platform's sample dataset versions (contracts/datasets/samples) when PLATFORM_DIR names the platform."""
+    platform = os.environ.get("PLATFORM_DIR")
+    samples = Path(platform).expanduser() / "contracts" / "datasets" / "samples" if platform else None
+    return sorted(p for p in samples.iterdir() if p.is_dir()) if samples and samples.is_dir() else []
+
+
 def contracts_doc(root: Path) -> Path:
     """A repository's CONTRACTS.md: in docs/ where the repository keeps its docs there, else at the root."""
     docs = root / "docs" / "CONTRACTS.md"
     return docs if docs.is_file() else root / "CONTRACTS.md"
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter).parse_args(argv)
     problems = check_samples()
     for p in problems:
         print(f"FAIL {p}")
     if not problems:
-        print(f"contracts v{CONTRACT_VERSION}: samples ok")
+        extra = f", and {len(platform_versions())} platform versions" if platform_versions() else ""
+        print(f"contracts v{CONTRACT_VERSION}: samples ok{extra}")
     return 1 if problems else 0
 
 

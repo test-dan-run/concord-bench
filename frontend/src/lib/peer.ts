@@ -1,5 +1,6 @@
 // Concord Label, the peer app (CONTRACTS.md §1, SPLIT_PLAN.md §5), and reference-package helpers.
-// Label links show only when the dataset came from Label and Label answers with our contract version.
+// Label links show only when the dataset is a Dataset Catalog version (Label finds its working dataset by the
+// catalog dataset id, CONTRACTS.md §3 and §5) and Label answers with our contract version.
 
 import type { AppConfig, Dataset, ImportPreview, Provenance, ReferenceImport } from "./api";
 
@@ -22,15 +23,15 @@ export function provenanceOf(d: Pick<Dataset, "provenance"> | undefined): Proven
   return p && typeof p.import_id === "number" ? p : null;
 }
 
-/** The dataset's references came from Concord Label (its flags can go back, its files open in Label). */
-export function fromLabel(d: Pick<Dataset, "provenance"> | undefined): boolean {
-  const src = provenanceOf(d)?.source;
-  return !!src && src.app === LABEL_APP && !!src.dataset_uid;
+/** The dataset is a Dataset Catalog version, imported from the catalog or published to it, so its flags can go back
+ *  to Concord Label and its files open there. */
+export function linksToLabel(d: Pick<Dataset, "catalog"> | undefined): boolean {
+  return !!d?.catalog;
 }
 
-/** Why "Send flags to Label" cannot push right now, or null when it can. */
-export function flagsPushBlocker(cfg: Pick<AppConfig, "contract_version" | "peer"> | undefined, d: Pick<Dataset, "provenance">): string | null {
-  if (!fromLabel(d)) return "These references did not come from Concord Label.";
+/** Why "Send flags to Label" cannot send right now, or null when it can. */
+export function flagsPushBlocker(cfg: Pick<AppConfig, "contract_version" | "peer"> | undefined, d: Pick<Dataset, "catalog">): string | null {
+  if (!linksToLabel(d)) return "This dataset is not a Dataset Catalog version, so Concord Label can't find it.";
   if (!cfg?.peer.url) return "LABEL_URL is not set, so flags can only be downloaded.";
   if (!cfg.peer.reachable) return `Concord Label at ${cfg.peer.url} is not answering; download the flags file instead.`;
   if (cfg.peer.contract_version !== cfg.contract_version)

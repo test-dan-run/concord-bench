@@ -56,14 +56,15 @@ own data directory and database.
 
 - **Development.** `just dev` here (API 8600, Vite 5173) and `just dev` in Label (API 8620, Vite 5174).
   Each finds the other through one setting in its `.env`: `LABEL_URL=http://localhost:8620` here and
-  `BENCH_URL=http://localhost:8600` in Label. Unset, the links between them are hidden and packages are
-  downloaded instead of pushed.
-- **Handoff.** In Label, **Send to Bench** on a dataset writes a reference package (CONTRACTS.md §2):
-  pushed straight here when Bench answers (only the audio Bench lacks travels), or downloaded as a zip.
-  Here, **Import reference package** stages it with a preview; accepting it makes a new dataset (a later
-  package from the same source becomes `<name> v<N>`). Back the other way: "Open in Label" on the error
-  pages, the locked score in Label's live evaluation, and "Send flags to Label" on the dataset page.
-  `just e2e-handoff` in the Label repository runs this round trip with both images.
+  `BENCH_URL=http://localhost:8600` in Label. Unset, the links between them are hidden and flags are
+  downloaded as a file.
+- **Handoff** (contract version 3). Datasets move between the apps through the platform's Dataset
+  Catalog. Label publishes a dataset as a catalog version. Here, **Import reference package**, From
+  Dataset Catalog, stages a version with a preview, and accepting it makes a new dataset (a later version
+  of the same catalog dataset becomes `<name> v<N>`). Back the other way, for a dataset that is a catalog
+  version: "Open in Label" on the error pages, the locked score in Label's live evaluation, and "Send
+  flags to Label" on the dataset page all name the catalog dataset id. `just e2e-handoff` in the Label
+  repository runs this round trip with both images and the catalog service.
 - **Offline.** Bench no longer writes offline kits (EVALUATE_PLAN.md §9). Models go to an air-gapped
   machine as a model catalog bundle, and the Bench image goes with `docker save` (see Air-gapped machines).
   Concord Label still has its own copy of the old kit code.
@@ -114,17 +115,17 @@ is gone from Bench since EVALUATE_PLAN.md §9; Label keeps its copy for now.)
   segments, STM, SegLST, NeMo diarisation output JSON). Templates are under
   `fixtures/generated/templates`.
 - **Reference packages** (CONTRACTS.md §2, SPLIT_PLAN.md §4). Datasets -> Import reference package takes
-  a package folder or zip, from Concord Label (pushed or downloaded), another tool or by hand (template:
+  a package folder or zip, downloaded from the Dataset Catalog or Concord Label, from another tool or by hand (template:
   `reference_package.zip`). It is staged with a preview until accepted, then ingested from its audio
   (or Bench's stored originals, by sha256) and its one references file. The dataset keeps where the
   references came from; a package from the same source is a new dataset `<name> v<N>` linked to the
   earlier versions, and the dataset page offers to run the models benchmarked on the previous version.
   Format version 2 packages also carry labels for slicing, on the records and in `refs/attributes.json`
-  (file and speaker labels, CONTRACTS.md §2.7); version 1 is still read.
+  (file and speaker labels, CONTRACTS.md §2.7). Format version 3 allows a package with audio only, which
+  Bench refuses because it has no references; versions 1 and 2 are still read.
   Seg-model outputs in the package go into the output cache when their `build_key` is the build the catalog
   runs now (CONTRACTS.md §2.5; rows without one are skipped), and into the catalog's index. Label calls
-  `POST /api/fingerprints/missing`, the chunked upload, `POST /api/reference-imports` and
-  `GET /api/datasets/by-source/<uid>/scores`.
+  only `GET /api/datasets/by-catalog/<catalog dataset id>/scores` (CONTRACTS.md §4).
 - **Models** come from the model catalog: it registers them (display name, tags, "derived from"),
   verifies them on its check clip and records their capabilities (ASR, VAD, diarisation) and timing
   (word, segment or text) per build. The Models page lists the catalog's speech models read-only, with

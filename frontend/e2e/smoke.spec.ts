@@ -273,14 +273,16 @@ test("the sample reference package imports through the UI and is accepted", asyn
   await page.getByLabel("Package folder").setInputFiles(join(CONTRACTS, "samples", "reference-package-complete"));
   const staged = page.getByRole("article", { name: "Staged package Help desk calls" });
   await expect(staged).toBeVisible();
-  await expect(staged.getByText("Concord Label · Help desk calls · version 1 · install 3f2a9c1e5b7d4a60")).toBeVisible();
+  // the sample is a Dataset Catalog version downloaded with its audio (CONTRACTS.md §2)
+  await expect(staged.getByText("Dataset Catalog · Help desk calls · v1 · published by Concord Label")).toBeVisible();
   await expect(staged.getByText("refs/segments.seglst.json")).toBeVisible();
   await expect(staged.getByLabel("Dataset name")).toHaveValue("Help desk calls");
   await staged.getByRole("button", { name: "Accept" }).click();
   await expect(page).toHaveURL(/\/datasets\/\d+$/);
   await expect(page.getByRole("heading", { name: "Where the references came from" })).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByText("Concord Label", { exact: true })).toBeVisible();
+  await expect(page.getByText("Dataset Catalog, published by Concord Label", { exact: true })).toBeVisible();
   await expect(page.getByText("v1", { exact: true })).toBeVisible();
+  await expect(page.getByText("Made from v1 in the Dataset Catalog.")).toBeVisible();
   await expect(page.getByRole("cell", { name: "check_clip.wav" })).toBeVisible();
   // Accepted: listed in the history, nothing left waiting
   await page.goto("/datasets/import");

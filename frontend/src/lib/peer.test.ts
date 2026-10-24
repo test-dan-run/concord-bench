@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { ReferenceImport } from "./api";
 import { presetFor } from "../features/benchmarks/PlanPanel";
-import { flagsPushBlocker, fromLabel, labelLinked, skippedSummary, sortImports, sourceLine } from "./peer";
+import { flagsPushBlocker, labelLinked, linksToLabel, skippedSummary, sortImports, sourceLine } from "./peer";
 
 const source = { app: "concord-label", install_id: "3f2a", dataset_uid: "8d4e", dataset_name: "Help desk calls" };
-const fromLabelDs = { provenance: { import_id: 1, package_name: "x", source } } as never;
-const handMade = { provenance: { import_id: 2, package_name: "y", source: null } } as never;
+const fromCatalog = { catalog: { dataset_id: "8d4e2b6a", n: 2, published: false, url: "http://c/datasets/8d4e2b6a/v/2" } } as never;
+const handMade = { catalog: null } as never;
 const cfg = (peer: { url: string | null; reachable: boolean; contract_version: number | null }) => ({ contract_version: 1, peer });
 
 describe("Label links", () => {
@@ -17,20 +17,19 @@ describe("Label links", () => {
     expect(labelLinked(undefined)).toBe(false);
   });
 
-  it("only for datasets whose references came from Label", () => {
-    expect(fromLabel(fromLabelDs)).toBe(true);
-    expect(fromLabel(handMade)).toBe(false);
-    expect(fromLabel({ provenance: {} })).toBe(false);
-    expect(fromLabel({ provenance: { import_id: 3, package_name: "z", source: { ...source, app: "other-tool" } } } as never)).toBe(false);
+  it("only for datasets that are Dataset Catalog versions", () => {
+    expect(linksToLabel(fromCatalog)).toBe(true);
+    expect(linksToLabel(handMade)).toBe(false);
+    expect(linksToLabel(undefined)).toBe(false);
   });
 
   it("explain why flags cannot be pushed", () => {
     const up = cfg({ url: "http://l:8610", reachable: true, contract_version: 1 });
-    expect(flagsPushBlocker(up, fromLabelDs)).toBeNull();
-    expect(flagsPushBlocker(up, handMade)).toMatch(/did not come from Concord Label/);
-    expect(flagsPushBlocker(cfg({ url: null, reachable: false, contract_version: null }), fromLabelDs)).toMatch(/LABEL_URL is not set/);
-    expect(flagsPushBlocker(cfg({ url: "http://l:8610", reachable: false, contract_version: null }), fromLabelDs)).toMatch(/not answering/);
-    expect(flagsPushBlocker(cfg({ url: "http://l:8610", reachable: true, contract_version: 2 }), fromLabelDs)).toMatch(/contract version 2/);
+    expect(flagsPushBlocker(up, fromCatalog)).toBeNull();
+    expect(flagsPushBlocker(up, handMade)).toMatch(/not a Dataset Catalog version/);
+    expect(flagsPushBlocker(cfg({ url: null, reachable: false, contract_version: null }), fromCatalog)).toMatch(/LABEL_URL is not set/);
+    expect(flagsPushBlocker(cfg({ url: "http://l:8610", reachable: false, contract_version: null }), fromCatalog)).toMatch(/not answering/);
+    expect(flagsPushBlocker(cfg({ url: "http://l:8610", reachable: true, contract_version: 2 }), fromCatalog)).toMatch(/contract version 2/);
   });
 });
 

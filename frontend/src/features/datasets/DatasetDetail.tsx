@@ -4,7 +4,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { api, type Dataset, type EnhancedCopy, type FlaggedReference, type Run } from "../../lib/api";
 import { useConfig } from "../../lib/config";
 import { ago, bytes, clock, hours, num, rtf } from "../../lib/format";
-import { appName, CATALOG_INSTALL, flagsPushBlocker, fromLabel, provenanceOf } from "../../lib/peer";
+import { appName, CATALOG_INSTALL, flagsPushBlocker, linksToLabel, provenanceOf } from "../../lib/peer";
 import * as I from "../../components/icons";
 import { LabelsTable } from "../../components/LabelsTable";
 import { TagInput } from "../../components/TagInput";
@@ -296,19 +296,17 @@ export function DatasetDetail() {
               title="Flagged references"
               subtitle="Marked wrong with “Flag reference as wrong” on the ASR error pages. Scores still use them until the references are corrected."
             >
-              {prov?.source && nFlags > 0 && (
+              {linksToLabel(d) && nFlags > 0 && (
                 <div className="flex flex-col gap-1.5 pb-1">
                   <span className="flex flex-wrap items-center gap-2">
-                    {fromLabel(d) && (
-                      <Button size="sm" variant="primary" disabled={!!flagBlocker || sendFlags.isPending} title={flagBlocker ?? undefined} onClick={() => sendFlags.mutate()}>
-                        <I.Flag size={13} /> Send flags to Label
-                      </Button>
-                    )}
+                    <Button size="sm" variant="primary" disabled={!!flagBlocker || sendFlags.isPending} title={flagBlocker ?? undefined} onClick={() => sendFlags.mutate()}>
+                      <I.Flag size={13} /> Send flags to Label
+                    </Button>
                     <a href={`/api/datasets/${d.id}/flags.json`} download className="inline-flex items-center gap-1.5 text-xs">
                       <I.Download size={12} /> Download flags file
                     </a>
                   </span>
-                  {fromLabel(d) && flagBlocker && <span className="text-xs text-muted">{flagBlocker}</span>}
+                  {flagBlocker && <span className="text-xs text-muted">{flagBlocker}</span>}
                   {sendFlags.data && (
                     <span role="status" className="text-xs text-good">
                       Sent {sendFlags.data.sent} flag{sendFlags.data.sent === 1 ? "" : "s"}: {sendFlags.data.matched} matched in Concord Label, {sendFlags.data.unmatched} unmatched.
@@ -316,6 +314,9 @@ export function DatasetDetail() {
                   )}
                   <ErrorNote error={sendFlags.error} />
                 </div>
+              )}
+              {!linksToLabel(d) && prov?.source && nFlags > 0 && (
+                <span className="text-xs text-muted pb-1">Flags go back to Concord Label only from a Dataset Catalog version. Publish the dataset in Label and import the new version here.</span>
               )}
               {nFlags === 0 && <span className="text-[13px] text-muted">No references flagged.</span>}
               {(flags.data ?? []).map((f) => (

@@ -1,7 +1,7 @@
 // Datasets → Import reference package (SPLIT_PLAN.md §4.3, CONTRACTS.md §2): upload a package (zip or
-// folder), pick a version from the Dataset Catalog when it is set up (DATASET_CATALOG_PLAN.md §9.2), or
-// find one Concord Label pushed; check the preview, then accept it into a new dataset (a new version when
-// it comes from the same source as an earlier one) or reject it.
+// folder) or pick a version from the Dataset Catalog when it is set up (DATASET_CATALOG_PLAN.md §9.2); check
+// the preview, then accept it into a new dataset (a new version when it comes from the same source as an
+// earlier one) or reject it.
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
@@ -55,7 +55,7 @@ export function ImportReference() {
       />
       <div className="flex flex-col xl:flex-row gap-5 items-start">
         <div className="flex-1 w-full flex flex-col gap-5 min-w-0">
-          <Panel title="Waiting for a decision" subtitle="Packages you uploaded or picked from the Dataset Catalog, and packages Concord Label pushed. Nothing is stored as a dataset until you accept.">
+          <Panel title="Waiting for a decision" subtitle="Packages you uploaded or picked from the Dataset Catalog. Nothing is stored as a dataset until you accept.">
             {imports.isLoading && <Spinner />}
             <ErrorNote error={imports.error} />
             {imports.data && waiting.length === 0 && <Empty>No staged packages.</Empty>}
@@ -130,9 +130,9 @@ export function ImportReference() {
             </a>
           </Panel>
           {cfg?.dataset_catalog.enabled && <CatalogImport uiUrl={cfg.dataset_catalog.ui_url} />}
-          <Panel title="Pushed from Concord Label">
+          <Panel title="From Concord Label">
             <span className="text-xs text-muted">
-              Concord Label's “Send to Bench” uploads packages here when its BENCH_URL points at this app. They wait above until you accept them.
+              Concord Label publishes its references to the Dataset Catalog. Import a published version with From Dataset Catalog, or upload a package that Label built for download.
             </span>
           </Panel>
         </aside>

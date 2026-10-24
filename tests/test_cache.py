@@ -4,6 +4,10 @@ provenance, Bench's own outputs recorded, and a catalog that is down. aicore's F
 
 from __future__ import annotations
 
+import threading
+import time
+from types import SimpleNamespace
+
 import httpx
 import numpy as np
 import pytest
@@ -11,9 +15,11 @@ from aicore.catalog import FakeCatalog, index_key
 
 from concord_bench.adapters.base import Adapter
 from concord_bench.core.models import ModelOutput
+from concord_bench.core.settings import reset_settings
 from concord_bench.platform import catalog
-from concord_bench.runs import cache
+from concord_bench.runs import cache, executor
 from concord_bench.runs.cache import OutputCache
+from concord_bench.runs.references import FileRefs
 
 SHA = "cd" * 32
 BUILD = "f00dfeedf00dfeed"
@@ -159,3 +165,78 @@ def test_bench_own_stale_entries_are_computed_again(session, cat, monkeypatch):
     monkeypatch.setattr(catalog, "read_outputs", lambda url, ids: pytest.fail("must not read from Bench itself"))
     row, hit = cache.get_or_run(session, a, AUDIO, SHA, build_key=BUILD)
     assert not hit and a.calls == 1
+
+
+class SlowASR(Adapter):
+    """Sleeps per call and counts how many calls overlap."""
+
+    kind, contract, api = "asr", "openai", "audio.transcriptions"
+
+    def __init__(self, delay=0.2, fail_at=None):
+        super().__init__("qwen3-asr-1-7b", {})
+        self.delay, self.fail_at = delay, fail_at
+        self.lock = threading.Lock()
+        self.calls = self.now = self.peak = 0
+
+    def call(self, audio):
+        with self.lock:
+            self.calls += 1
+            self.now += 1
+            self.peak = max(self.peak, self.now)
+            n = self.calls
+        time.sleep(self.delay)
+        with self.lock:
+            self.now -= 1
+        if n == self.fail_at:
+            raise ValueError("bad request")
+        return {"text": f"call {n}"}
+
+    def parse(self, raw, duration):
+        return {"text": raw["text"], "words": None, "segments": None}
+
+
+def _work(n_files: int, spans=((0.0, 0.5), (0.5, 1.0))):
+    refs = [FileRefs(SimpleNamespace(id=i, rel_path=f"f{i}.wav", sha256=f"{i:02x}" * 32, duration=1.0))
+            for i in range(n_files)]
+    return [(r, [cache.key(r.sha256, s, e) for s, e in spans]) for r in refs]
+
+
+def test_infer_overlaps_calls_and_latency_sums_to_wall_time(session, cat, monkeypatch):
+    monkeypatch.setattr(executor, "_load_audio", lambda r: AUDIO)
+    a = SlowASR()
+    work = _work(3)
+    work.append((FileRefs(SimpleNamespace(id=9, rel_path="copy.wav", sha256=work[0][0].sha256, duration=1.0)),
+                 work[0][1]))  # same audio as the first file: computed once
+    t0 = time.perf_counter()
+    rows, st = executor.infer(session, OutputCache(session), a, {"build_key": BUILD}, work, lambda f, m: None, "asr",
+                              concurrency=4)
+    wall = time.perf_counter() - t0
+    assert (a.calls, a.peak) == (6, 4)
+    assert (st["calls"], st["computed"], st["hits"]) == (8, 6, 2)
+    total = sum(r.latency_s for r in rows.values())
+    assert total <= wall and total > 0.8 * wall and total < 6 * a.delay * 0.75  # wall time, not summed requests
+    assert session.query(ModelOutput).count() == 6
+
+
+def test_infer_keeps_finished_rows_when_a_call_fails(session, cat, monkeypatch):
+    monkeypatch.setattr(executor, "_load_audio", lambda r: AUDIO)
+    a = SlowASR(delay=0.0, fail_at=3)
+    with pytest.raises(ValueError, match="bad request"):
+        executor.infer(session, OutputCache(session), a, {"build_key": BUILD}, _work(2), lambda f, m: None, "asr")
+    session.rollback()
+    assert session.query(ModelOutput).count() == 2
+    rows, st = executor.infer(session, OutputCache(session), a, {"build_key": BUILD}, _work(2), lambda f, m: None, "asr")
+    assert (st["computed"], st["hits"], a.calls) == (2, 2, 5)
+
+
+def test_concurrency_by_model_then_engine_then_default(data_dir, monkeypatch):
+    def model(cid, engine):
+        return SimpleNamespace(catalog_id=cid, catalog={"engine": engine})
+
+    assert executor.concurrency_for(model("qwen3-asr-1-7b", "vllm")) == executor.CONCURRENCY["vllm"]
+    assert executor.concurrency_for(model("meralion-3-3b-asr", "custom")) == executor.CONCURRENCY["default"]
+    monkeypatch.setenv("INFER_CONCURRENCY", '{"meralion-3-3b-asr": 1, "vllm": 16}')
+    reset_settings()
+    assert executor.concurrency_for(model("meralion-3-3b-asr", "custom")) == 1
+    assert executor.concurrency_for(model("qwen3-asr-1-7b", "vllm")) == 16
+    assert executor.concurrency_for(model("ark-asr-0-6b", "custom")) == executor.CONCURRENCY["default"]

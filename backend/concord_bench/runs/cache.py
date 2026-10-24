@@ -193,11 +193,22 @@ class OutputCache:
         if row is not None:
             return row, True
         output, latency = adapter.run(audio, AudioRef(sha256, s, e))
-        row = ModelOutput(model_name=adapter.service, build_key=build_key, audio_sha256=sha256, span_start=s,
-                          span_end=e, params_hash=adapter.params_hash, params=adapter.params, output=output,
-                          latency_s=latency, image=image)
+        row = new_row(adapter, (sha256, s, e), output, latency, build_key, image)
         stored = self.store(row)
         return stored, stored is not row
+
+    @property
+    def pending(self) -> int:
+        """Stored rows not yet recorded in the index."""
+        return len(self._pending)
+
+
+def new_row(adapter: Adapter, k: Key, output: dict[str, Any], latency: float, build_key: str | None,
+            image: str | None) -> ModelOutput:
+    sha, s, e = k
+    return ModelOutput(model_name=adapter.service, build_key=build_key, audio_sha256=sha, span_start=s, span_end=e,
+                       params_hash=adapter.params_hash, params=adapter.params, output=output, latency_s=latency,
+                       image=image)
 
 
 def get_or_run(session: Session, adapter: Adapter, audio: np.ndarray, sha256: str, start: float = WHOLE,

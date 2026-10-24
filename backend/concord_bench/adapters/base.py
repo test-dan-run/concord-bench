@@ -75,6 +75,11 @@ class Adapter(ABC):
     def params_hash(self) -> str:
         return params_hash(self.params)
 
+    def client(self) -> Any:
+        """The service client, made on first use (adapters that call a service override this). Thread-safe
+        once made: jobs make it before calls run in threads."""
+        return None
+
     @abstractmethod
     def call(self, audio: np.ndarray) -> Any: ...
 

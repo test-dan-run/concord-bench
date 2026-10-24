@@ -194,7 +194,10 @@ Environment variables (or `.env`, see [.env.example](.env.example)): `CONCORD_DA
 `http://127.0.0.1:8700`, `http://catalog:8700` in the image), `CATALOG_UI_URL` (linked from the Models page;
 default `CATALOG_URL`), `PUBLIC_URL` (where Label reads Bench's outputs, registered with the catalog;
 default `http://127.0.0.1:8600`), `REPLAY_DIR`, `RECORD_DIR`, `CONCORD_IMAGE`, `CONCORD_HOME`, `LABEL_URL`
-(Concord Label's base URL, e.g. `http://localhost:8620`; unset means no Label links). Bench sets
+(Concord Label's base URL, e.g. `http://localhost:8620`; unset means no Label links), `INFER_CONCURRENCY`
+(model calls a job keeps in flight, as JSON by catalog model id, engine or `default`; built in:
+`{"vllm": 8, "default": 2}`). Because calls overlap, RTF is wall time: each output's `latency_s` is its
+share of the seconds the job spent computing, not its request's own latency. Bench sets
 `AICORE_CATALOG` for `aicore` from `CATALOG_URL`, so every model call goes through the catalog's gateway.
 Each app has its own data directory and database; nothing is shared on disk. Bench's schema versions
 start with `bench_`, and Bench refuses to start (the API, the worker and `just migrate`) on a database

@@ -12,6 +12,9 @@ Pipelines run stage by stage (MODEL_CATALOG_REDESIGN.md, "Job planning"), so eac
 - `execute` on a pipeline run then assembles it from stored outputs (`infer=False`): no model.
 Segments are merged (short ones into same-speaker neighbours) and padded before transcription (PLAN §5 M4).
 
+Calls overlap (`concurrency_for`), so an output's `latency_s` is its share of the wall time spent computing,
+not its request's own latency; RTF sums those shares (`_compute`).
+
 `builds` say which build of each model an output must come from: catalog model id -> {build_key, image}.
 
 Speech enhancement (EVALUATE_PLAN.md §5): a run, stage or pipeline stage can read an enhanced copy of the
@@ -23,7 +26,9 @@ the diarised segments (the copy has the original's length, so the segment times 
 
 from __future__ import annotations
 
+import time
 from collections.abc import Callable
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass
 from typing import Any
 
@@ -32,8 +37,10 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from .. import adapters
+from ..adapters.base import AudioRef
 from ..core import paths
 from ..core.models import AudioFile, Dataset, EnhancedCopy, Model, ModelOutput, Run, RunTask, utcnow
+from ..core.settings import get_settings
 from ..datasets.audio import cut, load_derived
 from . import cache
 from .cache import WHOLE, Key, OutputCache
@@ -48,6 +55,11 @@ MIN_SEG = 0.5  # shorter segments are merged into the nearest same-speaker segme
 MERGE_MAX_GAP = 2.0  # ...when it is at most this far away
 PAD = 0.1
 MIN_SPAN = 0.05  # shorter spans are not sent to a model
+
+# Calls in flight per model (settings `infer_concurrency` overrides): vLLM batches requests that arrive
+# together; the custom servers take one at a time behind a lock, so a second call only overlaps the upload.
+CONCURRENCY = {"vllm": 8, "default": 2}
+INDEX_BATCH = 100  # stored rows per index record call
 
 
 class RunError(Exception):
@@ -193,47 +205,108 @@ def _load_audio(r: FileRefs) -> np.ndarray:
     return load_derived(paths.derived(r.sha256))
 
 
+def concurrency_for(model: Model) -> int:
+    """Calls kept in flight for a model: settings `infer_concurrency` merged over CONCURRENCY, by catalog id,
+    then engine, then "default"."""
+    c = {**CONCURRENCY, **get_settings().infer_concurrency}
+    n = c.get(model.catalog_id) or c.get((model.catalog or {}).get("engine") or "") or c.get("default") or 1
+    return max(1, int(n))
+
+
 def infer(session: Session, oc: OutputCache, adapter: adapters.Adapter, build: dict[str, Any],
           work: list[tuple[FileRefs, list[Key]]], progress: Progress, label: str,
-          mode: str = "run") -> tuple[dict[Key, ModelOutput], dict[str, int]]:
+          mode: str = "run", concurrency: int = 1) -> tuple[dict[Key, ModelOutput], dict[str, int]]:
     """Every (file, span) of `work` for one model: stored rows, plus calls for what is missing.
 
-    mode `run` computes what is missing, `lookup` raises MissingOutput instead, `check` only counts it.
-    The index is asked once for the whole work list; rows are committed and indexed per file."""
+    mode `run` computes what is missing (`_compute`, up to `concurrency` calls at once), `lookup` raises
+    MissingOutput instead, `check` only counts it. The index is asked once for the whole work list."""
     bk = build.get("build_key")
-    pre = oc.prefetch(adapter, bk, [k for _, keys in work for k in keys])
-    stats = {"calls": 0, "hits": 0, "computed": 0, "missing": 0, "copied": pre["copied"]}
-    rows: dict[Key, ModelOutput] = {}
-    for n, (r, keys) in enumerate(work):
-        if mode == "run":
-            progress(n / max(1, len(work)), f"{label}: {r.file.rel_path}")
-        keys = list(dict.fromkeys(keys))
-        have = oc.lookup_many(adapter, bk, keys)
-        rows.update(have)
-        stats["calls"] += len(keys)
-        stats["hits"] += len(have)
-        missing = [k for k in keys if k not in have]
-        if not missing:
-            continue
-        if mode == "check":
-            stats["missing"] += len(missing)
-            continue
-        if mode == "lookup":
-            raise MissingOutput(f"{adapter.service} has no stored output for {r.file.rel_path} "
-                                f"({len(missing)} span(s)); run its stage again")
-        audio = _load_audio(r)
-        for k in missing:
-            _, s, e = k
-            row, hit = oc.run(adapter, audio if e < 0 else cut(audio, s, e), r.sha256, s, e, bk,
-                              build.get("image"))
-            rows[k] = row
-            stats["hits"] += hit
-            stats["computed"] += not hit
-        session.commit()  # keep cache rows, release the write lock
-        oc.flush()
+    work = [(r, list(dict.fromkeys(keys))) for r, keys in work]
+    every = [k for _, keys in work for k in keys]
+    pre = oc.prefetch(adapter, bk, every)
     session.commit()  # rows copied from other apps
     oc.flush()
+    rows = oc.lookup_many(adapter, bk, every)
+    todo: list[tuple[FileRefs, list[Key]]] = []
+    seen: set[Key] = set()  # files with the same audio share their outputs
+    for r, keys in work:
+        missing = [k for k in keys if k not in rows and k not in seen]
+        seen.update(missing)
+        if missing:
+            todo.append((r, missing))
+    stats = {"calls": len(every), "hits": 0, "computed": 0, "missing": 0, "copied": pre["copied"]}
+    if todo and mode == "check":
+        stats["missing"] = len(seen)
+    elif todo and mode == "lookup":
+        r, missing = todo[0]
+        raise MissingOutput(f"{adapter.service} has no stored output for {r.file.rel_path} "
+                            f"({len(missing)} span(s)); run its stage again")
+    elif todo:
+        computed, stats["computed"] = _compute(session, oc, adapter, build, todo, progress, label, concurrency)
+        rows.update(computed)
+    stats["hits"] = stats["calls"] - stats["computed"] - stats["missing"]
     return rows, stats
+
+
+def _compute(session: Session, oc: OutputCache, adapter: adapters.Adapter, build: dict[str, Any],
+             todo: list[tuple[FileRefs, list[Key]]], progress: Progress, label: str,
+             concurrency: int) -> tuple[dict[Key, ModelOutput], int]:
+    """Calls for every missing span, up to `concurrency` in flight. Only `adapter.run` runs in the threads;
+    rows are stored, committed and indexed here as calls finish. Returns the rows and how many were new
+    (a row another process stored first is used instead).
+
+    A row's `latency_s` is its share of the job's wall time, so RTF (a sum over rows) stays wall time when
+    calls overlap: the seconds since the previous calls finished, split by request latency. Replayed rows
+    keep their recorded latency."""
+    bk, image = build.get("build_key"), build.get("image")
+    wall = get_settings().replay_dir is None
+    if wall:
+        adapter.client()  # made once, before the threads share it
+    calls = ((r, k) for r, keys in todo for k in keys)
+    total = sum(len(keys) for _, keys in todo)
+    rows: dict[Key, ModelOutput] = {}
+    new = done = 0
+    audio: tuple[str, np.ndarray] | None = None  # the current file's; calls come file by file
+
+    def submit(pool: ThreadPoolExecutor, r: FileRefs, k: Key) -> Future:
+        nonlocal audio
+        if audio is None or audio[0] != r.sha256:
+            audio = (r.sha256, _load_audio(r))
+        _, s, e = k
+        return pool.submit(adapter.run, audio[1] if e < 0 else cut(audio[1], s, e), AudioRef(r.sha256, s, e))
+
+    pool = ThreadPoolExecutor(concurrency, thread_name_prefix="infer")
+    running: dict[Future, tuple[FileRefs, Key]] = {}
+    mark = time.perf_counter()
+    try:
+        while True:
+            while len(running) < concurrency and (nxt := next(calls, None)) is not None:
+                running[submit(pool, *nxt)] = nxt
+            if not running:
+                break
+            finished, _ = wait(running, return_when=FIRST_COMPLETED)
+            now = time.perf_counter()
+            results = [(running.pop(f), f) for f in finished]
+            ok = [(rk, f.result()) for rk, f in results if f.exception() is None]
+            latency = sum(lat for _, (_, lat) in ok)
+            share = (now - mark) / latency if wall and latency > 0 else 1.0
+            mark = now
+            for (_, k), (output, lat) in ok:
+                row = cache.new_row(adapter, k, output, lat * share, bk, image)
+                rows[k] = oc.store(row)
+                new += rows[k] is row
+            session.commit()  # keep finished rows, release the write lock
+            if oc.pending >= INDEX_BATCH:
+                oc.flush()
+            errors = [exc for _, f in results if (exc := f.exception()) is not None]
+            if errors:
+                raise errors[0]
+            done += len(finished)
+            progress(done / total, f"{label}: {results[-1][0][0].file.rel_path}")
+    finally:
+        pool.shutdown(wait=True, cancel_futures=True)
+        oc.flush()
+    return rows, new
 
 
 def _build(builds: Builds, model: Model) -> dict[str, Any]:
@@ -303,7 +376,8 @@ def _run_asr(session: Session, oc: OutputCache, run: Run, refs: list[FileRefs], 
         us = r.asr_units() if r.has_text else [None]
         units[r.file.id] = [(u, (u.start, u.end) if u is not None else (0.0, r.duration)) for u in us]
     work = [(r, [k for _, (s, e) in units[r.file.id] if (k := span_key(r, s, e))]) for r in refs]
-    rows, st = infer(session, oc, adapter, _build(builds, model), work, progress, model.display_name, mode)
+    rows, st = infer(session, oc, adapter, _build(builds, model), work, progress, model.display_name, mode,
+                     concurrency_for(model))
     outputs: dict[str, Any] = {}
     seconds = audio_s = 0.0
     calls = 0
@@ -330,7 +404,8 @@ def _run_seg(session: Session, oc: OutputCache, run: Run, refs: list[FileRefs], 
         raise RunError(f"{model.display_name} has no VAD / diarisation capability")
     adapter = adapters.for_model(model)
     run.params = {**run.params, "adapter": adapter.params}
-    rows, st = infer(session, oc, adapter, _build(builds, model), seg_work(refs), progress, model.display_name, mode)
+    rows, st = infer(session, oc, adapter, _build(builds, model), seg_work(refs), progress, model.display_name, mode,
+                     concurrency_for(model))
     outputs: dict[str, Any] = {}
     seconds = audio_s = 0.0
     for r in refs:
@@ -361,7 +436,7 @@ def _run_pipeline(session: Session, oc: OutputCache, run: Run, refs: list[FileRe
     seg_rows: dict[Key, ModelOutput] = {}
     if seg is not None:
         seg_rows, _ = infer(session, oc, seg, _build(builds, seg_model), seg_work(refs),
-                            lambda f, m: progress(0.3 * f, m), seg_name, mode)
+                            lambda f, m: progress(0.3 * f, m), seg_name, mode, concurrency_for(seg_model))
     outputs: dict[str, Any] = {}
     plans = []
     asr_view = {a.file.id: a for a in asr_refs}
@@ -378,7 +453,7 @@ def _run_pipeline(session: Session, oc: OutputCache, run: Run, refs: list[FileRe
     work = [(r, [k for c in cuts + (o_cuts or []) if (k := span_key(r, c.start, c.end))])
             for r, _, cuts, o_cuts in plans]
     rows, st = infer(session, oc, asr, _build(builds, asr_model), work, lambda f, m: progress(0.3 + 0.7 * f, m),
-                     f"{seg_name} → {asr_model.display_name}", mode)
+                     f"{seg_name} → {asr_model.display_name}", mode, concurrency_for(asr_model))
 
     def cut_json(r: FileRefs, cs: list[Cut]) -> tuple[list[dict[str, Any]], float]:
         out, sec = [], 0.0
@@ -423,7 +498,7 @@ def seg_stage(session: Session, model: Model, ds: Dataset, build: dict[str, Any]
         raise RunError(f"{model.display_name} has no VAD / diarisation capability")
     refs = with_copy(session, file_refs(session, ds.id), ready_copy(session, ds.id, enh_model) if enh_model else None)
     rows, st = infer(session, OutputCache(session, log), adapters.for_model(model), build, seg_work(refs), progress,
-                     f"{model.display_name} (seg stage)", mode)
+                     f"{model.display_name} (seg stage)", mode, concurrency_for(model))
     if mode == "run":
         log(f"seg stage {model.display_name}: {len(refs)} files, {st['hits']} stored ({st['copied']} from other "
             f"apps), {st['computed']} computed")
@@ -469,7 +544,7 @@ def asr_stage(session: Session, model: Model, ds: Dataset, sources: list[Source]
                 add(r, oracle_cuts(r))
     work = [(r, keys[r.file.id]) for r in refs if keys[r.file.id]]
     _, st = infer(session, oc, adapters.for_model(model, ds.language), build, work, progress,
-                  f"{model.display_name} (ASR stage)", mode)
+                  f"{model.display_name} (ASR stage)", mode, concurrency_for(model))
     if mode == "run":
         log(f"ASR stage {model.display_name}: {st['calls']} cuts from {len(sources)} seg source(s), {st['hits']} "
             f"stored ({st['copied']} from other apps), {st['computed']} computed")

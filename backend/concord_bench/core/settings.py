@@ -39,6 +39,9 @@ class Settings(BaseSettings):
     replay_dir: Path | None = None
     # Write every live model response into this folder (to refresh recordings).
     record_dir: Path | None = None
+    # Model calls a job keeps in flight at once, by catalog model id, engine or "default"; merged over
+    # `runs.executor.CONCURRENCY`. JSON, e.g. INFER_CONCURRENCY='{"meralion-3-3b-asr": 1}'.
+    infer_concurrency: dict[str, int] = Field(default_factory=dict)
     # Concord Label's base URL (SPLIT_PLAN.md §5): "Open in Label" and "Send flags to Label". Unset: no links.
     label_url: str | None = None
     # Built frontend served by FastAPI; absent in development (Vite serves it).

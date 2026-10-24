@@ -63,7 +63,8 @@ def data_dir(tmp_path, monkeypatch):
     from concord_bench.core.settings import reset_settings
 
     monkeypatch.setenv("CONCORD_DATA", str(tmp_path / "data"))
-    for var in ("REPLAY_DIR", "RECORD_DIR", "LABEL_URL", "CATALOG_URL", "AICORE_CATALOG", "CATALOG_UI_URL", "PUBLIC_URL"):
+    for var in ("REPLAY_DIR", "RECORD_DIR", "LABEL_URL", "CATALOG_URL", "AICORE_CATALOG", "CATALOG_UI_URL", "PUBLIC_URL",
+                "DATASET_STORE"):
         monkeypatch.delenv(var, raising=False)
     reset_settings()
     peer.clear_cache()
@@ -91,6 +92,25 @@ def client(data_dir):
 
     with TestClient(create_app()) as c:
         yield c
+
+
+@pytest.fixture
+def dataset_store(tmp_path, monkeypatch, data_dir):
+    """The Dataset Catalog set up: DATASET_STORE is the folder of an in-memory FakeDatasetCatalog (aicore),
+    which answers as the catalog service."""
+    from aicore.datasets import FakeDatasetCatalog
+
+    from concord_bench import APP
+    from concord_bench.core.settings import reset_settings
+    from concord_bench.platform import dataset_catalog
+
+    fake = FakeDatasetCatalog(tmp_path / "store", app=APP)
+    monkeypatch.setenv("DATASET_STORE", str(fake.store))
+    reset_settings()
+    dataset_catalog.use(fake)
+    yield fake
+    dataset_catalog.reset()
+    reset_settings()
 
 
 @pytest.fixture

@@ -7,6 +7,8 @@
 #
 # Running: join ai-net, where the model catalog answers at http://catalog:8700 (it starts models and
 # routes every call), with the platform directory mounted at /platform for the aicore endpoint map.
+# To use the Dataset Catalog, mount its store read-only and point DATASET_STORE at it, e.g.
+#   -v "$HOME/ai-data/datasets":/datasets:ro -e DATASET_STORE=/datasets
 # See README.md.
 
 ARG PYTHON=python:3.12.15-slim-bookworm

@@ -18,7 +18,7 @@ from ..core.db import get_session
 from ..core.models import AudioFile, Dataset, EnhancedCopy, Job, JobStatus, Model, Run, RunTask, Segment, Slice
 from ..core.settings import REPO_ROOT
 from ..datasets.ingest import NO_REFERENCES, inspect_source
-from ..platform import catalog
+from ..platform import catalog, dataset_catalog
 from ..runs import enhance, jobs
 
 router = APIRouter(tags=["datasets"])
@@ -377,7 +377,17 @@ def delete_enhanced(copy_id: int, session: Session = Depends(get_session)) -> di
 
 @router.delete("/datasets/{dataset_id}", status_code=204)
 def delete_dataset(dataset_id: int, session: Session = Depends(get_session)) -> None:
-    session.delete(get_dataset(session, dataset_id))
+    """With the Dataset Catalog set up, the holds on the dataset's audio are released first, except on files
+    another Bench dataset has; a catalog that doesn't answer keeps the dataset (and its holds)."""
+    ds = get_dataset(session, dataset_id)
+    if dataset_catalog.enabled():
+        try:
+            dataset_catalog.release_unused(
+                session, session.scalars(select(AudioFile.sha256).where(AudioFile.dataset_id == ds.id)), ds.id)
+        except (dataset_catalog.Unavailable, dataset_catalog.DatasetCatalogError) as exc:
+            raise HTTPException(503, f"{exc}. The dataset is kept, so its audio stays held in the store; try "
+                                     "again when the catalog answers.") from None
+    session.delete(ds)
     session.commit()
 
 

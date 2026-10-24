@@ -70,6 +70,8 @@ export interface AppConfig {
   replay: boolean;
   /** The model catalog: models, leases and the gateway; `ui_url` is where models are registered and verified. */
   catalog: { url: string; ui_url: string };
+  /** The Dataset Catalog: set up when DATASET_STORE is set; `ui_url` is its pages in the catalog UI. */
+  dataset_catalog: { enabled: boolean; ui_url: string };
 }
 
 /** A catalog lease a job waits on ("waiting for compute"). */

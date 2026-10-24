@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import mimetypes
+
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
@@ -39,7 +41,8 @@ def audio(file_id: int, original: bool = False, copy_id: int | None = None,
     p = paths.original(f.sha256, f.ext) if original else paths.derived(_sha(session, f, copy_id))
     if not p.is_file():
         raise HTTPException(404, "no playable audio for this file (undecodable?)")
-    media = "audio/flac" if p.suffix == ".flac" else None
+    # An original in the Dataset Catalog's store has no extension: its type comes from the file's own.
+    media = "audio/flac" if p.suffix == ".flac" else mimetypes.guess_type(f"x{f.ext}")[0] if original else None
     return FileResponse(p, media_type=media, headers={"Cache-Control": "private, max-age=86400"})
 
 

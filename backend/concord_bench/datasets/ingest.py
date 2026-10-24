@@ -1,6 +1,9 @@
 """Dataset ingest: scan a source (upload folder, zip, or local path), match annotations to audio by
 stem, then copy originals, derive 16 kHz mono FLAC + peaks, and store reference segments.
 
+With DATASET_STORE set, originals go to the Dataset Catalog's store instead of CONCORD_DATA/originals,
+and the dataset holds its audio there (DATASET_CATALOG_PLAN.md §9.1, §4.3).
+
 `inspect_source` is cheap (no decoding) and drives the upload page's match counts and previews.
 `ingest` runs as a job and reports progress. Concord Bench benchmarks against references, so a source
 whose annotations match no audio file is refused (`NO_REFERENCES`); audio-only datasets belong in
@@ -22,6 +25,7 @@ from sqlalchemy.orm import Session
 
 from ..core import paths
 from ..core.models import AudioFile, Dataset, FileStatus, LabelType, Segment, SegmentStatus
+from ..platform import dataset_catalog
 from . import audio as audio_mod
 from . import labels as labels_mod
 from .parsers import ANNOTATION_EXTS, ParseResult, RefRecord, parse_file
@@ -160,7 +164,10 @@ def file_labels(records: list[RefRecord]) -> dict[str, Any]:
 
 
 def _process_audio(f: AudioFile, src: Path) -> dict[str, Any]:
-    """Copy the original, decode, check clipping, derive 16 kHz mono and peaks. Returns facts for the report."""
+    """Copy the original (to the store when it is set up), decode, check clipping, derive 16 kHz mono and
+    peaks. Returns facts for the report."""
+    if dataset_catalog.enabled():
+        dataset_catalog.upload(src, f.sha256)
     orig = paths.original(f.sha256, f.ext)
     if not orig.exists():
         orig.parent.mkdir(parents=True, exist_ok=True)
@@ -235,6 +242,9 @@ def ingest(session: Session, dataset_id: int, source: Path, progress: Progress |
         if constant:
             f.meta = {**(f.meta or {}), **constant}
         session.commit()  # short write transactions: the API shares this SQLite file
+    if dataset_catalog.enabled():
+        progress(0.93, "holding the audio in the store")
+        dataset_catalog.hold(session.scalars(select(AudioFile.sha256).where(AudioFile.dataset_id == ds.id)))
     progress(0.95, "writing report")
     all_records = [r for recs in m["matched"].values() for r in recs]
     ds.label_types = label_types_for(all_records)

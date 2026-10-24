@@ -6,7 +6,7 @@ import os
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import AliasChoices, Field
+from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # The Concord Bench checkout (fixtures, frontend/dist, .env). In an image the package is installed into
@@ -42,14 +42,29 @@ class Settings(BaseSettings):
     # Model calls a job keeps in flight at once, by catalog model id, engine or "default"; merged over
     # `runs.executor.CONCURRENCY`. JSON, e.g. INFER_CONCURRENCY='{"meralion-3-3b-asr": 1}'.
     infer_concurrency: dict[str, int] = Field(default_factory=dict)
+    # The Dataset Catalog's audio store as this app sees it (DATASET_CATALOG_PLAN.md §4), mounted read-only.
+    # Set: ingest uploads originals to the store through the catalog service (at catalog_url) and reads
+    # them from here, and datasets can be imported from and published to the catalog. Unset: originals stay
+    # in CONCORD_DATA/originals and the Dataset Catalog is not used.
+    dataset_store: Path | None = None
     # Concord Label's base URL (SPLIT_PLAN.md §5): "Open in Label" and "Send flags to Label". Unset: no links.
     label_url: str | None = None
     # Built frontend served by FastAPI; absent in development (Vite serves it).
     frontend_dist: Path = Field(default=REPO_ROOT / "frontend" / "dist")
 
+    @field_validator("dataset_store", mode="before")
+    @classmethod
+    def _empty_is_unset(cls, v: object) -> object:
+        return None if isinstance(v, str) and not v.strip() else v
+
     @property
     def catalog_ui(self) -> str:
         return (self.catalog_ui_url or self.catalog_url).rstrip("/")
+
+    @property
+    def dataset_catalog_ui(self) -> str:
+        """The Dataset Catalog's pages in the catalog UI (DATASET_CATALOG_PLAN.md §6)."""
+        return self.catalog_ui + "/datasets"
 
     def export_platform_env(self) -> None:
         """aicore reads AI_HOST, AICORE_ENDPOINTS and AICORE_CATALOG from the process environment. With

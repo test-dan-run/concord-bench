@@ -179,10 +179,12 @@ def ensure_score(session: Session, run: Run, normaliser: str | None, collar: flo
     if run.status != "done":
         return None, None
     sc = scoring.find_score(session, run, normaliser, collar, skip_overlap)
-    if sc is not None:
+    if sc is not None and (sc.aggregates or {}).get("v", 1) >= scoring.SCORE_VERSION:
         return sc, None
     n = normalisers.get(normaliser or normalisers.DEFAULT) if run.task != RunTask.seg else None
     if n is not None and n.service and _model_state(n.service) != "running":
+        if sc is not None:  # older scoring version, but rescoring would need a model that is not running
+            return sc, None
         if not queue:
             return None, None
         job = session.scalar(select(Job).where(Job.type == "score", Job.status.in_(ACTIVE))

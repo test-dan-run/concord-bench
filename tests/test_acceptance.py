@@ -306,3 +306,64 @@ def test_benchmark_metric_and_overlap_parameters(flow, client):
                 scored[(c["model_id"], c["dataset_id"])]["breakdown"]["facts"]["Reference speech (s)"]
     grid = client.get("/api/benchmarks-pipelines", params={"tcp_collar": 2}).json()
     assert grid["tcp_collar"] == 2 and any(c.get("tcpwer") is not None for c in grid["cells"])
+
+
+# ---------------------------------------------------------------- EVALUATE_PLAN.md E5c, E6
+
+def test_slices_by_label_and_saved_slice_columns(flow, client, session):
+    asr = session.scalar(select(Run).where(Run.task == "asr", Run.model.has()))
+    s = client.get(f"/api/errors/asr/summary?run_id={asr.id}").json()
+    out = client.get("/api/errors/slices", params={"score_id": s["score_id"]}).json()
+    assert out["overall"]["value"] == pytest.approx(s["tiles"]["wer"])
+    keys = {lb["key"] for lb in out["labels"]}
+    assert {"speaker", "duration_s"} <= keys  # derived labels exist even without labels in the references
+    rows = client.get("/api/errors/slices", params={"score_id": s["score_id"], "label": "duration_s",
+                                                    "bins": "quantile"}).json()["rows"]
+    assert rows and sum(r["n"] for r in rows) == out["overall"]["n"]
+    assert all(r["ci"] is None or r["ci"][0] <= r["score"] <= r["ci"][1] for r in rows)
+    # save a slice on the dataset: it becomes a Benchmarks column for every model on that dataset
+    spk = next(lb for lb in out["labels"] if lb["key"] == "speaker")
+    assert spk["kind"] != "unused"
+    first = client.get("/api/errors/slices", params={"score_id": s["score_id"], "label": "speaker"}).json()["rows"][0]
+    saved = client.post(f"/api/datasets/{asr.dataset_id}/slices",
+                        json={"name": "one speaker", "filters": [{"key": "speaker", "value": first["value"]}]}).json()
+    table = client.get("/api/benchmarks/asr").json()
+    assert [x["name"] for x in table["slices"]] == ["one speaker"]
+    vals = [c["slices"][str(saved["id"])] for c in table["cells"] if c.get("slices")]
+    assert vals and all(v["n"] == first["n"] for v in vals)
+    unit = client.get("/api/errors/slices/units", params={"score_id": s["score_id"],
+                                                          "filters": json.dumps(saved["filters"])}).json()
+    assert unit["n"] == first["n"] and unit["value"] == pytest.approx(first["score"]) and unit["worst"]
+
+
+def test_diarisation_regions_and_matrices(flow, client, session):
+    seg = next(r for r in session.scalars(select(Run).where(Run.task == "seg")) if r.model.has_speakers)
+    ds = client.get(f"/api/errors/diar/summary?run_id={seg.id}").json()
+    rows = {r["key"]: r for r in ds["regions"]["rows"]}
+    assert set(rows) == {"overlap", "near_change", "short", "nonspeech"}
+    assert all(r["share_errors"] is None or 0 <= r["share_errors"] <= 1 for r in rows.values())
+    assert ds["speaker_counts"]["files"] == 6
+    files = client.get(f"/api/errors/diar/files?score_id={ds['score_id']}").json()["rows"]
+    fd = client.get(f"/api/errors/diar/files/{files[0]['id']}").json()
+    assert fd["confusion"]["rows"] and all("context" in e for e in fd["errors"])
+
+
+def test_pipeline_stage_cards_waterfall_and_causes(flow, client, session):
+    checked = 0
+    for pipe in session.scalars(select(Run).where(Run.task == "pipeline")):
+        ps = client.get(f"/api/errors/pipeline/summary?run_id={pipe.id}").json()
+        assert [s["kind"] for s in ps["stages"]] == ["seg", "asr", "output"]
+        if not ps["has_speakers"] or ps["oracle"]:
+            continue
+        wf = ps["waterfall"]
+        att = ps["tiles"]["attribution"]
+        assert [w["key"] for w in wf][:3] == ["asr", "segmentation", "speaker"]
+        assert wf[2]["total"] == pytest.approx(att["cpwer"])
+        assert wf[-1]["key"] == "timing" and wf[-1]["total"] == pytest.approx(ps["tiles"]["tcpwer"])
+        rows = client.get(f"/api/errors/pipeline/files?score_id={ps['score_id']}").json()["rows"]
+        pf = client.get(f"/api/errors/pipeline/files/{rows[0]['id']}").json()
+        tagged = sum(1 for line in pf["ref_lines"] for w in line["words"] if w["cause"])
+        wrong = sum(p["s"] + p["d"] for p in pf["pairs"])
+        assert tagged == wrong
+        checked += 1
+    assert checked

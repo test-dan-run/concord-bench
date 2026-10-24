@@ -42,6 +42,11 @@ def number(v: Any) -> float | None:
     return None
 
 
+def _integral(v: Any) -> bool:
+    """Written as a whole number (7, "7"), not as a decimal (7.0, "7.0"): IDs are the former."""
+    return isinstance(v, int) or (isinstance(v, str) and v.strip().lstrip("-").isdigit())
+
+
 def kind_of(values: list[Any]) -> tuple[str, str | None]:
     """(discrete | continuous | unused, why unused)."""
     distinct = len({str(v) for v in values})
@@ -49,7 +54,7 @@ def kind_of(values: list[Any]) -> tuple[str, str | None]:
     if values and all(n is not None for n in nums):
         if distinct <= MAX_DISCRETE:
             return "discrete", None
-        if all(float(n).is_integer() for n in nums) and distinct >= ID_SHARE * len(values):
+        if all(_integral(v) for v in values) and distinct >= ID_SHARE * len(values):
             return "unused", f"{distinct} different values: looks like an ID"
         return "continuous", None
     if distinct > MAX_DISCRETE and distinct >= ID_SHARE * len(values):

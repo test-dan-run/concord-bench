@@ -7,7 +7,12 @@ per-file `result` rows. Reads cached outputs only, so rescoring takes seconds an
   error regions for the lanes. Normaliser is not used (stored as "-"). `skip_overlap` leaves overlapped
   speech out of DER and JER.
 - Pipelines: per file WER, cpWER (C), tcpWER at each of `cpwer.TCP_COLLARS`, DER of the seg stage (with
-  `skip_overlap`), error attribution (A / B / C), RTF.
+  `skip_overlap`), error attribution (A / B / C), RTF. Every reference word C gets wrong is tagged with the
+  stage that caused it (EVALUATE_PLAN.md §8.2): ASR when A also gets it wrong, segmentation when only B
+  does, speaker attribution otherwise; and counted by the kind of moment its reference segment is in.
+
+`SCORE_VERSION` is stored in the aggregates; a score from an older version is recomputed when read
+(`api.runs.ensure_score`), which needs no inference.
 """
 
 from __future__ import annotations
@@ -27,6 +32,14 @@ from .executor import file_refs
 from .references import FileRefs
 
 NO_NORMALISER = "-"
+SCORE_VERSION = 2  # 2: MER / WIL / WIP, tcpWER, per-word error causes and moments in pipelines
+
+# Kinds of moment a reference segment can be in (a segment can be in several).
+NEAR_CHANGE_S = 0.5
+SHORT_TURN_S = 1.0
+LONG_SEGMENT_S = 30.0
+MOMENTS = {"near_change": "Within 0.5 s of a speaker change", "overlap": "Overlapping speech",
+           "long": "Segments over 30 s (chunked by ASR)", "short": "Turns under 1 s (backchannels)"}
 
 
 def score_key(run: Run, normaliser: str | None, collar: float | None,
@@ -68,6 +81,7 @@ def score_run(session: Session, run: Run, normaliser: str | None = None, collar:
         r.score_id = score.id
     session.add_all(rows)
     agg["rtf"] = run.rtf_by_stage
+    agg["v"] = SCORE_VERSION
     score.aggregates = agg
     session.flush()
     return score
@@ -219,6 +233,82 @@ def _score_seg(session: Session, run: Run, refs: dict[str, FileRefs], collar: fl
 
 # ---------------------------------------------------------------- pipelines
 
+def moment_kinds(segs: list[Any]) -> list[set[str]]:
+    """The kinds of moment (MOMENTS) each reference segment (start, end, speaker) is in."""
+    out: list[set[str]] = []
+    for k, s in enumerate(segs):
+        kinds: set[str] = set()
+        dur = s.end - s.start
+        if dur < SHORT_TURN_S:
+            kinds.add("short")
+        if dur > LONG_SEGMENT_S:
+            kinds.add("long")
+        for j, o in enumerate(segs):
+            if j == k or o.speaker == s.speaker:
+                continue
+            if min(s.end, o.end) - max(s.start, o.start) > 0.05:
+                kinds.add("overlap")
+            if abs(s.start - o.end) <= NEAR_CHANGE_S or abs(o.start - s.end) <= NEAR_CHANGE_S:
+                kinds.add("near_change")
+        out.append(kinds)
+    return out
+
+
+def _wrong_words(result: dict[str, Any]) -> dict[str, set[int]]:
+    """Reference speaker -> indices of its reference words a cpWER alignment gets wrong (sub / del)."""
+    out: dict[str, set[int]] = {}
+    for pair in cpwer.per_word(result)["pairs"]:
+        if pair["ref_speaker"] is None:
+            continue
+        out[pair["ref_speaker"]] = {o["ri"] for o in pair["ops"] if o["op"] in ("sub", "del") and o["ri"] is not None}
+    return out
+
+
+def word_causes(ref_segs: list[cpwer.SpkSegment], res_a: dict[str, Any], res_b: dict[str, Any],
+                res_c: dict[str, Any]) -> tuple[dict[str, list[str | None]], dict[str, dict[str, int]], list[dict]]:
+    """Each reference word C gets wrong, tagged asr / segmentation / speaker (see the module docstring); the
+    counts per kind of moment; and the reference segments as lines of tagged words."""
+    wa, wb, wc = _wrong_words(res_a), _wrong_words(res_b), _wrong_words(res_c)
+    ordered = sorted(ref_segs, key=lambda s: (s.start, s.end))
+    kinds = moment_kinds(ordered)
+    causes: dict[str, list[str | None]] = {}
+    pos: dict[str, int] = {}
+    moments: dict[str, dict[str, int]] = {k: {"words": 0, "asr": 0, "segmentation": 0, "speaker": 0} for k in MOMENTS}
+    lines = []
+    for seg, kk in zip(ordered, kinds, strict=True):
+        words = seg.text.split()
+        start = pos.get(seg.speaker, 0)
+        tags = []
+        for i in range(start, start + len(words)):
+            if i not in wc.get(seg.speaker, set()):
+                tag = None
+            elif i in wa.get(seg.speaker, set()):
+                tag = "asr"
+            elif i in wb.get(seg.speaker, set()):
+                tag = "segmentation"
+            else:
+                tag = "speaker"
+            tags.append(tag)
+        pos[seg.speaker] = start + len(words)
+        causes.setdefault(seg.speaker, []).extend(tags)
+        for k in kk:
+            moments[k]["words"] += len(words)
+            for tag in tags:
+                if tag:
+                    moments[k][tag] += 1
+        lines.append({"start": seg.start, "end": seg.end, "speaker": seg.speaker, "kinds": sorted(kk),
+                      "words": [{"w": w, "cause": c} for w, c in zip(words, tags, strict=True)]})
+    return causes, moments, lines
+
+
+def _sum_moments(rows: list[dict[str, dict[str, int]]]) -> dict[str, dict[str, int]]:
+    out = {k: {"words": 0, "asr": 0, "segmentation": 0, "speaker": 0} for k in MOMENTS}
+    for r in rows:
+        for k, v in r.items():
+            for kk, n in v.items():
+                out[k][kk] += n
+    return out
+
 def _cut_texts(cuts: list[dict[str, Any]], outs: dict[int, Any]) -> list[tuple[dict[str, Any], str]]:
     return [(c, (outs[c["cache_id"]].output.get("text", "") if c.get("cache_id") in outs else "")) for c in cuts]
 
@@ -235,6 +325,7 @@ def _score_pipeline(session: Session, run: Run, refs: dict[str, FileRefs], norm,
     outs = cache.outputs_for(session, ids)
     rows, wer_rows, cp_rows, der_rows, att_rows = [], [], [], [], []
     tcp_rows: dict[str, list[dict[str, Any]]] = {cpwer.tcp_key(c): [] for c in cpwer.TCP_COLLARS}
+    moment_rows: list[dict[str, dict[str, int]]] = []
     wrong_pairs: Counter[tuple[str, str]] = Counter()
     for fid, entry in run.outputs.items():
         r = refs.get(fid)
@@ -299,18 +390,23 @@ def _score_pipeline(session: Session, run: Run, refs: dict[str, FileRefs], norm,
             for ww in pw["wrong_speaker_words"]:
                 wrong_pairs[(ww["word"], f"{ww['ref_speaker']}→{ww['given_to'] or ww['hyp_speaker']}")] += 1
             if oracle:
-                a_err = b_err = res_c["errors"]
+                res_a = res_b = res_c
             else:
                 hyp_a = [cpwer.SpkSegment(c["start"], c["end"], c["speaker"], t)
                          for (c, _), t in zip(o_texts, o_n, strict=True)]
-                a_err = cpwer.cpwer(ref_segs, hyp_a)["errors"] if hyp_a else res_c["n"]
+                res_a = cpwer.cpwer(ref_segs, hyp_a) if hyp_a else cpwer.cpwer(ref_segs, [])
                 hyp_b = [cpwer.SpkSegment(c["start"], c["end"],
                                           attribution.best_ref_speaker(c["src"][0], c["src"][1], ref_turns)
                                           or "unassigned", t) for (c, _), t in zip(cut_texts, cut_n, strict=True)]
-                b_err = cpwer.cpwer(ref_segs, hyp_b)["errors"]
-            att = attribution.split(a_err, b_err, res_c["errors"], res_c["n"])
+                res_b = cpwer.cpwer(ref_segs, hyp_b)
+            att = attribution.split(res_a["errors"], res_b["errors"], res_c["errors"], res_c["n"])
             m["attribution"] = att
             att_rows.append(att)
+            causes, moments, lines = word_causes(ref_segs, res_a, res_b, res_c)
+            m["moments"] = moments
+            moment_rows.append(moments)
+            al["causes"] = causes
+            al["ref_lines"] = lines
         m["rtf"] = run.rtf_by_stage.get("total")
         sort_val = m["cpwer"] if m["cpwer"] is not None else m["wer"]
         rows.append(Result(audio_file_id=r.file.id, utterance_key=r.file.stem, start=0.0, end=r.duration,
@@ -321,5 +417,6 @@ def _score_pipeline(session: Session, run: Run, refs: dict[str, FileRefs], norm,
     agg["tcpwer"] = {k: cpwer.aggregate(v, "tcpwer") for k, v in tcp_rows.items()} if cp_rows else None
     agg["der"] = der.aggregate(der_rows) if der_rows else ({"der": 0.0} if oracle else None)
     agg["attribution"] = attribution.aggregate(att_rows) if att_rows else None
+    agg["moments"] = _sum_moments(moment_rows) if moment_rows else None
     agg["wrong_speaker_pairs"] = [{"word": w_, "move": mv, "n": n} for (w_, mv), n in wrong_pairs.most_common(20)]
     return rows, agg

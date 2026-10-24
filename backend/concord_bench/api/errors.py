@@ -17,8 +17,10 @@ from sqlalchemy.orm import Session
 from .. import peer
 from ..analysis import asr as asr_an
 from ..analysis import diar as diar_an
+from ..analysis import slices as slices_an
 from ..core.db import get_session
 from ..core.models import AudioFile, Result, Run, RunTask, Score, Segment
+from ..datasets.labels import of as labels_of
 from ..metrics import attribution, cpwer, normalisers, wer
 from .runs import ensure_score, get_run, run_json, run_label
 
@@ -189,15 +191,19 @@ def diar_summary(run_id: int, collar: float | None = None, compare_run_id: int |
         raise HTTPException(400, "not a VAD / diarisation run")
     sc = _score_for(session, run, None, collar, skip_overlap)
     results = list(session.scalars(select(Result).where(Result.score_id == sc.id)))
+    names = {f.id: f.stem for f in session.scalars(select(AudioFile).where(AudioFile.dataset_id == run.dataset_id))}
     out = {"run": run_json(run), "score_id": sc.id, "collar": sc.collar, "skip_overlap": sc.skip_overlap,
            "has_speakers": run.model.has_speakers,
            "tiles": _diar_tiles(sc.aggregates), "compare": None,
            "conditions": diar_an.by_condition(results, _meta_by_file(session, run.dataset_id)),
-           "turns_found": diar_an.turns_found(results), "boundaries": diar_an.boundary_histogram(results)}
+           "turns_found": diar_an.turns_found(results), "boundaries": diar_an.boundary_histogram(results),
+           "regions": diar_an.regions(results, names), "speaker_counts": diar_an.speaker_counts(results)}
     if compare_run_id:
         cr = get_run(session, compare_run_id)
         csc = _score_for(session, cr, None, collar, skip_overlap)
-        out["compare"] = {"run": run_json(cr), "tiles": _diar_tiles(csc.aggregates)}
+        cres = list(session.scalars(select(Result).where(Result.score_id == csc.id)))
+        out["compare"] = {"run": run_json(cr), "score_id": csc.id, "tiles": _diar_tiles(csc.aggregates),
+                          "regions": diar_an.regions(cres, names)}
     return out
 
 
@@ -228,10 +234,19 @@ def diar_file(result_id: int, session: Session = Depends(get_session)) -> dict[s
         raise HTTPException(404, "file not found")
     al = r.alignment or {}
     mapping = al.get("mapping") or {}
+    masks = diar_an._moments(al.get("ref") or [], r.end or 0.0)
+    errors = [{**e, "context": diar_an.context_of(e["start"], e["end"], masks)} for e in al.get("errors", [])]
+    f = session.get(AudioFile, r.audio_file_id)
+    spk_labels: dict[str, dict[str, Any]] = {}
+    for s in session.scalars(select(Segment).where(Segment.audio_file_id == r.audio_file_id, Segment.speaker.is_not(None))):
+        for k, v in labels_of(s.meta).items():
+            spk_labels.setdefault(s.speaker, {})[k] = v
     return {**_file_json(r), "ref": al.get("ref", []),
             "hyp": [[s, e, mapping.get(k, k), k] for s, e, k in al.get("hyp", [])], "mapping": mapping,
-            "errors": al.get("errors", []), "overlaps": al.get("overlaps", []),
-            "largest": diar_an.largest_errors(al), "label_url": peer.file_link_for(session, r.audio_file_id)}
+            "errors": errors, "overlaps": al.get("overlaps", []),
+            "largest": sorted(errors, key=lambda e: -e["dur"])[:6], "confusion": diar_an.confusion(r),
+            "speaker_labels": spk_labels, "file_labels": labels_of(f.meta if f else {}),
+            "label_url": peer.file_link_for(session, r.audio_file_id)}
 
 
 # ---------------------------------------------------------------- pipelines
@@ -271,13 +286,79 @@ def pipeline_summary(run_id: int, normaliser: str | None = None, collar: float |
     sc = _score_for(session, run, normaliser, collar, skip_overlap)
     tiles = _pipe_tiles(sc.aggregates, tcp_collar)
     p = run.pipeline
+    results = list(session.scalars(select(Result).where(Result.score_id == sc.id)))
     return {"run": run_json(run), "score_id": sc.id, "normaliser": sc.normaliser, "collar": sc.collar,
             "skip_overlap": sc.skip_overlap, "tcp_collar": tcp_collar, "tcp_collars": list(cpwer.TCP_COLLARS),
+            "stages": _stages(run, sc, results), "waterfall": _waterfall(tiles),
+            "moments": _moments(sc.aggregates.get("moments")),
             "tiles": tiles, "counterfactuals": _counterfactuals(tiles["attribution"]),
             "wrong_speaker_pairs": sc.aggregates.get("wrong_speaker_pairs", []),
             "has_speakers": sc.aggregates.get("has_speakers"), "oracle": p.seg_model_id is None,
             "chain": [{"stage": "VAD / diarisation", "name": p.seg_model.display_name if p.seg_model else
                        "Reference segments + speakers"}, {"stage": "ASR", "name": p.asr_model.display_name}]}
+
+
+def _stages(run: Run, sc: Score, results: list[Result]) -> list[dict[str, Any]]:
+    """The pipeline's stage cards: each stage's model, metric, hardware, RTF and what it hands on."""
+    agg, rtf, hw = sc.aggregates or {}, run.rtf_by_stage or {}, run.hardware or {}
+    p = run.pipeline
+    segs = [len(((r.alignment or {}).get("seg") or {}).get("hyp") or []) for r in results]
+    spks = [len({h[2] for h in ((r.alignment or {}).get("seg") or {}).get("hyp") or []}) for r in results]
+    cuts = sum(len((r.alignment or {}).get("hyp_segments") or []) for r in results)
+    out = []
+    if run.enh_model is not None:
+        out.append({"kind": "enhance", "name": run.enh_model.display_name, "metric": None, "metric_label": None,
+                    "rtf": rtf.get("enh"), "hardware": hw.get(run.enh_model.catalog_id) or {},
+                    "placement": run.enh_placement, "generative": run.enh_model.generative,
+                    "handoff": "enhanced audio, same length", "copy_id": run.enh_copy_id})
+    der = (agg.get("der") or {}).get("der") if agg.get("der") else None
+    out.append({"kind": "seg", "name": p.seg_model.display_name if p.seg_model else "Reference segments + speakers",
+                "oracle": p.seg_model is None, "metric": der, "metric_label": "DER",
+                "rtf": rtf.get("seg"), "hardware": hw.get(p.seg_model.catalog_id) or {} if p.seg_model else {},
+                "hears": "enhanced" if run.enh_model is not None and run.enh_placement == "before" else "original",
+                "handoff": f"{sum(segs)} segments, {max(spks) if spks else 0} speakers at most per file"})
+    out.append({"kind": "asr", "name": p.asr_model.display_name, "metric": (agg.get("wer") or {}).get("wer"),
+                "metric_label": "WER", "rtf": rtf.get("asr"), "hardware": hw.get(p.asr_model.catalog_id) or {},
+                "hears": "enhanced" if run.enh_model is not None else "original",
+                "handoff": f"{cuts} transcribed segments"})
+    cp = (agg.get("cpwer") or {}).get("cpwer") if agg.get("cpwer") else None
+    out.append({"kind": "output", "name": "Speaker-attributed transcript", "metric": cp, "metric_label": "cpWER",
+                "rtf": rtf.get("total"), "wall_s": run.wall_s})
+    return out
+
+
+def _waterfall(tiles: dict[str, Any]) -> list[dict[str, Any]] | None:
+    """ASR alone, then segmentation, speaker attribution (to cpWER) and timing (to tcpWER), as rates."""
+    att = tiles.get("attribution")
+    if not att or not att.get("n"):
+        return None
+    n = att["n"]
+    steps = [{"key": "asr", "label": "ASR alone", "sub": "Reference segments + speakers", "value": att["asr"],
+              "total": att["asr"]},
+             {"key": "segmentation", "label": "Segmentation", "sub": "model segments, reference speakers",
+              "value": att["segmentation"], "total": att["b_errors"] / n},
+             {"key": "speaker", "label": "Speaker attribution", "sub": "model speakers", "value": att["speaker"],
+              "total": att["c_errors"] / n}]
+    if tiles.get("tcp_errors") is not None:
+        timing = (tiles["tcp_errors"] - att["c_errors"]) / n
+        steps.append({"key": "timing", "label": "Timing", "sub": "words outside the tcpWER collar", "value": timing,
+                      "total": tiles["tcp_errors"] / n})
+    return steps
+
+
+def _moments(m: dict[str, Any] | None) -> list[dict[str, Any]]:
+    from ..runs.scoring import MOMENTS
+
+    out = []
+    for k, label in MOMENTS.items():
+        v = (m or {}).get(k)
+        if not v or not v.get("words"):
+            continue
+        w = v["words"]
+        parts = {c: v[c] / w for c in ("asr", "segmentation", "speaker")}
+        main = max(parts, key=lambda c: parts[c]) if any(parts.values()) else None
+        out.append({"key": k, "label": label, "words": w, "parts": parts, "rate": sum(parts.values()), "main": main})
+    return out
 
 
 @router.get("/pipeline/files")
@@ -317,7 +398,99 @@ def pipeline_file(result_id: int, session: Session = Depends(get_session)) -> di
             "hyp_segments": al.get("hyp_segments", []), "assignment": cp.get("assignment", []),
             "pairs": cp.get("pairs", []), "wrong_speaker_words": cp.get("wrong_speaker_words", []),
             "ref_norm": al.get("ref_norm"), "hyp_norm": al.get("hyp_norm"),
+            "ref_lines": al.get("ref_lines") or [], "moments": (r.metrics or {}).get("moments"),
+            "tcp": (r.metrics or {}).get("tcp"),
             "label_url": peer.file_link_for(session, r.audio_file_id)}
+
+
+# ---------------------------------------------------------------- slices by label
+
+def _units(session: Session, sc: Score) -> list[slices_an.Unit]:
+    results = list(session.scalars(select(Result).where(Result.score_id == sc.id)))
+    files = {f.id: f for f in session.scalars(select(AudioFile).where(AudioFile.dataset_id == sc.run.dataset_id))}
+    seg_ids = [r.segment_id for r in results if r.segment_id]
+    segs = {s.id: s for s in session.scalars(select(Segment).where(Segment.id.in_(seg_ids)))} if seg_ids else {}
+    return slices_an.units(results, sc.run.task, files, segs)
+
+
+def _score(session: Session, score_id: int) -> Score:
+    sc = session.get(Score, score_id)
+    if sc is None:
+        raise HTTPException(404, "score not found")
+    return sc
+
+
+def _metric_for(sc: Score, metric: str | None) -> str:
+    m = metric or slices_an.DEFAULT_METRIC[sc.run.task]
+    if m not in slices_an.METRICS:
+        raise HTTPException(400, f"metric must be one of {', '.join(slices_an.METRICS)}")
+    if sc.run.task == RunTask.seg and m not in ("der", "vad_error"):
+        raise HTTPException(400, "VAD / diarisation slices take der or vad_error")
+    if sc.run.task == RunTask.pipeline and m not in ("cpwer", "wer", "cer"):
+        raise HTTPException(400, "pipeline slices take cpwer, wer or cer")
+    return m
+
+
+@router.get("/slices")
+def slices(score_id: int, compare_score_id: int | None = None, metric: str | None = None, label: str | None = None,
+           bins: str = "even", edges: str | None = None, session: Session = Depends(get_session)) -> dict[str, Any]:
+    """Scores by label for one score: the labels with how many weak values each has, then either the slices of
+    one label (`label`) or the weakest slices of every label (the "where it fails" table)."""
+    sc = _score(session, score_id)
+    m = _metric_for(sc, metric)
+    if sc.run.task == RunTask.seg and m == "der" and not (sc.aggregates or {}).get("der"):
+        m = "vad_error"
+    us = _units(session, sc)
+    other = _units(session, _score(session, compare_score_id)) if compare_score_id else None
+    custom = [float(x) for x in edges.split(",") if x.strip()] if edges else None
+    infos = slices_an.label_info(us)
+    for info in infos:
+        if info["kind"] != "unused":
+            rows = slices_an.label_rows(us, info["key"], m, sc.run.task, other)
+            info["weak"] = sum(1 for r in rows if r["pattern"] in ("worse", "hard"))
+            info["values"] = len(rows)
+    out: dict[str, Any] = {"score_id": sc.id, "task": sc.run.task, "metric": m, "low_better": slices_an.METRICS[m][2],
+                           "overall": {"n": len(us), "value": slices_an.rate(us, m), "ci": slices_an.interval(us, m)},
+                           "labels": infos, "min_units": slices_an.MIN_UNITS[sc.run.task]}
+    if other is not None:
+        out["compare_overall"] = {"n": len(other), "value": slices_an.rate(other, m)}
+    if label:
+        out["label"] = label
+        out["rows"] = slices_an.label_rows(us, label, m, sc.run.task, other, bins, custom)
+        have = [u for u in us if label in u.labels]
+        out["unlabelled"] = len(us) - len(have)
+    else:
+        out["finder"] = slices_an.finder(us, m, sc.run.task, other)
+    return out
+
+
+@router.get("/slices/heatmap")
+def slices_heatmap(score_id: int, row: str, col: str, metric: str | None = None,
+                   session: Session = Depends(get_session)) -> dict[str, Any]:
+    sc = _score(session, score_id)
+    m = _metric_for(sc, metric)
+    return {"metric": m, "min_units": slices_an.HEAT_MIN, **slices_an.heatmap(_units(session, sc), row, col, m)}
+
+
+@router.get("/slices/units")
+def slice_units(score_id: int, filters: str, metric: str | None = None,
+                session: Session = Depends(get_session)) -> dict[str, Any]:
+    """One slice (JSON filters, as saved slices hold them): its score and interval, and its worst units."""
+    import json
+
+    sc = _score(session, score_id)
+    m = _metric_for(sc, metric)
+    try:
+        fl = json.loads(filters)
+    except ValueError:
+        raise HTTPException(400, "filters must be JSON") from None
+    us = _units(session, sc)
+    sub = [u for u in us if slices_an.matches(u, fl)]
+    sub_counts = {k: sum(u.counts.get(k, 0) for u in sub) for k in ("n", "s", "d", "i", "missed", "false_alarm",
+                                                                    "confusion", "total", "cp_errors", "cp_n")}
+    return {"metric": m, "n": len(sub), "of": len(us), "value": slices_an.rate(sub, m) if sub else None,
+            "ci": slices_an.interval(sub, m), "overall": slices_an.rate(us, m), "counts": sub_counts,
+            "worst": slices_an.worst(sub), "unit_ids": [u.id for u in sub][:5000]}
 
 
 @router.get("/runs")

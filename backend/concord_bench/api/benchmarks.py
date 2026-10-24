@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 
 from ..analysis.suggest import rank_models
 from ..core.db import get_session
-from ..core.models import Dataset, EnhancedCopy, Job, Model, Pipeline, Run, RunTask, Score
+from ..core.models import Dataset, EnhancedCopy, Job, Model, Pipeline, Run, RunTask, Score, Slice
 from ..metrics import cpwer, normalisers, wer
 from ..metrics.der import DEFAULT_COLLAR
 from ..platform import catalog
@@ -126,6 +126,9 @@ def benchmark_table(tab: str, normaliser: str | None = None, collar: float | Non
     runs = _runs_by_key(session, run_task)
     enh_ids = sorted({k[2] for k in runs if k[2] is not None})
     enhancers = [m for m in (session.get(Model, i) for i in enh_ids) if m is not None]
+    saved: dict[int, list[Slice]] = {}
+    for s in session.scalars(select(Slice).order_by(Slice.id)):
+        saved.setdefault(s.dataset_id, []).append(s)
     cells = []
     for m in models:
         for d in datasets:
@@ -136,6 +139,8 @@ def benchmark_table(tab: str, normaliser: str | None = None, collar: float | Non
                     continue
                 cell = _cell(session, tab, m, d, rs, nkey, collar, skip_overlap, metric)
                 cell["enh_model_id"] = e.id if e else None
+                if saved.get(d.id) and cell.get("score_id"):
+                    cell["slices"] = _slice_values(session, cell["score_id"], saved[d.id], tab, metric)
                 if e is None:
                     plain = cell["value"]
                 elif cell["value"] is not None and plain is not None:
@@ -150,10 +155,27 @@ def benchmark_table(tab: str, normaliser: str | None = None, collar: float | Non
                     "kind": "asr" if tab == "asr" else ("diar" if m.has_speakers else "vad")} for m in models],
         "enhancers": [_enh_json(e) for e in enhancers],
         "copies": _copies(session),
+        "slices": [{"id": s.id, "dataset_id": s.dataset_id, "name": s.name, "filters": s.filters}
+                   for ss in saved.values() for s in ss],
         "cells": cells,
         "recent_runs": [{"id": r.id, "label": run_label(r), "dataset": r.dataset.name, "status": r.status,
                          "finished_at": r.finished_at.isoformat() if r.finished_at else None} for r in recent],
     }
+
+
+def _slice_values(session: Session, score_id: int, saved: list[Slice], tab: str, metric: str) -> dict[str, Any]:
+    """A score's value on each saved slice of its dataset: slice id -> {value, n}."""
+    from ..analysis import slices as slices_an
+    from .errors import _units
+
+    sc = session.get(Score, score_id)
+    us = _units(session, sc)
+    m = metric if tab == "asr" else ("der" if (sc.aggregates or {}).get("der") is not None else "vad_error")
+    out = {}
+    for s in saved:
+        sub = [u for u in us if slices_an.matches(u, s.filters)]
+        out[str(s.id)] = {"value": slices_an.rate(sub, m) if sub else None, "n": len(sub)}
+    return out
 
 
 def _cell(session: Session, tab: str, m: Model, d: Dataset, rs: list[Run], nkey: str, collar: float,

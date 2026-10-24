@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 from .. import peer
 from ..core import paths
 from ..core.db import get_session
-from ..core.models import AudioFile, Dataset, EnhancedCopy, Job, JobStatus, Model, Run, RunTask, Segment
+from ..core.models import AudioFile, Dataset, EnhancedCopy, Job, JobStatus, Model, Run, RunTask, Segment, Slice
 from ..core.settings import REPO_ROOT
 from ..datasets.ingest import NO_REFERENCES, inspect_source
 from ..platform import catalog
@@ -168,6 +168,8 @@ def dataset_json(session: Session, ds: Dataset, detail: bool = False) -> dict[st
                              .where(Job.payload["dataset_id"].as_integer() == ds.id))
         d["ingest_job"] = job_brief(job) if job else None
         d["enhanced"] = copies_of(session, ds)
+        d["slices"] = [slice_json(s) for s in session.scalars(select(Slice).where(Slice.dataset_id == ds.id)
+                                                               .order_by(Slice.id))]
     else:
         d["enhanced"] = [{"enh_model_id": c["model_id"], "display_name": c["display_name"], "status": c["status"],
                           "progress": c["progress"]} for c in copies_of(session, ds)]
@@ -282,6 +284,44 @@ def patch_dataset(dataset_id: int, body: DatasetPatch, session: Session = Depend
         setattr(ds, k, _clean_tags(v) if k == "tags" else v)
     session.commit()
     return dataset_json(session, ds)
+
+
+def slice_json(s: Slice) -> dict[str, Any]:
+    return {"id": s.id, "dataset_id": s.dataset_id, "name": s.name, "filters": s.filters,
+            "created_at": s.created_at.isoformat()}
+
+
+class SliceIn(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    filters: list[dict[str, Any]] = Field(min_length=1)
+
+
+@router.get("/datasets/{dataset_id}/slices")
+def list_slices(dataset_id: int, session: Session = Depends(get_session)) -> list[dict[str, Any]]:
+    get_dataset(session, dataset_id)
+    return [slice_json(s) for s in session.scalars(select(Slice).where(Slice.dataset_id == dataset_id).order_by(Slice.id))]
+
+
+@router.post("/datasets/{dataset_id}/slices", status_code=201)
+def save_slice(dataset_id: int, body: SliceIn, session: Session = Depends(get_session)) -> dict[str, Any]:
+    """A saved slice belongs to this one dataset; Benchmarks scores it for every model run on it."""
+    get_dataset(session, dataset_id)
+    for f in body.filters:
+        if "key" not in f or not ("value" in f or "min" in f or "max" in f):
+            raise HTTPException(422, "each filter needs a key and a value, or a key with min / max")
+    s = Slice(dataset_id=dataset_id, name=body.name.strip(), filters=body.filters)
+    session.add(s)
+    session.commit()
+    return slice_json(s)
+
+
+@router.delete("/slices/{slice_id}", status_code=204)
+def delete_slice(slice_id: int, session: Session = Depends(get_session)) -> None:
+    s = session.get(Slice, slice_id)
+    if s is None:
+        raise HTTPException(404, "slice not found")
+    session.delete(s)
+    session.commit()
 
 
 class EnhanceIn(BaseModel):

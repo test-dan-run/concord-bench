@@ -385,6 +385,19 @@ class Result(Base):
     audio_file: Mapped[AudioFile] = relationship()
 
 
+class Slice(Base):
+    """A saved slice of one dataset (EVALUATE_PLAN.md §7.4): label filters, scored as an extra column on
+    Benchmarks for every model that has run on the dataset."""
+
+    __tablename__ = "slice"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    dataset_id: Mapped[int] = mapped_column(ForeignKey("dataset.id", ondelete="CASCADE"))
+    name: Mapped[str] = mapped_column(String(200))
+    # [{key, value}] for a label value, [{key, min, max}] for a range of a continuous label; all must hold.
+    filters: Mapped[list[Any]] = mapped_column(default=list)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
 class Job(Base):
     __tablename__ = "job"
     id: Mapped[int] = mapped_column(primary_key=True)

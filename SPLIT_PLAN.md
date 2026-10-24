@@ -143,7 +143,8 @@ number and is kept identical in both repositories. Each contract has sample file
 - **Tests in both repositories** check their own side against the samples: Label's writer produces files
   that match the samples, and Bench's reader imports every sample.
 - **`just check-contracts`** compares `CONTRACTS.md` and `contracts/samples/` with the other repository when
-  it sits next to this one, and fails on any difference.
+  it sits next to this one, and fails on any difference. (The comparison was dropped on 2026-10-24, and
+  `just check-contracts` now checks only the samples. The copies are kept identical by hand.)
 - **Version changes.** A contract change bumps the version in `CONTRACTS.md` and lands in both repositories.
   Each app reads the format versions it knows and refuses others with a clear message. `/api/config`
   reports the contract version so a push can be refused before any upload starts.

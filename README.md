@@ -24,7 +24,7 @@ just setup            # uv sync + npm install
 just dev              # API :8600 + worker + Vite :5173, then open http://localhost:5173
 just test             # backend and frontend unit tests, no GPU or platform needed
 just lint             # ruff and tsc
-just check-contracts  # contract samples, and a comparison with ../concord-label when it is there
+just check-contracts  # the contract samples
 ```
 
 Without a GPU or a catalog, `REPLAY_DIR=fixtures/recorded AICORE_ENDPOINTS=fixtures/recorded/endpoints.generated.yaml just dev`
@@ -67,8 +67,8 @@ own data directory and database.
 - **Offline.** Bench no longer writes offline kits (EVALUATE_PLAN.md §9). Models go to an air-gapped
   machine as a model catalog bundle, and the Bench image goes with `docker save` (see Air-gapped machines).
   Concord Label still has its own copy of the old kit code.
-- **Contracts.** `just check-contracts` checks `contracts/samples` and compares `CONTRACTS.md` and
-  `contracts/` with `../concord-label` (or `--peer PATH`); they must stay byte-identical.
+- **Contracts.** `just check-contracts` checks `contracts/samples`. `CONTRACTS.md` and `contracts/` are
+  kept identical to Label's copies by hand, and nothing compares the two repositories.
 - **Fixtures.** Bench owns `fixtures/generated` and `fixtures/recorded`. When `just fixtures` or
   `just record` changes them, copy both folders into the Label repository too.
 

@@ -603,7 +603,8 @@ and the list below records each place where the code took a different route.
 - **Contract version 2 (§7.2).** CONTRACTS.md says that any change bumps the contract version, so both apps
   now report version 2, and a Bench and a Label on different versions hide the links between them.
   Bench's `contracts/check.py` had fallen behind Label's copy, which finds CONTRACTS.md in Label's `docs/`
-  folder. Without that, Bench's `just check-contracts` skipped the comparison, so it now uses Label's copy.
+  folder. The owner then chose to drop the comparison between the repositories altogether, so
+  `just check-contracts` checks only the samples, and the copies are kept identical by hand.
 - **What Label sends (§7.2).** Label keeps no labels per segment or per speaker, so it sends each file's
   metadata as file labels and nothing else. Its ingest now keeps only metadata that has the same value on
   every record of a file, where before the last record's value won, and its parser flattens nested

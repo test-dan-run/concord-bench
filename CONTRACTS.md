@@ -2,8 +2,8 @@
 
 **Contract version 2.** This file and `contracts/` are kept identical in the Concord Bench and Concord Label
 repositories (SPLIT_PLAN.md §2.3). They are the only things the two apps must agree on: the apps share no
-code. `just check-contracts` validates the samples and, when the other repository sits next to this one,
-fails on any difference between the two copies.
+code. `just check-contracts` validates the samples. It does not compare the two copies, so a change here is
+copied to the other repository by hand.
 
 A change to anything below bumps the contract version and lands in both repositories. Version 2 added
 labels to the reference package (format version 2, §2.3 and §2.7). An app refuses a

@@ -1,20 +1,16 @@
-"""Check the contract samples, and compare this repository's contracts with the other app's (CONTRACTS.md, at
-the repository root or in docs/).
+"""Check the contract samples against CONTRACTS.md (at the repository root or in docs/).
 
-    python contracts/check.py [--peer PATH]
+    python contracts/check.py
 
-Standard library only, so the same file runs unchanged in Concord Bench and Concord Label. Without
---peer it looks for the other repository next to this one (../Concord or ../concord-label) and skips the
-comparison when neither is there.
+Standard library only, so the same file runs unchanged in Concord Bench and Concord Label. It does not
+compare this repository's copy with the other app's: the copies are kept identical by hand.
 
 `check_package(path)` is also used by both apps' tests on packages they write or read.
 """
 
 from __future__ import annotations
 
-import argparse
 import csv
-import filecmp
 import hashlib
 import json
 import sys
@@ -212,44 +208,12 @@ def contracts_doc(root: Path) -> Path:
     return docs if docs.is_file() else root / "CONTRACTS.md"
 
 
-def compare(peer: Path) -> list[str]:
-    """Differences between this repository's CONTRACTS.md + contracts/ and the peer's."""
-    problems = []
-    if not filecmp.cmp(contracts_doc(REPO), contracts_doc(peer), shallow=False):
-        problems.append("CONTRACTS.md differs")
-    mine = {p.relative_to(REPO).as_posix() for p in (REPO / "contracts").rglob("*")
-            if p.is_file() and "__pycache__" not in p.parts}
-    theirs = {p.relative_to(peer).as_posix() for p in (peer / "contracts").rglob("*")
-              if p.is_file() and "__pycache__" not in p.parts}
-    problems += [f"only here: {r}" for r in sorted(mine - theirs)]
-    problems += [f"only in {peer.name}: {r}" for r in sorted(theirs - mine)]
-    problems += [f"differs: {r}" for r in sorted(mine & theirs)
-                 if not filecmp.cmp(REPO / r, peer / r, shallow=False)]
-    return problems
-
-
-def find_peer() -> Path | None:
-    for name in ("Concord", "concord-label", "concord-bench"):
-        cand = REPO.parent / name
-        if cand.resolve() != REPO and contracts_doc(cand).is_file():
-            return cand
-    return None
-
-
-def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--peer", type=Path, help="the other app's repository")
-    args = ap.parse_args(argv)
+def main() -> int:
     problems = check_samples()
-    peer = args.peer or find_peer()
-    if peer is None:
-        print("no other repository found next to this one; comparison skipped")
-    else:
-        problems += [f"vs {peer}: {p}" for p in compare(peer.resolve())]
     for p in problems:
         print(f"FAIL {p}")
     if not problems:
-        print(f"contracts v{CONTRACT_VERSION}: samples ok" + (f", identical to {peer}" if peer else ""))
+        print(f"contracts v{CONTRACT_VERSION}: samples ok")
     return 1 if problems else 0
 
 

@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session
 from ..core import paths
 from ..core.models import AudioFile, Dataset, FileStatus, LabelType, Segment, SegmentStatus
 from . import audio as audio_mod
+from . import labels as labels_mod
 from .parsers import ANNOTATION_EXTS, ParseResult, RefRecord, parse_file
 
 Progress = Callable[[float, str], None]
@@ -112,6 +113,7 @@ def match(scan_: Scan) -> dict[str, Any]:
                 t["preview"].append({"file": rel, "start": rec.start, "end": rec.end, "speaker": rec.speaker,
                                      "text": rec.text})
     stems = Counter(Path(r).stem for r in scan_.audio)
+    labels = labels_mod.summarize([(rec.meta, rec.start is None) for recs in matched.values() for rec in recs])
     return {
         "parsed": parsed,
         "matched": matched,
@@ -124,6 +126,7 @@ def match(scan_: Scan) -> dict[str, Any]:
                          for r in parsed if r.errors],
         "files_by_format": [{"file": r.path, "format": r.format, "records": len(r.records),
                              "tasks": sorted(r.tasks)} for r in parsed],
+        "labels": labels,
     }
 
 
@@ -146,6 +149,14 @@ def label_types_for(records: list[RefRecord]) -> list[str]:
     if kinds & {"diar", "spk_asr"}:
         out.append(LabelType.diar.value)
     return out
+
+
+def file_labels(records: list[RefRecord]) -> dict[str, Any]:
+    """Labels with the same value on every reference record of a file: those describe the file itself."""
+    if not records:
+        return {}
+    first = records[0].meta
+    return {k: v for k, v in first.items() if all(r.meta.get(k) == v for r in records[1:])}
 
 
 def _process_audio(f: AudioFile, src: Path) -> dict[str, Any]:
@@ -212,17 +223,17 @@ def ingest(session: Session, dataset_id: int, source: Path, progress: Progress |
         # Reference segments: replace whatever this file had from a previous ingest.
         for seg in list(f.segments):
             session.delete(seg)
-        meta: dict[str, Any] = {}
-        for rec in m["matched"].get(rel, []):
+        recs = m["matched"].get(rel, [])
+        for rec in recs:
             if rec.start is None:
                 start, end = 0.0, f.duration or 0.0
             else:
                 start, end = rec.start, rec.end
             session.add(Segment(audio_file_id=f.id, start=start, end=end, speaker=rec.speaker, text=rec.text,
-                                status=SegmentStatus.confirmed))
-            meta.update(rec.meta)
-        if meta:
-            f.meta = {**(f.meta or {}), **meta}
+                                status=SegmentStatus.confirmed, meta=dict(rec.meta)))
+        constant = file_labels(recs)
+        if constant:
+            f.meta = {**(f.meta or {}), **constant}
         session.commit()  # short write transactions: the API shares this SQLite file
     progress(0.95, "writing report")
     all_records = [r for recs in m["matched"].values() for r in recs]
@@ -237,6 +248,7 @@ def ingest(session: Session, dataset_id: int, source: Path, progress: Progress |
         "audio_without_labels_count": len(m["audio_without_labels"]),
         "duplicate_stems": m["duplicate_stems"], "parse_errors": m["parse_errors"],
         "files_by_format": m["files_by_format"], "has_speaker_text": "spk_asr" in m["tasks"],
+        "labels": m["labels"],
     }
     ds.status = "ready"
     session.flush()

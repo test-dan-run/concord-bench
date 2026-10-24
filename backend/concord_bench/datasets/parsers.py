@@ -12,6 +12,10 @@ its own: its `rttm_filepath` names an RTTM that must be in the upload too (match
 Every parser yields `RefRecord`s. What a record feeds follows from its fields: text -> ASR,
 speaker -> diarisation, both -> cpWER as well. Records without times cover the whole file.
 
+Any other field on a record is a label for slicing (EVALUATE_PLAN.md §7.1), kept in `RefRecord.meta`.
+Nested objects are flattened to dotted keys, so a NeMo manifest's `"attribute": {"gender": "F"}` becomes
+`attribute.gender`; lists are dropped. `datasets.labels` decides which labels are usable.
+
 The registry is keyed by format id, and each format lists the tasks it can feed, so a KWS format is
 one more entry (Q6).
 """
@@ -80,6 +84,18 @@ _KNOWN = set(_FILE_KEYS) | set(_TEXT_KEYS) | set(_SPK_KEYS) | _NEMO_KEYS | {"sta
                                                                            "offset", "duration"}
 
 
+def flatten(obj: dict[str, Any], prefix: str = "") -> dict[str, Any]:
+    """Scalar fields of `obj`, nested objects as dotted keys; lists, nulls and empty strings dropped."""
+    out: dict[str, Any] = {}
+    for k, v in obj.items():
+        key = f"{prefix}{k}"
+        if isinstance(v, dict):
+            out.update(flatten(v, key + "."))
+        elif isinstance(v, (str, int, float, bool)) and v != "":
+            out[key] = v
+    return out
+
+
 def _record_from_obj(obj: dict[str, Any], default_stem: str | None) -> RefRecord:
     file_key = next((k for k in _FILE_KEYS if obj.get(k) not in (None, "")), None)
     stem = stem_of(obj[file_key]) if file_key else default_stem
@@ -102,7 +118,7 @@ def _record_from_obj(obj: dict[str, Any], default_stem: str | None) -> RefRecord
         raise ValueError(f"end {end} before start {start}")
     if text is None and spk_key is None:
         raise ValueError("needs text and/or speaker")
-    meta = {k: v for k, v in obj.items() if k not in _KNOWN and isinstance(v, (str, int, float, bool))}
+    meta = flatten({k: v for k, v in obj.items() if k not in _KNOWN})
     return RefRecord(stem, start, end, str(obj[spk_key]) if spk_key else None,
                      str(text) if text is not None else None, meta)
 

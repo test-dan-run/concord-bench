@@ -11,7 +11,8 @@ Job types:
 - asr_stage  {dataset_id, model_id, sources}
                                           one ASR model over the cuts of every seg source (Bench model ids,
                                           None = oracle) of a grid
-- score      {run_id, normaliser, collar} rescoring with a platform normaliser (through the catalog's gateway)
+- score      {run_id, normaliser, collar, skip_overlap?}
+                                          rescoring with a platform normaliser (through the catalog's gateway)
 
 Models come from the model catalog (platform/catalog/README.md). A job that needs models
 (`required_services`, catalog model ids) takes one catalog lease on them as `bench:job-<id>`; the aicore
@@ -300,7 +301,7 @@ def _wait(session: Session, job: Job, lease: Lease, ctx: JobContext) -> None:
 # ---------------------------------------------------------------- builds
 
 def _current_build(model_id: str) -> dict[str, Any]:
-    """The build the catalog runs for a model now: {build_key, image}."""
+    """The build the catalog runs for a model now: {build_key, image, hardware}."""
     try:
         rec = catalog.record(model_id, refresh=True)
     except catalog.CatalogUnavailable as exc:
@@ -310,18 +311,31 @@ def _current_build(model_id: str) -> dict[str, Any]:
     if not rec.get("build_key"):
         raise JobBlocked(f"the catalog has no build key for {model_id} yet (its weights are still being hashed, "
                          "or its image is missing); retry shortly")
-    return {"build_key": rec["build_key"], "image": rec.get("image")}
+    return {"build_key": rec["build_key"], "image": rec.get("image"), "hardware": catalog.hardware(rec)}
 
 
 def _dep_builds(session: Session, job: Job) -> executor.Builds:
-    """The builds the earlier stages of a grid used, from their results."""
+    """The builds the earlier stages of a grid used, from their results (with the hardware they ran on)."""
     builds: executor.Builds = {}
     for jid in job.after or []:
         dep = session.get(Job, jid)
         r = (dep.result or {}) if dep is not None else {}
         if r.get("model") and r.get("build_key"):
-            builds[r["model"]] = {"build_key": r["build_key"], "image": r.get("image")}
+            hw = dict(r.get("hardware") or {})
+            if r.get("computed") == 0:
+                hw["reused"] = True  # every output was stored already: nothing ran on this hardware now
+            builds[r["model"]] = {"build_key": r["build_key"], "image": r.get("image"), "hardware": hw}
     return builds
+
+
+def _dep_seconds(session: Session, job: Job) -> float:
+    """Seconds the earlier stages of a grid took, start to finish."""
+    total = 0.0
+    for jid in job.after or []:
+        dep = session.get(Job, jid)
+        if dep is not None and dep.started_at and dep.finished_at:
+            total += (dep.finished_at - dep.started_at).total_seconds()
+    return total
 
 
 def _stage_subject(session: Session, job: Job) -> tuple[Model, Dataset]:
@@ -392,6 +406,9 @@ def _handle_run(session: Session, job: Job, ctx: JobContext) -> dict[str, Any]:
         executor.execute(session, run, ctx.log, lambda p, m: ctx.progress(0.9 * p, m), builds,
                          infer_missing=not assemble)
         run.status = "done"
+        if run.started_at and run.finished_at:
+            run.wall_s = round((run.finished_at - run.started_at).total_seconds()
+                               + (_dep_seconds(session, job) if assemble else 0.0), 3)
         session.commit()
     except JobBlocked:
         session.rollback()
@@ -458,7 +475,8 @@ def _handle_asr_stage(session: Session, job: Job, ctx: JobContext) -> dict[str, 
 
 def _handle_score(session: Session, job: Job, ctx: JobContext) -> dict[str, Any]:
     run = session.get(Run, job.payload["run_id"])
-    sc = scoring.score_run(session, run, job.payload.get("normaliser"), job.payload.get("collar"))
+    sc = scoring.score_run(session, run, job.payload.get("normaliser"), job.payload.get("collar"),
+                           bool(job.payload.get("skip_overlap")))
     session.commit()
     return {"run_id": run.id, "score_id": sc.id}
 
@@ -505,11 +523,35 @@ def run_job(job_id: int, lease: Lease | None = None) -> None:
         session.commit()
     finally:
         if lease is not None and not keep_lease:
+            peaks = catalog.peak_vram(lease)  # read while the lease is live: the catalog's running peak
             try:
                 lease.release()
             except Exception as exc:  # noqa: BLE001 - the job's outcome is already recorded
                 ctx.log(f"release failed: {exc}")
+            _record_peak(session, job_id, peaks)
         session.close()
+
+
+def _record_peak(session: Session, job_id: int, peaks: dict[str, float]) -> None:
+    """Peak VRAM the job's lease measured (platform P1): onto the run's hardware, or a stage job's result."""
+    if not peaks:
+        return
+    try:
+        session.rollback()
+        job = session.get(Job, job_id)
+        if job is None or job.status != JobStatus.done:
+            return
+        if job.type in RUN_JOBS:
+            run = session.get(Run, job.payload["run_id"])
+            if run is not None:
+                run.hardware = {k: ({**v, "peak_vram_gb": peaks[k]} if k in peaks else v)
+                                for k, v in (run.hardware or {}).items()}
+        elif job.result.get("model") in peaks:
+            job.result = {**job.result, "hardware": {**(job.result.get("hardware") or {}),
+                                                     "peak_vram_gb": peaks[job.result["model"]]}}
+        session.commit()
+    except Exception:  # noqa: BLE001 - best effort; the job is done either way
+        session.rollback()
 
 
 def run_pending(max_jobs: int | None = None, poll_s: float = 0.5) -> int:

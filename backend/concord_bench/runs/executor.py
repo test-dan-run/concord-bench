@@ -225,6 +225,7 @@ def execute(session: Session, run: Run, log: Log, progress: Progress, builds: Bu
     run.status, run.started_at = "running", utcnow()
     run.builds = {m.catalog_id: {"build_key": builds[m.catalog_id]["build_key"],
                                  "image": builds[m.catalog_id].get("image")} for m in models_of(run)}
+    run.hardware = {m.catalog_id: builds[m.catalog_id].get("hardware") or {} for m in models_of(run)}
     session.commit()
     oc = OutputCache(session, log)
     mode = "run" if infer_missing else "lookup"
@@ -377,7 +378,7 @@ def seg_stage(session: Session, model: Model, ds: Dataset, build: dict[str, Any]
         log(f"seg stage {model.display_name}: {len(refs)} files, {st['hits']} stored ({st['copied']} from other "
             f"apps), {st['computed']} computed")
     return {"model": model.catalog_id, "build_key": build.get("build_key"), "image": build.get("image"),
-            "files": len(refs), **st}
+            "hardware": build.get("hardware") or {}, "files": len(refs), **st}
 
 
 def asr_stage(session: Session, model: Model, ds: Dataset, sources: list[Model | None], seg_builds: Builds,
@@ -411,4 +412,4 @@ def asr_stage(session: Session, model: Model, ds: Dataset, sources: list[Model |
         log(f"ASR stage {model.display_name}: {st['calls']} cuts from {len(sources)} seg source(s), {st['hits']} "
             f"stored ({st['copied']} from other apps), {st['computed']} computed")
     return {"model": model.catalog_id, "build_key": build.get("build_key"), "image": build.get("image"),
-            "files": len(work), **st}
+            "hardware": build.get("hardware") or {}, "files": len(work), **st}

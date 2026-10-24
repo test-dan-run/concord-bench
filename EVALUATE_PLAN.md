@@ -135,18 +135,19 @@ time (§1). Bench works without them. P1 also adds the `generative` flag (§5.1)
    version, CUDA version, CPU model, CPU core count, host name.
 2. Add optional `runtime` fields to the service manifests, `precision` and `batch_size`, and return them on
    the model record. vLLM services can fill precision from their dtype.
-3. Measure peak VRAM per model while a lease is active, and return `peak_vram_gb` per model on the lease
-   when it is released.
+3. Measure peak VRAM per model while a lease is active, and return the running peak as `peak_vram_gb`
+   (model id to GB) on the lease. Bench reads it just before it releases the lease.
 
 **Bench (E1).**
 
 1. Add `Run.hardware` (JSON). When a run's lease becomes active, copy onto it, per model: GPU or CPU, the
    declared VRAM, the engine, the image, whether the model is hosted (and the provider host), and the
    `host` object and `runtime` fields when the platform has them. A pipeline stores one entry per stage.
-2. When the lease is released, add `peak_vram_gb` per model if the lease reports it.
+2. Just before the lease is released, add `peak_vram_gb` per model if the lease reports it.
 3. Add `Run.wall_s` (from `started_at` to `finished_at`), and keep cold start out of RTF as today. Cold
    start stays a catalog attribute of the model.
-4. API: return `hardware` with every leaderboard cell and inspector.
+4. API: return `hardware` and `wall_s` with every leaderboard cell and inspector. The hardware filter runs
+   in the page over the cells' `hardware.device`, so the API needs no filter parameter.
 
 Accuracy compares fairly across hardware, and RTF does not. With one host, runs differ mainly by whether a
 model ran on the GPU, on the CPU or at a hosted provider, so the ASR leaderboard's hardware filter offers

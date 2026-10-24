@@ -1,7 +1,13 @@
-"""WER / CER with jiwer, plus the word alignment used for inline diffs.
+"""WER / CER with jiwer, MER / WIL / WIP from the same counts, plus the word alignment used for inline diffs.
 
 Inputs are already-normalised strings. An empty reference gives N = 0 and `wer = None` (every
 hypothesis word is an insertion); corpus WER sums errors over N across utterances.
+
+With H hits, N reference words and P = H + S + I hypothesis words:
+- MER = (S + D + I) / (H + S + D + I), the share of aligned word pairs that are wrong;
+- WIP = (H / N) x (H / P), word information preserved; WIL = 1 - WIP.
+Corpus values come from summed counts (`info`), never from a mean of per-utterance values, so they agree
+with corpus WER.
 """
 
 from __future__ import annotations
@@ -46,10 +52,33 @@ class WerResult:
 
     def counts(self) -> dict[str, Any]:
         return {"n": self.n, "s": self.s, "d": self.d, "i": self.i, "h": self.h, "errors": self.errors,
-                "wer": self.wer, "cer": self.cer, "cer_n": self.cer_n, "cer_e": self.cer_e}
+                "wer": self.wer, "cer": self.cer, "cer_n": self.cer_n, "cer_e": self.cer_e,
+                **info(self.n, self.s, self.d, self.i, self.h)}
 
     def ops_json(self) -> list[dict[str, Any]]:
         return [asdict(o) for o in self.ops]
+
+
+def info(n: int, s: int, d: int, i: int, h: int) -> dict[str, Any]:
+    """P, MER, WIL and WIP from word counts. None where undefined (nothing to align, or no reference)."""
+    p = h + s + i
+    aligned = h + s + d + i
+    mer = (s + d + i) / aligned if aligned else None
+    if n and p:
+        wip: float | None = (h / n) * (h / p)
+    elif n:
+        wip = 0.0  # every reference word deleted
+    else:
+        wip = None
+    return {"p": p, "mer": mer, "wip": wip, "wil": None if wip is None else 1.0 - wip}
+
+
+def with_info(c: dict[str, Any]) -> dict[str, Any]:
+    """`c` with P, MER, WIL and WIP filled in from its counts when it lacks them (scores made before they
+    were computed)."""
+    if "mer" in c or c.get("n") is None:
+        return c
+    return {**c, **info(c.get("n") or 0, c.get("s") or 0, c.get("d") or 0, c.get("i") or 0, c.get("h") or 0)}
 
 
 _TYPE = {"equal": "eq", "substitute": "sub", "delete": "del", "insert": "ins"}
@@ -101,6 +130,7 @@ def aggregate(rows: list[dict[str, Any]]) -> dict[str, Any]:
     tot["errors"] = errors
     tot["wer"] = errors / tot["n"] if tot["n"] else None
     tot["cer"] = tot["cer_e"] / tot["cer_n"] if tot["cer_n"] else None
+    tot.update(info(tot["n"], tot["s"], tot["d"], tot["i"], tot["h"]))
     tot["utterances"] = len(rows)
     tot["with_errors"] = sum(1 for r in rows if r.get("errors"))
     return tot

@@ -229,3 +229,80 @@ def test_error_views_load_sort_expand_play(flow, client, session):
             assert len(ps["counterfactuals"]) == 3
             att = ps["tiles"]["attribution"]
             assert att["asr_errors"] + att["segmentation_errors"] + att["speaker_errors"] == att["c_errors"]
+
+
+# ---------------------------------------------------------------- EVALUATE_PLAN.md E1
+
+def test_asr_mer_wil_wip_match_jiwer(flow, session):
+    norm = normalisers.get("basic")
+    for run in session.scalars(select(Run).where(Run.task == "asr")):
+        sc = session.scalar(select(Score).where(Score.run_id == run.id, Score.normaliser == "basic@1"))
+        rows = session.scalars(select(Result).where(Result.score_id == sc.id)).all()
+        out = jiwer.process_words([norm(r.ref_text) for r in rows], [norm(r.hyp_text) for r in rows])
+        assert sc.aggregates["mer"] == pytest.approx(out.mer)
+        assert sc.aggregates["wil"] == pytest.approx(out.wil)
+        assert sc.aggregates["wip"] == pytest.approx(out.wip)
+
+
+def test_tcpwer_matches_meeteval(flow, session):
+    from meeteval.io.seglst import SegLST
+    from meeteval.wer.wer.time_constrained import time_constrained_minimum_permutation_word_error_rate as tcp
+
+    from concord_bench.metrics import cpwer
+
+    norm = normalisers.get("basic")
+
+    def seglst(segs):
+        return SegLST([{"session_id": "f", "speaker": s.speaker, "start_time": s.start, "end_time": s.end,
+                        "words": s.text} for s in segs])
+
+    checked = 0
+    for run in session.scalars(select(Run).where(Run.task == "pipeline")):
+        sc = session.scalar(select(Score).where(Score.run_id == run.id, Score.normaliser == "basic@1"))
+        if not sc.aggregates.get("cpwer"):
+            continue
+        for collar in cpwer.TCP_COLLARS:
+            errors = length = 0
+            for r in session.scalars(select(Result).where(Result.score_id == sc.id)):
+                f = session.get(AudioFile, r.audio_file_id)
+                ref = [SpkSegment(s.start, s.end, s.speaker, norm(s.text)) for s in f.segments if s.speaker and s.text]
+                hyp = [SpkSegment(h["start"], h["end"], h["speaker"] or "speech", norm(h["text"]))
+                       for h in r.alignment["hyp_segments"]]
+                res = tcp(seglst(ref), seglst(hyp), collar=collar)
+                assert r.metrics["tcp"][cpwer.tcp_key(collar)]["errors"] == res.errors
+                errors += res.errors
+                length += res.length
+            assert sc.aggregates["tcpwer"][cpwer.tcp_key(collar)]["tcpwer"] == pytest.approx(errors / length)
+            # timing can only add errors to cpWER
+            assert errors >= sc.aggregates["cpwer"]["errors"]
+        checked += 1
+    assert checked
+
+
+def test_runs_record_hardware_and_wall_time(flow, session):
+    for run in session.scalars(select(Run)):
+        assert run.wall_s is not None and run.wall_s >= 0
+        assert set(run.hardware) == set(run.builds)
+        assert all(hw["device"] in ("gpu", "cpu") and hw["image"] for hw in run.hardware.values())
+    asr = flow["asr"]["cells"][0]
+    assert asr["hardware"] and asr["wall_s"] is not None and asr["metrics"]["mer"] is not None
+
+
+def test_benchmark_metric_and_overlap_parameters(flow, client):
+    mer = client.get("/api/benchmarks/asr", params={"metric": "mer"}).json()
+    by_id = {(c["model_id"], c["dataset_id"]): c for c in flow["asr"]["cells"]}
+    for c in mer["cells"]:
+        if c["value"] is not None:
+            assert c["metric"] == "MER" and c["value"] == pytest.approx(by_id[(c["model_id"], c["dataset_id"])]
+                                                                         ["metrics"]["mer"])
+    assert client.get("/api/benchmarks/asr", params={"metric": "xyz"}).status_code == 400
+    skipped = client.get("/api/benchmarks/diar", params={"skip_overlap": True}).json()
+    assert skipped["skip_overlap"] is True
+    scored = {(c["model_id"], c["dataset_id"]): c for c in flow["diar"]["cells"]}
+    for c in skipped["cells"]:
+        if c["metric"] == "DER" and c["value"] is not None:
+            assert c["score_id"] != scored[(c["model_id"], c["dataset_id"])]["score_id"]
+            assert c["breakdown"]["facts"]["Reference speech (s)"] <= \
+                scored[(c["model_id"], c["dataset_id"])]["breakdown"]["facts"]["Reference speech (s)"]
+    grid = client.get("/api/benchmarks-pipelines", params={"tcp_collar": 2}).json()
+    assert grid["tcp_collar"] == 2 and any(c.get("tcpwer") is not None for c in grid["cells"])

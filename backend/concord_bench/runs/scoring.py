@@ -1,11 +1,13 @@
-"""Scores for a run: one `score` row per (run, normaliser, collar) and its per-utterance / per-file
-`result` rows. Reads cached outputs only, so rescoring takes seconds and no inference.
+"""Scores for a run: one `score` row per (run, normaliser, collar, skip_overlap) and its per-utterance /
+per-file `result` rows. Reads cached outputs only, so rescoring takes seconds and no inference.
 
-- ASR runs: per utterance WER / CER / S / D / I with the word alignment (timed when the model gave
-  word times). Collar is not used (stored as 0).
+- ASR runs: per utterance WER / CER / MER / WIL / WIP / S / D / I with the word alignment (timed when the
+  model gave word times). Collar and overlap are not used (stored as 0 and False).
 - Seg runs: per file DER / JER / speaker mapping (speaker models) and VAD missed / false alarm (all),
-  error regions for the lanes. Normaliser is not used (stored as "-").
-- Pipelines: per file WER, cpWER (C), DER of the seg stage, error attribution (A / B / C), RTF.
+  error regions for the lanes. Normaliser is not used (stored as "-"). `skip_overlap` leaves overlapped
+  speech out of DER and JER.
+- Pipelines: per file WER, cpWER (C), tcpWER at each of `cpwer.TCP_COLLARS`, DER of the seg stage (with
+  `skip_overlap`), error attribution (A / B / C), RTF.
 """
 
 from __future__ import annotations
@@ -27,27 +29,31 @@ from .references import FileRefs
 NO_NORMALISER = "-"
 
 
-def score_key(run: Run, normaliser: str | None, collar: float | None) -> tuple[str, float]:
+def score_key(run: Run, normaliser: str | None, collar: float | None,
+              skip_overlap: bool = False) -> tuple[str, float, bool]:
     n = normalisers.get(normaliser or normalisers.DEFAULT).key if run.task != RunTask.seg else NO_NORMALISER
     c = float(der.DEFAULT_COLLAR if collar is None else collar) if run.task != RunTask.asr else 0.0
-    return n, c
+    return n, c, bool(skip_overlap) and run.task != RunTask.asr
 
 
-def find_score(session: Session, run: Run, normaliser: str | None, collar: float | None) -> Score | None:
-    n, c = score_key(run, normaliser, collar)
-    return session.scalar(select(Score).where(Score.run_id == run.id, Score.normaliser == n, Score.collar == c))
+def find_score(session: Session, run: Run, normaliser: str | None, collar: float | None,
+               skip_overlap: bool = False) -> Score | None:
+    n, c, so = score_key(run, normaliser, collar, skip_overlap)
+    return session.scalar(select(Score).where(Score.run_id == run.id, Score.normaliser == n, Score.collar == c,
+                                              Score.skip_overlap == so))
 
 
-def score_run(session: Session, run: Run, normaliser: str | None = None, collar: float | None = None) -> Score:
+def score_run(session: Session, run: Run, normaliser: str | None = None, collar: float | None = None,
+              skip_overlap: bool = False) -> Score:
     if run.status != "done" and not run.outputs:
         raise ValueError(f"run {run.id} has no outputs yet ({run.status})")
-    n_key, c = score_key(run, normaliser, collar)
-    old = find_score(session, run, normaliser, collar)
+    n_key, c, so = score_key(run, normaliser, collar, skip_overlap)
+    old = find_score(session, run, normaliser, collar, skip_overlap)
     if old is not None:
         session.execute(delete(Result).where(Result.score_id == old.id))
         session.delete(old)
         session.flush()
-    score = Score(run_id=run.id, normaliser=n_key, collar=c)
+    score = Score(run_id=run.id, normaliser=n_key, collar=c, skip_overlap=so)
     session.add(score)
     session.flush()
     refs = {str(r.file.id): r for r in file_refs(session, run.dataset_id)}
@@ -55,9 +61,9 @@ def score_run(session: Session, run: Run, normaliser: str | None = None, collar:
     if run.task == RunTask.asr:
         rows, agg = _score_asr(session, run, refs, norm)
     elif run.task == RunTask.seg:
-        rows, agg = _score_seg(session, run, refs, c)
+        rows, agg = _score_seg(session, run, refs, c, so)
     else:
-        rows, agg = _score_pipeline(session, run, refs, norm, c)
+        rows, agg = _score_pipeline(session, run, refs, norm, c, so)
     for r in rows:
         r.score_id = score.id
     session.add_all(rows)
@@ -154,8 +160,8 @@ def turn_stats(turns: list[Turn]) -> dict[str, Any]:
     return {"turns": len(turns), "mean_turn_s": float(np.mean(durs)) if durs else None}
 
 
-def seg_file_metrics(r: FileRefs, segs: list[list[float]], speakers: list[str] | None, collar: float) -> tuple[
-        dict[str, Any], dict[str, Any]]:
+def seg_file_metrics(r: FileRefs, segs: list[list[float]], speakers: list[str] | None, collar: float,
+                     skip_overlap: bool = False) -> tuple[dict[str, Any], dict[str, Any]]:
     dur = r.duration
     ref = r.speaker_turns
     if not ref:  # text-only references: speech regions from timed text segments
@@ -166,7 +172,7 @@ def seg_file_metrics(r: FileRefs, segs: list[list[float]], speakers: list[str] |
     al: dict[str, Any] = {"ref": [[t.start, t.end, t.speaker] for t in ref],
                           "hyp": [[t.start, t.end, t.speaker] for t in hyp]}
     if speakers is not None and r.has_speakers:
-        d = der.der(ref, hyp, dur, collar)
+        d = der.der(ref, hyp, dur, collar, skip_overlap)
         m.update({k: v for k, v in d.items() if k != "mapping"})
         al["mapping"] = d["mapping"]
         al["errors"] = der.error_regions(ref, hyp, dur, d["mapping"])
@@ -191,8 +197,8 @@ def seg_file_metrics(r: FileRefs, segs: list[list[float]], speakers: list[str] |
     return m, al
 
 
-def _score_seg(session: Session, run: Run, refs: dict[str, FileRefs], collar: float) -> tuple[
-        list[Result], dict[str, Any]]:
+def _score_seg(session: Session, run: Run, refs: dict[str, FileRefs], collar: float,
+               skip_overlap: bool = False) -> tuple[list[Result], dict[str, Any]]:
     outs = cache.outputs_for(session, [e["cache_id"] for e in run.outputs.values() if e.get("cache_id")])
     rows, metrics = [], []
     for fid, entry in run.outputs.items():
@@ -200,7 +206,7 @@ def _score_seg(session: Session, run: Run, refs: dict[str, FileRefs], collar: fl
         row = outs.get(entry.get("cache_id"))
         if r is None or row is None or not (r.has_speakers or r.segment_level):
             continue
-        m, al = seg_file_metrics(r, row.output["segments"], row.output.get("speakers"), collar)
+        m, al = seg_file_metrics(r, row.output["segments"], row.output.get("speakers"), collar, skip_overlap)
         metrics.append(m)
         sort_val = m.get("der") if m.get("der") is not None else m.get("vad_error")
         rows.append(Result(audio_file_id=r.file.id, utterance_key=r.file.stem, start=0.0, end=r.duration,
@@ -217,8 +223,8 @@ def _cut_texts(cuts: list[dict[str, Any]], outs: dict[int, Any]) -> list[tuple[d
     return [(c, (outs[c["cache_id"]].output.get("text", "") if c.get("cache_id") in outs else "")) for c in cuts]
 
 
-def _score_pipeline(session: Session, run: Run, refs: dict[str, FileRefs], norm, collar: float) -> tuple[
-        list[Result], dict[str, Any]]:
+def _score_pipeline(session: Session, run: Run, refs: dict[str, FileRefs], norm, collar: float,
+                    skip_overlap: bool = False) -> tuple[list[Result], dict[str, Any]]:
     oracle = run.pipeline.seg_model_id is None
     has_spk = oracle or run.pipeline.seg_model.has_speakers
     ids = []
@@ -228,6 +234,7 @@ def _score_pipeline(session: Session, run: Run, refs: dict[str, FileRefs], norm,
             ids.append(e["seg_cache_id"])
     outs = cache.outputs_for(session, ids)
     rows, wer_rows, cp_rows, der_rows, att_rows = [], [], [], [], []
+    tcp_rows: dict[str, list[dict[str, Any]]] = {cpwer.tcp_key(c): [] for c in cpwer.TCP_COLLARS}
     wrong_pairs: Counter[tuple[str, str]] = Counter()
     for fid, entry in run.outputs.items():
         r = refs.get(fid)
@@ -260,7 +267,7 @@ def _score_pipeline(session: Session, run: Run, refs: dict[str, FileRefs], norm,
         # seg-stage DER
         if not oracle and entry.get("seg_cache_id") in outs and r.has_speakers:
             so = outs[entry["seg_cache_id"]].output
-            sm, sal = seg_file_metrics(r, so["segments"], so.get("speakers"), collar)
+            sm, sal = seg_file_metrics(r, so["segments"], so.get("speakers"), collar, skip_overlap)
             m.update({kk: sm.get(kk) for kk in ("der", "missed", "false_alarm", "confusion", "total", "jer",
                                                  "vad_error", "vad_missed", "vad_false_alarm", "vad_total")})
             al["seg"] = {kk: sal.get(kk) for kk in ("ref", "hyp", "mapping", "errors", "overlaps")}
@@ -281,6 +288,12 @@ def _score_pipeline(session: Session, run: Run, refs: dict[str, FileRefs], norm,
             m["cpwer"] = res_c["cpwer"]
             m["cp"] = cpwer.public(res_c)
             cp_rows.append(m["cp"])
+            m["tcp"] = {}
+            for tc in cpwer.TCP_COLLARS:
+                t_res = cpwer.tcpwer(ref_segs, hyp_c, tc)
+                m["tcp"][cpwer.tcp_key(tc)] = t_res
+                tcp_rows[cpwer.tcp_key(tc)].append(t_res)
+            m["tcpwer"] = m["tcp"][cpwer.tcp_key(cpwer.DEFAULT_TCP_COLLAR)]["tcpwer"]
             al["cpwer"] = {"pairs": pw["pairs"], "wrong_speaker_words": pw["wrong_speaker_words"],
                            "assignment": res_c["assignment"]}
             for ww in pw["wrong_speaker_words"]:
@@ -305,6 +318,7 @@ def _score_pipeline(session: Session, run: Run, refs: dict[str, FileRefs], norm,
                            alignment=al))
     agg: dict[str, Any] = {"wer": wer.aggregate(wer_rows), "has_speakers": has_spk, "oracle": oracle}
     agg["cpwer"] = cpwer.aggregate(cp_rows) if cp_rows else None
+    agg["tcpwer"] = {k: cpwer.aggregate(v, "tcpwer") for k, v in tcp_rows.items()} if cp_rows else None
     agg["der"] = der.aggregate(der_rows) if der_rows else ({"der": 0.0} if oracle else None)
     agg["attribution"] = attribution.aggregate(att_rows) if att_rows else None
     agg["wrong_speaker_pairs"] = [{"word": w_, "move": mv, "n": n} for (w_, mv), n in wrong_pairs.most_common(20)]

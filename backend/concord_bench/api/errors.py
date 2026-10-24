@@ -19,17 +19,18 @@ from ..analysis import asr as asr_an
 from ..analysis import diar as diar_an
 from ..core.db import get_session
 from ..core.models import AudioFile, Result, Run, RunTask, Score, Segment
-from ..metrics import attribution, normalisers
+from ..metrics import attribution, cpwer, normalisers, wer
 from .runs import ensure_score, get_run, run_json, run_label
 
 router = APIRouter(prefix="/errors", tags=["errors"])
 
 
-def _score_for(session: Session, run: Run, normaliser: str | None, collar: float | None) -> Score:
+def _score_for(session: Session, run: Run, normaliser: str | None, collar: float | None,
+               skip_overlap: bool = False) -> Score:
     if run.status != "done":
         raise HTTPException(409, f"run is {run.status}")
     try:
-        sc, job = ensure_score(session, run, normaliser, collar)
+        sc, job = ensure_score(session, run, normaliser, collar, skip_overlap=skip_overlap)
     except KeyError as exc:
         raise HTTPException(400, str(exc)) from None
     if sc is None:
@@ -63,7 +64,9 @@ def _page(session: Session, stmt, sort: str, order: str, offset: int, limit: int
 # ---------------------------------------------------------------- ASR
 
 def _asr_tiles(agg: dict[str, Any]) -> dict[str, Any]:
-    return {k: agg.get(k) for k in ("wer", "cer", "s", "d", "i", "n", "errors", "utterances", "with_errors")}
+    a = wer.with_info(agg)
+    return {k: a.get(k) for k in ("wer", "cer", "mer", "wil", "wip", "s", "d", "i", "h", "n", "p", "errors",
+                                  "utterances", "with_errors")}
 
 
 @router.get("/asr/summary")
@@ -88,12 +91,13 @@ def asr_summary(run_id: int, normaliser: str | None = None, compare_run_id: int 
 
 
 def _utt_json(r: Result, flagged: bool | None = None) -> dict[str, Any]:
-    m = r.metrics or {}
+    m = wer.with_info(r.metrics or {})
     return {"id": r.id, "key": r.utterance_key, "file_id": r.audio_file_id, "segment_id": r.segment_id,
             "start": r.start, "end": r.end, "duration": round(r.end - r.start, 3), "speaker": r.speaker,
             "ref": r.ref_text, "hyp": r.hyp_text, "ops": (r.alignment or {}).get("ops", []),
             "n": m.get("n"), "s": m.get("s"), "d": m.get("d"), "i": m.get("i"), "errors": m.get("errors"),
-            "wer": m.get("wer"), "cer": m.get("cer"), "flagged": flagged}
+            "wer": m.get("wer"), "cer": m.get("cer"), "mer": m.get("mer"), "wil": m.get("wil"), "wip": m.get("wip"),
+            "flagged": flagged}
 
 
 @router.get("/asr/utterances")
@@ -110,7 +114,7 @@ def asr_utterances(score_id: int, sort: str = "wer", order: str = "desc", q: str
     if word:
         ids = [r.id for r in session.scalars(stmt) if asr_an.has_error_word(r, word)]
         stmt = select(Result).where(Result.id.in_(ids))
-    total, rows = _page(session, stmt, sort, order, offset, limit, ("n", "s", "d", "i", "cer"))
+    total, rows = _page(session, stmt, sort, order, offset, limit, ("n", "s", "d", "i", "cer", "mer", "wil", "wip"))
     seg_ids = [r.segment_id for r in rows if r.segment_id]
     flags = dict(session.execute(select(Segment.id, Segment.flagged).where(Segment.id.in_(seg_ids))).all()) \
         if seg_ids else {}
@@ -179,19 +183,20 @@ def _diar_tiles(agg: dict[str, Any]) -> dict[str, Any]:
 
 @router.get("/diar/summary")
 def diar_summary(run_id: int, collar: float | None = None, compare_run_id: int | None = None,
-                 session: Session = Depends(get_session)) -> dict[str, Any]:
+                 skip_overlap: bool = False, session: Session = Depends(get_session)) -> dict[str, Any]:
     run = get_run(session, run_id)
     if run.task != RunTask.seg:
         raise HTTPException(400, "not a VAD / diarisation run")
-    sc = _score_for(session, run, None, collar)
+    sc = _score_for(session, run, None, collar, skip_overlap)
     results = list(session.scalars(select(Result).where(Result.score_id == sc.id)))
-    out = {"run": run_json(run), "score_id": sc.id, "collar": sc.collar, "has_speakers": run.model.has_speakers,
+    out = {"run": run_json(run), "score_id": sc.id, "collar": sc.collar, "skip_overlap": sc.skip_overlap,
+           "has_speakers": run.model.has_speakers,
            "tiles": _diar_tiles(sc.aggregates), "compare": None,
            "conditions": diar_an.by_condition(results, _meta_by_file(session, run.dataset_id)),
            "turns_found": diar_an.turns_found(results), "boundaries": diar_an.boundary_histogram(results)}
     if compare_run_id:
         cr = get_run(session, compare_run_id)
-        csc = _score_for(session, cr, None, collar)
+        csc = _score_for(session, cr, None, collar, skip_overlap)
         out["compare"] = {"run": run_json(cr), "tiles": _diar_tiles(csc.aggregates)}
     return out
 
@@ -199,7 +204,8 @@ def diar_summary(run_id: int, collar: float | None = None, compare_run_id: int |
 def _file_json(r: Result) -> dict[str, Any]:
     m = r.metrics or {}
     keys = ("duration", "der", "missed", "false_alarm", "confusion", "total", "jer", "ref_speakers", "hyp_speakers",
-            "vad_error", "vad_missed", "vad_false_alarm", "vad_total", "ref_turns", "hyp_turns", "wer", "cpwer", "rtf")
+            "vad_error", "vad_missed", "vad_false_alarm", "vad_total", "ref_turns", "hyp_turns", "wer", "cpwer",
+            "tcpwer", "rtf")
     return {"id": r.id, "key": r.utterance_key, "file_id": r.audio_file_id, **{k: m.get(k) for k in keys}}
 
 
@@ -230,9 +236,11 @@ def diar_file(result_id: int, session: Session = Depends(get_session)) -> dict[s
 
 # ---------------------------------------------------------------- pipelines
 
-def _pipe_tiles(agg: dict[str, Any]) -> dict[str, Any]:
+def _pipe_tiles(agg: dict[str, Any], tcp_collar: float = cpwer.DEFAULT_TCP_COLLAR) -> dict[str, Any]:
     att = agg.get("attribution")
+    tcp = ((agg.get("tcpwer") or {}).get(cpwer.tcp_key(tcp_collar)) or {})
     return {"cpwer": (agg.get("cpwer") or {}).get("cpwer") if agg.get("cpwer") else None,
+            "tcpwer": tcp.get("tcpwer"), "tcp_errors": tcp.get("errors"),
             "wer": (agg.get("wer") or {}).get("wer"), "der": (agg.get("der") or {}).get("der") if agg.get("der")
             else None, "attribution": att, "attribution_chart": attribution.clipped(att) if att else None,
             "cp_errors": (agg.get("cpwer") or {}).get("errors") if agg.get("cpwer") else None,
@@ -255,14 +263,16 @@ def _counterfactuals(att: dict[str, Any] | None) -> list[dict[str, Any]]:
 
 @router.get("/pipeline/summary")
 def pipeline_summary(run_id: int, normaliser: str | None = None, collar: float | None = None,
+                     tcp_collar: float = cpwer.DEFAULT_TCP_COLLAR, skip_overlap: bool = False,
                      session: Session = Depends(get_session)) -> dict[str, Any]:
     run = get_run(session, run_id)
     if run.task != RunTask.pipeline:
         raise HTTPException(400, "not a pipeline run")
-    sc = _score_for(session, run, normaliser, collar)
-    tiles = _pipe_tiles(sc.aggregates)
+    sc = _score_for(session, run, normaliser, collar, skip_overlap)
+    tiles = _pipe_tiles(sc.aggregates, tcp_collar)
     p = run.pipeline
     return {"run": run_json(run), "score_id": sc.id, "normaliser": sc.normaliser, "collar": sc.collar,
+            "skip_overlap": sc.skip_overlap, "tcp_collar": tcp_collar, "tcp_collars": list(cpwer.TCP_COLLARS),
             "tiles": tiles, "counterfactuals": _counterfactuals(tiles["attribution"]),
             "wrong_speaker_pairs": sc.aggregates.get("wrong_speaker_pairs", []),
             "has_speakers": sc.aggregates.get("has_speakers"), "oracle": p.seg_model_id is None,

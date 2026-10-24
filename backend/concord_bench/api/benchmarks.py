@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 from ..analysis.suggest import rank_models
 from ..core.db import get_session
 from ..core.models import Dataset, Job, Model, Pipeline, Run, RunTask, Score
-from ..metrics import normalisers
+from ..metrics import cpwer, normalisers, wer
 from ..metrics.der import DEFAULT_COLLAR
 from ..platform import catalog
 from ..runs import executor
@@ -42,9 +42,19 @@ def _runs_by_key(session: Session, task: str) -> dict[tuple, list[Run]]:
     return out
 
 
-def _value(task_tab: str, agg: dict[str, Any], speaker_model: bool) -> tuple[float | None, str]:
+ASR_METRICS = {"wer": "WER", "cer": "CER", "mer": "MER", "wil": "WIL", "wip": "WIP"}
+ASR_COUNTS = ("n", "p", "h", "s", "d", "i", "errors", "utterances", "with_errors")
+
+
+def asr_metrics(agg: dict[str, Any]) -> dict[str, Any]:
+    """Every ASR metric and count of a score's aggregates (MER / WIL / WIP derived for older scores)."""
+    a = wer.with_info(agg)
+    return {k: a.get(k) for k in (*ASR_METRICS, *ASR_COUNTS)}
+
+
+def _value(task_tab: str, agg: dict[str, Any], speaker_model: bool, metric: str = "wer") -> tuple[float | None, str]:
     if task_tab == "asr":
-        return agg.get("wer"), "WER"
+        return asr_metrics(agg).get(metric), ASR_METRICS[metric]
     if speaker_model and agg.get("der") is not None:
         return agg.get("der"), "DER"
     return agg.get("vad_error"), "VAD error"
@@ -52,11 +62,12 @@ def _value(task_tab: str, agg: dict[str, Any], speaker_model: bool) -> tuple[flo
 
 def _breakdown(task_tab: str, agg: dict[str, Any], metric: str) -> dict[str, Any]:
     if task_tab == "asr":
-        n = agg.get("n") or 0
-        return {"parts": [{"key": k, "label": lbl, "count": agg.get(k), "pct": (agg.get(k) or 0) / n if n else None}
+        a = asr_metrics(agg)
+        n = a.get("n") or 0
+        return {"parts": [{"key": k, "label": lbl, "count": a.get(k), "pct": (a.get(k) or 0) / n if n else None}
                           for k, lbl in (("s", "Substitutions"), ("d", "Deletions"), ("i", "Insertions"))],
-                "facts": {"Words (N)": n, "CER": agg.get("cer"), "Utterances": agg.get("utterances"),
-                          "With errors": agg.get("with_errors")}}
+                "facts": {"Words (N)": n, "CER": a.get("cer"), "Utterances": a.get("utterances"),
+                          "With errors": a.get("with_errors")}}
     if metric == "DER":
         tot = agg.get("total") or 0
         return {"parts": [{"key": k, "label": lbl, "seconds": agg.get(k), "pct": (agg.get(k) or 0) / tot if tot
@@ -70,11 +81,23 @@ def _breakdown(task_tab: str, agg: dict[str, Any], metric: str) -> dict[str, Any
             "facts": {"Reference speech (s)": tot, "Files": agg.get("files")}}
 
 
+def run_compute(run: Run) -> dict[str, Any]:
+    """RTF, wall time and hardware of a run, for leaderboard cells and inspectors."""
+    return {"rtf": (run.rtf_by_stage or {}).get("total"), "rtf_by_stage": run.rtf_by_stage or {},
+            "wall_s": run.wall_s, "audio_s": (run.rtf_by_stage or {}).get("audio_s"), "hardware": run.hardware or {},
+            "finished_at": run.finished_at.isoformat() if run.finished_at else None,
+            "image": next(iter(run.builds.values()), {}).get("image") if run.builds else None,
+            "build_key": next(iter(run.builds.values()), {}).get("build_key") if run.builds else None}
+
+
 @router.get("/benchmarks/{tab}")
-def benchmark_table(tab: str, normaliser: str | None = None, collar: float | None = None,
-                    session: Session = Depends(get_session)) -> dict[str, Any]:
+def benchmark_table(tab: str, normaliser: str | None = None, collar: float | None = None, metric: str = "wer",
+                    skip_overlap: bool = False, session: Session = Depends(get_session)) -> dict[str, Any]:
     if tab not in ("asr", "diar"):
         raise HTTPException(404, "tab must be asr or diar (pipelines: /benchmarks-pipelines)")
+    if metric not in ASR_METRICS:
+        raise HTTPException(400, f"metric must be one of {', '.join(ASR_METRICS)}")
+    skip_overlap = skip_overlap and tab == "diar"
     try:
         nkey = normalisers.get(normaliser or normalisers.DEFAULT).key
     except KeyError as exc:
@@ -98,23 +121,20 @@ def benchmark_table(tab: str, normaliser: str | None = None, collar: float | Non
                 cell["error"] = latest.error
             if done:
                 cur = done[-1]
-                sc, job = ensure_score(session, cur, nkey, collar)
+                sc, job = ensure_score(session, cur, nkey, collar, skip_overlap=skip_overlap)
                 cell["run_id"] = cur.id
                 if job is not None:
                     cell["pending_score_job"] = job.id
                 if sc is not None:
-                    v, metric = _value(tab, sc.aggregates, m.has_speakers)
-                    cell.update({"value": v, "metric": metric, "score_id": sc.id,
-                                 "breakdown": _breakdown(tab, sc.aggregates, metric),
-                                 "rtf": (cur.rtf_by_stage or {}).get("total"),
-                                 "finished_at": cur.finished_at.isoformat() if cur.finished_at else None,
-                                 "image": next(iter(cur.builds.values()), {}).get("image") if cur.builds else None,
-                                 "build_key": next(iter(cur.builds.values()), {}).get("build_key") if cur.builds
-                                 else None})
+                    v, label_ = _value(tab, sc.aggregates, m.has_speakers, metric)
+                    cell.update({"value": v, "metric": label_, "score_id": sc.id,
+                                 "breakdown": _breakdown(tab, sc.aggregates, label_), **run_compute(cur)})
+                    if tab == "asr":
+                        cell["metrics"] = asr_metrics(sc.aggregates)
                     if len(done) > 1:
-                        psc, _ = ensure_score(session, done[-2], nkey, collar, queue=False)
+                        psc, _ = ensure_score(session, done[-2], nkey, collar, queue=False, skip_overlap=skip_overlap)
                         if psc is not None:
-                            pv, _ = _value(tab, psc.aggregates, m.has_speakers)
+                            pv, _ = _value(tab, psc.aggregates, m.has_speakers, metric)
                             cell["prev"] = pv
                             cell["delta"] = v - pv if v is not None and pv is not None else None
                 if latest is not cur and latest.status in ("queued", "running"):
@@ -122,7 +142,7 @@ def benchmark_table(tab: str, normaliser: str | None = None, collar: float | Non
             cells.append(cell)
     recent = list(session.scalars(select(Run).where(Run.task == run_task).order_by(Run.id.desc()).limit(8)))
     return {
-        "tab": tab, "normaliser": nkey, "collar": collar,
+        "tab": tab, "normaliser": nkey, "collar": collar, "metric": metric, "skip_overlap": skip_overlap,
         "datasets": [_ds_json(d, label in (d.label_types or []) and d.status == "ready") for d in datasets],
         "models": [{"id": m.id, "display_name": m.display_name, "catalog_id": m.catalog_id, "tags": m.tags,
                     "capabilities": m.capabilities, "timing_level": m.timing_level,
@@ -135,6 +155,7 @@ def benchmark_table(tab: str, normaliser: str | None = None, collar: float | Non
 
 @router.get("/benchmarks-pipelines")
 def pipeline_grid(dataset_id: int | None = None, normaliser: str | None = None, collar: float | None = None,
+                  skip_overlap: bool = False, tcp_collar: float = cpwer.DEFAULT_TCP_COLLAR,
                   session: Session = Depends(get_session)) -> dict[str, Any]:
     nkey = normalisers.get(normaliser or normalisers.DEFAULT).key
     collar = DEFAULT_COLLAR if collar is None else collar
@@ -144,8 +165,10 @@ def pipeline_grid(dataset_id: int | None = None, normaliser: str | None = None, 
     models = list(session.scalars(select(Model).order_by(Model.display_name)))
     seg_models = [m for m in models if m.is_seg]
     asr_models = [m for m in models if m.is_asr]
+    tkey = cpwer.tcp_key(tcp_collar)
     out: dict[str, Any] = {
-        "normaliser": nkey, "collar": collar, "dataset_id": ds.id if ds else None,
+        "normaliser": nkey, "collar": collar, "skip_overlap": skip_overlap, "tcp_collar": tcp_collar,
+        "tcp_collars": list(cpwer.TCP_COLLARS), "dataset_id": ds.id if ds else None,
         "datasets": [_ds_json(d, d in eligible) for d in datasets],
         "rows": ([{"seg_model_id": None, "name": "Reference segments + speakers", "oracle": True,
                    "has_speakers": True, "available": bool(ds and "diar" in (ds.label_types or []))}] +
@@ -170,7 +193,7 @@ def pipeline_grid(dataset_id: int | None = None, normaliser: str | None = None, 
                 cell["error"] = rs[-1].error
             if done:
                 cur = done[-1]
-                sc, job = ensure_score(session, cur, nkey, collar)
+                sc, job = ensure_score(session, cur, nkey, collar, skip_overlap=skip_overlap)
                 cell["run_id"] = cur.id
                 if job is not None:
                     cell["pending_score_job"] = job.id
@@ -179,12 +202,13 @@ def pipeline_grid(dataset_id: int | None = None, normaliser: str | None = None, 
                     cell.update({
                         "score_id": sc.id, "wer": (a.get("wer") or {}).get("wer"),
                         "cpwer": (a.get("cpwer") or {}).get("cpwer") if a.get("cpwer") else None,
+                        "tcpwer": ((a.get("tcpwer") or {}).get(tkey) or {}).get("tcpwer"),
                         "der": (a.get("der") or {}).get("der") if a.get("der") else None,
-                        "rtf": (cur.rtf_by_stage or {}).get("total"), "rtf_by_stage": cur.rtf_by_stage,
+                        **run_compute(cur),
                         "attribution": a.get("attribution"), "wrong_speaker_pairs": a.get("wrong_speaker_pairs"),
                         "label": run_label(cur)})
                     if len(done) > 1:
-                        psc, _ = ensure_score(session, done[-2], nkey, collar, queue=False)
+                        psc, _ = ensure_score(session, done[-2], nkey, collar, queue=False, skip_overlap=skip_overlap)
                         if psc is not None and psc.aggregates.get("cpwer") and cell["cpwer"] is not None:
                             cell["prev_cpwer"] = psc.aggregates["cpwer"]["cpwer"]
             out["cells"].append(cell)

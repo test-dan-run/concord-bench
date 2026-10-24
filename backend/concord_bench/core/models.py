@@ -237,6 +237,12 @@ class Run(Base):
     # Per-file inference outputs gathered by the run, consumed by scoring (keys are audio_file ids).
     outputs: Mapped[dict[str, Any]] = mapped_column(default=dict)
     rtf_by_stage: Mapped[dict[str, Any]] = mapped_column(default=dict)
+    # What each model ran on, per catalog model id, as the model catalog reported it (platform.catalog
+    # `hardware`): device (gpu | cpu | hosted), declared VRAM, engine, the host's GPU and CPU, runtime
+    # precision and batch size, peak VRAM. Fields the catalog does not report are absent.
+    hardware: Mapped[dict[str, Any]] = mapped_column(default=dict)
+    # Seconds from start to finish, including the stage jobs of an assembled pipeline (not cold starts).
+    wall_s: Mapped[float | None] = mapped_column(Float)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     started_at: Mapped[datetime | None] = mapped_column(DateTime)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime)
@@ -275,11 +281,13 @@ class ModelOutput(Base):
 
 class Score(Base):
     __tablename__ = "score"
-    __table_args__ = (UniqueConstraint("run_id", "normaliser", "collar"),)
+    __table_args__ = (UniqueConstraint("run_id", "normaliser", "collar", "skip_overlap", name="uq_score_key"),)
     id: Mapped[int] = mapped_column(primary_key=True)
     run_id: Mapped[int] = mapped_column(ForeignKey("run.id", ondelete="CASCADE"))
     normaliser: Mapped[str] = mapped_column(String(100))  # id@version
     collar: Mapped[float] = mapped_column(Float)
+    # Overlapped speech left out of DER and JER (seg runs and pipelines' seg stage).
+    skip_overlap: Mapped[bool] = mapped_column(Boolean, default=False)
     aggregates: Mapped[dict[str, Any]] = mapped_column(default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 

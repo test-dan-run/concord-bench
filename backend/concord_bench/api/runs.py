@@ -117,26 +117,28 @@ def run_json(run: Run, with_scores: list[Score] | None = None) -> dict[str, Any]
     d = {"id": run.id, "task": run.task, "label": run_label(run), "model_id": run.model_id,
          "pipeline_id": run.pipeline_id, "dataset_id": run.dataset_id, "dataset": run.dataset.name,
          "status": run.status, "error": run.error, "builds": run.builds, "params": run.params,
-         "rtf": run.rtf_by_stage, "created_at": run.created_at.isoformat(),
+         "rtf": run.rtf_by_stage, "hardware": run.hardware or {}, "wall_s": run.wall_s,
+         "created_at": run.created_at.isoformat(),
          "started_at": run.started_at.isoformat() if run.started_at else None,
          "finished_at": run.finished_at.isoformat() if run.finished_at else None}
     if run.pipeline:
         d["seg_model_id"] = run.pipeline.seg_model_id
         d["asr_model_id"] = run.pipeline.asr_model_id
     if with_scores is not None:
-        d["scores"] = [{"id": s.id, "normaliser": s.normaliser, "collar": s.collar, "aggregates": s.aggregates,
+        d["scores"] = [{"id": s.id, "normaliser": s.normaliser, "collar": s.collar,
+                        "skip_overlap": s.skip_overlap, "aggregates": s.aggregates,
                         "created_at": s.created_at.isoformat()} for s in with_scores]
     return d
 
 
 def ensure_score(session: Session, run: Run, normaliser: str | None, collar: float | None,
-                 queue: bool = True) -> tuple[Score | None, Job | None]:
-    """The score for (run, normaliser, collar), computed now if it only needs local code. A platform
-    normaliser whose model is not running in the catalog is queued as a score job instead: the call goes
-    through the catalog's gateway, which starts the model, and that can take minutes."""
+                 queue: bool = True, skip_overlap: bool = False) -> tuple[Score | None, Job | None]:
+    """The score for (run, normaliser, collar, skip_overlap), computed now if it only needs local code. A
+    platform normaliser whose model is not running in the catalog is queued as a score job instead: the call
+    goes through the catalog's gateway, which starts the model, and that can take minutes."""
     if run.status != "done":
         return None, None
-    sc = scoring.find_score(session, run, normaliser, collar)
+    sc = scoring.find_score(session, run, normaliser, collar, skip_overlap)
     if sc is not None:
         return sc, None
     n = normalisers.get(normaliser or normalisers.DEFAULT) if run.task != RunTask.seg else None
@@ -146,10 +148,11 @@ def ensure_score(session: Session, run: Run, normaliser: str | None, collar: flo
         job = session.scalar(select(Job).where(Job.type == "score", Job.status.in_(ACTIVE))
                              .where(Job.payload["run_id"].as_integer() == run.id))
         if job is None:
-            job = jobs.enqueue(session, "score", {"run_id": run.id, "normaliser": n.key, "collar": collar})
+            job = jobs.enqueue(session, "score", {"run_id": run.id, "normaliser": n.key, "collar": collar,
+                                                  "skip_overlap": skip_overlap})
             session.commit()
         return None, job
-    sc = scoring.score_run(session, run, normaliser, collar)
+    sc = scoring.score_run(session, run, normaliser, collar, skip_overlap)
     session.commit()
     return sc, None
 
@@ -254,6 +257,7 @@ def run_detail(run_id: int, session: Session = Depends(get_session)) -> dict[str
 class ScoreIn(BaseModel):
     normaliser: str | None = None
     collar: float | None = None
+    skip_overlap: bool = False
 
 
 @router.post("/runs/{run_id}/score")
@@ -262,13 +266,13 @@ def score(run_id: int, body: ScoreIn, session: Session = Depends(get_session)) -
     if r.status != "done":
         raise HTTPException(409, f"run is {r.status}")
     try:
-        sc, job = ensure_score(session, r, body.normaliser, body.collar)
+        sc, job = ensure_score(session, r, body.normaliser, body.collar, skip_overlap=body.skip_overlap)
     except KeyError as exc:
         raise HTTPException(400, str(exc)) from None
     if job is not None:
         return {"pending": True, "job": job_brief(job)}
     return {"pending": False, "score": {"id": sc.id, "normaliser": sc.normaliser, "collar": sc.collar,
-                                        "aggregates": sc.aggregates}}
+                                        "skip_overlap": sc.skip_overlap, "aggregates": sc.aggregates}}
 
 
 # ---------------------------------------------------------------- jobs

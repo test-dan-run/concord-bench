@@ -40,15 +40,20 @@ def _state() -> tuple[set[str], list]:
     return tables, version
 
 
+def _latest() -> str:
+    return max(db.known_revisions())
+
+
 def test_ids_are_bench_only():
-    assert db.known_revisions() == {"bench_0001", "bench_0002", "bench_0003", "bench_0004", "bench_0005"}
-    assert db.next_revision_id() == "bench_0006"
+    revs = db.known_revisions()
+    assert revs == {f"bench_{k:04d}" for k in range(1, len(revs) + 1)}  # bench_0001 ... contiguous
+    assert db.next_revision_id() == f"bench_{len(revs) + 1:04d}"
 
 
 def test_a_new_folder_migrates_and_a_second_migrate_is_fine(empty_dir):
     db.migrate()
     db.migrate()
-    assert _state()[1] == [("bench_0005",)]
+    assert _state()[1] == [(_latest(),)]
 
 
 @pytest.mark.parametrize(("version", "says"), [

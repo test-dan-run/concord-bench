@@ -6,6 +6,10 @@ right speaker's stream and an insertion in the wrong one, so it counts twice.
 
 `per_word` re-aligns each assigned pair with `wer.align` to list individual errors; the totals equal
 meeteval's (both are Levenshtein distances), which the tests check.
+
+tcpWER (meeteval's time-constrained cpWER) also needs a word's time to fall within `collar` seconds of
+its reference word's time to match; words get times spread over their segment (meeteval's
+character-based pseudo word timing). tcpWER minus cpWER is the error that timing alone adds.
 """
 
 from __future__ import annotations
@@ -86,12 +90,36 @@ def per_word(result: dict[str, Any]) -> dict[str, Any]:
             "errors": sum(p["errors"] for p in pairs)}
 
 
+TCP_COLLARS = (2.0, 5.0, 10.0)  # seconds; the error pages offer these
+DEFAULT_TCP_COLLAR = 5.0
+
+
+def tcpwer(ref: list[SpkSegment], hyp: list[SpkSegment], collar: float = DEFAULT_TCP_COLLAR) -> dict[str, Any]:
+    from meeteval.io.seglst import SegLST
+    from meeteval.wer.wer.time_constrained import time_constrained_minimum_permutation_word_error_rate
+
+    def seglst(segs: list[SpkSegment]) -> SegLST:
+        rows = [{"session_id": "f", "speaker": s.speaker, "start_time": s.start, "end_time": max(s.end, s.start),
+                 "words": s.text.strip()} for s in segs]
+        return SegLST(rows or [{"session_id": "f", "speaker": "__none__", "start_time": 0.0, "end_time": 0.0,
+                                "words": ""}])
+
+    res = time_constrained_minimum_permutation_word_error_rate(seglst(ref), seglst(hyp), collar=collar)
+    return {"tcpwer": res.error_rate if res.length else None, "errors": res.errors, "n": res.length,
+            "s": res.substitutions, "d": res.deletions, "i": res.insertions, "collar": collar}
+
+
+def tcp_key(collar: float) -> str:
+    """The key a collar's tcpWER is stored under in scores ("5" for 5.0 s)."""
+    return f"{collar:g}"
+
+
 def public(result: dict[str, Any]) -> dict[str, Any]:
     return {k: v for k, v in result.items() if not k.startswith("_")}
 
 
-def aggregate(rows: list[dict[str, Any]]) -> dict[str, Any]:
+def aggregate(rows: list[dict[str, Any]], key: str = "cpwer") -> dict[str, Any]:
     tot = {k: sum(r.get(k) or 0 for r in rows) for k in ("errors", "n", "s", "d", "i")}
-    tot["cpwer"] = tot["errors"] / tot["n"] if tot["n"] else None
+    tot[key] = tot["errors"] / tot["n"] if tot["n"] else None
     tot["files"] = len(rows)
     return tot

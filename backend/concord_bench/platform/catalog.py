@@ -11,6 +11,11 @@ Bench registers, verifies, starts and calls no model service itself:
 
 A `Model` row is made on a model's first use (`ensure_model`) and keeps the last record seen.
 
+`hardware` is what a run records about where each model ran (EVALUATE_PLAN.md §3.4): what the model
+record says (GPU or CPU, declared VRAM, engine; a hosted provider), the platform's GPU size, and, once the
+catalog reports them (platform P1), the host's GPU and CPU, the model's runtime precision and batch size,
+and the peak VRAM a lease measured. Fields the catalog does not report are left out.
+
 Replay mode (REPLAY_DIR) needs no catalog: `get()` returns a `FakeCatalog` holding the services of the
 recorded endpoint map, with the capabilities recorded in summary.json and a build key derived from each
 image tag, so replayed runs have stable cache keys. Tests install their own with `use()`.
@@ -87,8 +92,8 @@ def use(catalog: Any) -> None:
 
 
 def reset() -> None:
-    global _override, _records
-    _override, _records = None, None
+    global _override, _records, _platform
+    _override, _records, _platform = None, None, None
     _real.cache_clear()
     _replay.cache_clear()
 
@@ -210,6 +215,83 @@ def sync_models(session: Session, recs: dict[str, dict[str, Any]]) -> None:
             _apply(session, m, rec)
     if session.dirty:
         session.commit()
+
+
+# ---------------------------------------------------------------- hardware
+
+PLATFORM_TTL_S = 60.0
+_platform: tuple[float, dict[str, Any]] | None = None
+HOST_KEYS = ("gpu_name", "gpu_count", "driver_version", "cuda_version", "cpu_model", "cpu_cores", "hostname")
+
+
+def platform_info(refresh: bool = False) -> dict[str, Any]:
+    """`GET /api/platform` (GPU size, and the `host` object once the catalog has it); {} when unavailable."""
+    global _platform
+    with _lock:
+        if not refresh and _platform is not None and time.monotonic() - _platform[0] < PLATFORM_TTL_S:
+            return _platform[1]
+    cat = get()
+    info: dict[str, Any] = {}
+    try:
+        if callable(getattr(cat, "platform", None)):
+            info = dict(cat.platform() or {})
+        elif isinstance(cat, Catalog):
+            info = dict(cat._req("GET", "/platform") or {})
+    except Exception as exc:  # noqa: BLE001 - hardware details are best effort
+        if not unavailable(exc):
+            log.warning("could not read the platform's hardware: %s", exc)
+    with _lock:
+        _platform = (time.monotonic(), info)
+    return info
+
+
+def hardware(rec: dict[str, Any] | None, platform: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Where a model runs, from its catalog record and the platform: device (gpu | cpu | hosted) and what the
+    catalog reports about it. Missing fields are absent, never guessed."""
+    if not rec:
+        return {}
+    out: dict[str, Any] = {}
+    hosted = rec.get("hosted")
+    gpu = rec.get("gpu")
+    if hosted:
+        out["device"] = "hosted"
+        host = hosted.get("host") or hosted.get("base_url")
+        if host:
+            out["hosted_at"] = host
+    elif gpu and (gpu.get("fraction") or gpu.get("gb")):
+        out["device"] = "gpu"
+        if gpu.get("gb") is not None:
+            out["vram_gb"] = gpu["gb"]
+    else:
+        out["device"] = "cpu"
+    for k in ("engine", "image"):
+        if rec.get(k):
+            out[k] = rec[k]
+    runtime = rec.get("runtime") or {}
+    for k in ("precision", "batch_size"):
+        if runtime.get(k) is not None:
+            out[k] = runtime[k]
+    if rec.get("generative") is not None:
+        out["generative"] = bool(rec["generative"])
+    if out["device"] != "hosted":
+        plat = platform if platform is not None else platform_info()
+        if out["device"] == "gpu" and plat.get("gpu_total_gb") is not None:
+            out["gpu_total_gb"] = plat["gpu_total_gb"]
+        host = plat.get("host") or {}
+        for k in HOST_KEYS:
+            if host.get(k) is not None and (out["device"] == "gpu" or not k.startswith(("gpu", "driver", "cuda"))):
+                out[k] = host[k]
+    return out
+
+
+def peak_vram(lease: Lease) -> dict[str, float]:
+    """Peak VRAM per model so far on a live lease (platform P1: `peak_vram_gb`), {} when it reports none."""
+    try:
+        data = lease.refresh()
+    except Exception:  # noqa: BLE001 - a lease that is gone has nothing more to say
+        data = lease.data
+    peak = (data or {}).get("peak_vram_gb") or {}
+    return {k: float(v) for k, v in peak.items() if v is not None} if isinstance(peak, dict) else {}
 
 
 # ---------------------------------------------------------------- leases, plans, apps

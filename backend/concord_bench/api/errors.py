@@ -244,7 +244,7 @@ def diar_file(result_id: int, session: Session = Depends(get_session)) -> dict[s
     return {**_file_json(r), "ref": al.get("ref", []),
             "hyp": [[s, e, mapping.get(k, k), k] for s, e, k in al.get("hyp", [])], "mapping": mapping,
             "errors": errors, "overlaps": al.get("overlaps", []),
-            "largest": sorted(errors, key=lambda e: -e["dur"])[:6], "confusion": diar_an.confusion(r),
+            "largest": sorted(errors, key=lambda e: -e["dur"])[:6], "speaker_matrix": diar_an.confusion(r),
             "speaker_labels": spk_labels, "file_labels": labels_of(f.meta if f else {}),
             "label_url": peer.file_link_for(session, r.audio_file_id)}
 
@@ -401,6 +401,39 @@ def pipeline_file(result_id: int, session: Session = Depends(get_session)) -> di
             "ref_lines": al.get("ref_lines") or [], "moments": (r.metrics or {}).get("moments"),
             "tcp": (r.metrics or {}).get("tcp"),
             "label_url": peer.file_link_for(session, r.audio_file_id)}
+
+
+# ---------------------------------------------------------------- enhancement (EVALUATE_PLAN.md §6)
+
+@router.get("/enh/clips")
+def enhancement_clips(run_id: int, base_run_id: int, normaliser: str | None = None, limit: int = 8,
+                      session: Session = Depends(get_session)) -> dict[str, Any]:
+    """Reference segments where enhancement changed the transcript most, in either direction: the same
+    pipeline on original audio (`base_run_id`) against the run on an enhanced copy (`run_id`)."""
+    run, base = get_run(session, run_id), get_run(session, base_run_id)
+    if run.task != RunTask.pipeline or base.task != RunTask.pipeline or run.dataset_id != base.dataset_id:
+        raise HTTPException(400, "give two pipeline runs on the same dataset")
+    sc, bsc = _score_for(session, run, normaliser, None), _score_for(session, base, normaliser, None)
+    names = {f.id: f.stem for f in session.scalars(select(AudioFile).where(AudioFile.dataset_id == run.dataset_id))}
+    mine = {r.audio_file_id: r for r in session.scalars(select(Result).where(Result.score_id == sc.id))}
+    clips = []
+    for br in session.scalars(select(Result).where(Result.score_id == bsc.id)):
+        er = mine.get(br.audio_file_id)
+        if er is None:
+            continue
+        for bl, el in zip((br.alignment or {}).get("ref_lines") or [], (er.alignment or {}).get("ref_lines") or [],
+                          strict=False):
+            if (bl["start"], bl["speaker"]) != (el["start"], el["speaker"]):
+                continue
+            be = sum(1 for w in bl["words"] if w["cause"])
+            ee = sum(1 for w in el["words"] if w["cause"])
+            if be != ee:
+                clips.append({"file_id": br.audio_file_id, "file": names.get(br.audio_file_id, br.utterance_key),
+                              "start": bl["start"], "end": bl["end"], "speaker": bl["speaker"],
+                              "original": {"errors": be, "words": bl["words"]},
+                              "enhanced": {"errors": ee, "words": el["words"]}, "change": ee - be})
+    clips.sort(key=lambda c: -abs(c["change"]))
+    return {"run_id": run.id, "base_run_id": base.id, "copy_id": run.enh_copy_id, "clips": clips[:limit]}
 
 
 # ---------------------------------------------------------------- slices by label

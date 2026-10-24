@@ -274,7 +274,11 @@ def heatmap(us: list[Unit], row_key: str, col_key: str, metric: str) -> dict[str
             sub = [u for u in rg if col_ids.get(u.id) == cmeta["value"]]
             line.append({"score": rate(sub, metric) if sub else None, "n": len(sub), "colour": len(sub) >= HEAT_MIN})
         cells.append({"label": rmeta["value"], "cells": line})
-    return {"rows": cells, "cols": [m["value"] for m, _ in cols], "overall": rate(us, metric)}
+    return {"rows": cells, "cols": [m["value"] for m, _ in cols], "overall": rate(us, metric),
+            "col_filters": [{"key": col_key, "min": m["min"], "max": m["max"]} if m["kind"] == "continuous"
+                            else {"key": col_key, "value": m["value"]} for m, _ in cols],
+            "row_filters": [{"key": row_key, "min": m["min"], "max": m["max"]} if m["kind"] == "continuous"
+                            else {"key": row_key, "value": m["value"]} for m, _ in rows]}
 
 
 def worst(us: list[Unit], k: int = 6) -> list[dict[str, Any]]:

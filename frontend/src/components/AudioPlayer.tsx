@@ -20,7 +20,8 @@ export interface AudioController {
   seek: (t: number) => void;
 }
 
-export function useAudio(fileId: number | null | undefined): AudioController {
+/** Playback of a file's derived audio, or of its version in an enhanced copy (`copyId`). */
+export function useAudio(fileId: number | null | undefined, copyId?: number | null): AudioController {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [time, setTime] = useState(0);
   const [playing, setPlaying] = useState(false);
@@ -67,7 +68,7 @@ export function useAudio(fileId: number | null | undefined): AudioController {
       a.removeEventListener("ended", onPause);
       if (raf.current) cancelAnimationFrame(raf.current);
     };
-  }, [tick, fileId]);
+  }, [tick, fileId, copyId]);
 
   const play = useCallback((from?: number, to?: number) => {
     const a = audioRef.current;
@@ -100,7 +101,7 @@ export function useAudio(fileId: number | null | undefined): AudioController {
     if (audioRef.current) audioRef.current.playbackRate = r;
   }, []);
 
-  return { audioRef, src: fileId ? `/api/audio/${fileId}` : "", time, playing, rate, setRate, play, playSpans, pause, seek };
+  return { audioRef, src: fileId ? `/api/audio/${fileId}${copyId ? `?copy_id=${copyId}` : ""}` : "", time, playing, rate, setRate, play, playSpans, pause, seek };
 }
 
 /** Transport bar for a span of a file (the whole file when start/end are omitted). */
@@ -158,5 +159,23 @@ export function PlayFrom({ ctl, t, until, label }: { ctl: AudioController; t: nu
     >
       <I.Play size={10} />
     </button>
+  );
+}
+
+/** A play button for one moment of a file, with its own audio element (lists of moments from many files). */
+export function ClipButton({ fileId, start, end, label, copyId }: { fileId: number; start: number; end: number; label: string; copyId?: number | null }) {
+  const ctl = useAudio(fileId, copyId);
+  return (
+    <>
+      <audio ref={ctl.audioRef} src={ctl.src} preload="none" />
+      <button
+        type="button"
+        aria-label={ctl.playing ? "Pause" : label}
+        onClick={() => (ctl.playing ? ctl.pause() : ctl.play(Math.max(0, start), end))}
+        className="inline-flex items-center justify-center size-7 rounded-full border border-line text-fg bg-transparent cursor-pointer hover:bg-track shrink-0"
+      >
+        {ctl.playing ? <I.Pause size={10} /> : <I.Play size={10} />}
+      </button>
+    </>
   );
 }

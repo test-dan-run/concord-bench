@@ -33,6 +33,10 @@
   --color-fa: #f59e0b;
   --color-confusion: #a855f7;
 
+  /* speech enhancement (a copy of the audio, and rows that read one) */
+  --color-enh: #f472b6;
+  --color-enh-soft: #f9a8d4;
+
   /* pipeline stages */
   --color-stage-asr: #38bdf8;
   --color-stage-seg: #10b981;

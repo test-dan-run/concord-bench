@@ -9,6 +9,7 @@ file, stored as derived audio under each output's own sha256.
   the shift is recorded; further off, the file fails, and a copy with failed files is `failed`.
 - A copy is reused by every run that asks for the same (dataset, model, build, parameters). Deleting one
   removes its audio (unless another copy or an original has the same bytes) and keeps the row `deleted`.
+- An output identical to its input is not stored again: the copy's file points at the original's audio.
 """
 
 from __future__ import annotations
@@ -169,7 +170,8 @@ def build(session: Session, copy: EnhancedCopy, adapter: OIPEnhancer, log: Log, 
             failed.append(f"{f.rel_path}: {exc}")
             log(f"length check failed: {f.rel_path}: {exc}")
             continue
-        sha = store_audio(y)
+        # Unchanged audio (a no-op enhancer) points at the original's derived audio instead of a second copy.
+        sha = f.sha256 if np.array_equal(y, np.clip(x, -1.0, 1.0)) else store_audio(y)
         session.add(EnhancedFile(copy_id=copy.id, audio_file_id=f.id, sha256=sha, duration=len(y) / SR,
                                  shift_ms=round(shift / SR * 1000, 3), latency_s=latency))
         session.commit()  # one file at a time: the API shares this SQLite file
@@ -178,8 +180,9 @@ def build(session: Session, copy: EnhancedCopy, adapter: OIPEnhancer, log: Log, 
     copy.files = len(done)
     copy.audio_s = sum(e.duration for e in done.values())
     copy.processing_s = sum(e.latency_s for e in done.values())
+    own = {f.id: f.sha256 for f in files}
     copy.size_bytes = sum(paths.derived(e.sha256).stat().st_size for e in done.values()
-                          if paths.derived(e.sha256).exists())
+                          if e.sha256 != own.get(e.audio_file_id) and paths.derived(e.sha256).exists())
     copy.max_shift_ms = max(shifts) if shifts else 0.0
     copy.progress, copy.finished_at = 1.0, utcnow()
     if failed:

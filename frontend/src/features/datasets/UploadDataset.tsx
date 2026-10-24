@@ -5,6 +5,7 @@ import { api, type Inspection, type TaskMatch } from "../../lib/api";
 import { bytes, num } from "../../lib/format";
 import { pickedFromDrop, pickedFromInput, uploadFiles, type PickedFile } from "../../lib/upload";
 import * as I from "../../components/icons";
+import { LabelsTable } from "../../components/LabelsTable";
 import { TagInput } from "../../components/TagInput";
 import { Button, Chip, cx, ErrorNote, Fact, PageHeader, Panel, Spinner } from "../../components/ui";
 import { EMPTY_PLAN, PlanPanel, planCount, type PlanValue } from "../benchmarks/PlanPanel";
@@ -210,6 +211,7 @@ export function UploadDataset() {
             <Fact k="Name" v={name || "—"} />
             <Fact k="Audio" v={inspection ? `${num(inspection.audio_files)} files · ${bytes(inspection.audio_bytes)}` : "—"} />
             <Fact k="Labels" v={labels.length ? labels.map((l) => (l === "asr" ? "ASR" : "Diarisation")).join(" + ") : "—"} />
+            {inspection && <Fact k="Labels for slicing" v={`${(inspection.labels ?? []).filter((l) => l.kind !== "unused").length} found`} />}
             {tags.length > 0 && <span className="flex flex-wrap gap-1">{tags.map((t) => <Chip key={t}>#{t}</Chip>)}</span>}
           </Panel>
           <Panel title="Benchmark plan" subtitle="Ranked by tags shared with this dataset">
@@ -221,7 +223,7 @@ export function UploadDataset() {
           <Button variant="primary" disabled={!ready || create.isPending} onClick={() => create.mutate()}>
             {create.isPending ? "Starting…" : cta}
           </Button>
-          <span className="text-[11px] text-subtle">Ingest runs as a job: originals are copied, 16 kHz mono and waveform peaks are derived, and the services the plan needs are started.</span>
+          <span className="text-[11px] text-subtle">Ingest runs as a job: originals are copied, 16 kHz mono and waveform peaks are derived, enhanced copies are built, and the models the plan needs are started.</span>
         </aside>
       </div>
     </>
@@ -284,6 +286,21 @@ function Annotations({ ins }: { ins: Inspection }) {
           </div>
         </div>
       ))}
+      {tasks.length > 0 && (
+        <div className="flex flex-col gap-2 border border-track rounded-md p-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-medium text-[13px]">Labels for slicing</span>
+            <Chip tone={(ins.labels ?? []).some((l) => l.kind !== "unused") ? "good" : "default"}>
+              <span className="num">{(ins.labels ?? []).filter((l) => l.kind !== "unused").length} labels found</span>
+            </Chip>
+            <span className="ml-auto text-[11px] text-subtle">from the extra fields in the annotations</span>
+          </div>
+          <span className="text-xs text-muted leading-relaxed">
+            Any field besides the file, times, speaker and text becomes a label. Nested objects are flattened, so <span className="num">"attribute": {"{"}"gender": …{"}"}</span> becomes <span className="num">attribute.gender</span>. A label on a record applies to every word in it; error analysis breaks scores down by each one.
+          </span>
+          <LabelsTable labels={ins.labels ?? []} />
+        </div>
+      )}
       {ins.unmatched.length > 0 && (
         <span className="text-xs text-warn">
           {ins.unmatched.length} annotation file name{ins.unmatched.length > 1 ? "s" : ""} match no audio: {ins.unmatched.slice(0, 8).join(", ")}

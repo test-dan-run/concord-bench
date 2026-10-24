@@ -8,7 +8,7 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from ..core.db import get_session
@@ -62,6 +62,9 @@ def catalog_listing(session: Session) -> dict[str, Any]:
     for that the catalog no longer lists. One catalog call (cached a few seconds), not one per model."""
     rows = {m.catalog_id: m for m in session.scalars(select(Model))}
     runs = dict(session.execute(select(Run.model_id, func.count(Run.id)).group_by(Run.model_id)).all())
+    for mid, n in session.execute(select(Run.enh_model_id, func.count(Run.id)).where(Run.enh_model_id.is_not(None))
+                                  .group_by(Run.enh_model_id)).all():
+        runs[mid] = runs.get(mid, 0) + n  # an enhancer is used by the runs that read its copy
     try:
         recs = catalog.records()
     except catalog.CatalogUnavailable as exc:
@@ -90,5 +93,5 @@ def model_detail(model_id: int, session: Session = Depends(get_session)) -> dict
         rec = catalog.record(m.catalog_id)
     except catalog.CatalogUnavailable:
         rec = None
-    runs = session.scalar(select(func.count(Run.id)).where(Run.model_id == m.id)) or 0
+    runs = session.scalar(select(func.count(Run.id)).where(or_(Run.model_id == m.id, Run.enh_model_id == m.id))) or 0
     return catalog_entry(rec, m, runs)

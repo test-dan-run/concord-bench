@@ -93,3 +93,51 @@ def run_flow(client, staging: Path, asr_models: list[str] | None = None, seg_mod
         cp = f"{c['cpwer']:.3f}" if c["cpwer"] is not None else "n/a"
         log(f"PIPE {c['label']}: cpWER {cp}  WER {c['wer']:.3f}  RTF {c['rtf']:.3f}")
     return out
+
+
+# ---------------------------------------------------------------- speech enhancement on replayed fixtures
+
+IDENTITY_ENHANCER = "identity-enhancer"
+
+
+def add_identity_enhancer() -> None:
+    """Replay only: an enhancement model that returns its input unchanged. Re-encoding the same samples gives
+    the same FLAC bytes, so its copy has the originals' sha256 and runs on it replay the recorded outputs:
+    the enhancement screens get real rows (with no change against original audio) and no model is needed."""
+    from .adapters.enhance import OIPEnhancer
+    from .platform import catalog
+
+    cat = catalog.get()
+    if not any(m["id"] == IDENTITY_ENHANCER for m in cat.models(all=True)):
+        bk = catalog.replay_build_key(IDENTITY_ENHANCER)
+        cat.add_model({
+            "id": IDENTITY_ENHANCER, "aliases": [], "registered": True, "display_name": IDENTITY_ENHANCER, "tags": [],
+            "parent_id": None, "description": "Returns its input unchanged (replay demo)", "tasks": ["speech-enhancement"],
+            "kind": "model", "engine": "custom", "contract": "oip-v2", "api": "infer", "gpu": None, "state": "running",
+            "leased_by": [], "in_flight": 0, "build_key": bk, "image": f"replay/{IDENTITY_ENHANCER}:0", "cold_start_s": 5.0,
+            "cold_start_measured": False, "generative": False,
+            "capabilities": {"build_key": bk, "status": "verified", "usable_as": "enhancer", "tasks": ["enhance"],
+                             "output_detail": ["enhanced_audio"], "rtf": 0.01}})
+    OIPEnhancer.call = lambda self, audio, sample_rate=16000: (audio, sample_rate)  # type: ignore[method-assign]
+    catalog.records(refresh=True)
+
+
+def run_enhancement_flow(client, ds_id: int, log: Callable[[str], None] = print) -> dict[str, Any]:
+    """Each ASR model on the identity enhancer's copy, and one pipeline with the copy before and after
+    diarisation (replay only)."""
+    add_identity_enhancer()
+    _ok(client.post("/api/benchmarks/plan", json={"dataset_id": ds_id, "asr_models": ASR_MODELS, "mode": "stages",
+                                                  "enhancers": [IDENTITY_ENHANCER], "include_original": False}), 202)
+    _ok(client.post("/api/benchmarks/plan", json={
+        "dataset_id": ds_id, "seg_models": ["pyannote-diarization"], "asr_models": ["whisper-large-v3"], "mode": "grid",
+        "enhancers": [IDENTITY_ENHANCER], "include_original": False, "placements": ["before", "after"]}), 202)
+    jobs.run_pending()
+    failed = [j for j in _ok(client.get("/api/jobs?limit=200")) if j["status"] in ("failed", "blocked")]
+    if failed:
+        raise AssertionError("jobs failed: " + "; ".join(f"{j['label']}: {j['error']}" for j in failed))
+    out = {"asr": _ok(client.get("/api/benchmarks/asr")),
+           "pipelines": _ok(client.get(f"/api/benchmarks-pipelines?dataset_id={ds_id}")),
+           "copies": _ok(client.get(f"/api/datasets/{ds_id}/enhanced"))}
+    log(f"enhancement: {len(out['copies'])} copy, {sum(1 for c in out['asr']['cells'] if c['enh_model_id'])} ASR cells, "
+        f"{sum(1 for r in out['pipelines']['leaderboard'] if r['enh_model_id'])} enhanced pipelines")
+    return out

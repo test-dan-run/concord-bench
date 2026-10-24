@@ -3,7 +3,7 @@ import type { ColumnDef } from "@tanstack/react-table";
 import { useMemo, useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import { api, qs, type AlignOp, type Page, type Run, type Utterance, type UtteranceDetail } from "../../lib/api";
-import { useNormaliser, useNormalisers } from "../../lib/config";
+import { useNormaliser } from "../../lib/config";
 import { clock, deltaPts, num, pct, timingLabel } from "../../lib/format";
 import { AudioPlayer, PlayFrom, useAudio } from "../../components/AudioPlayer";
 import { AlignmentGrid, DiffText } from "../../components/DiffText";
@@ -12,8 +12,10 @@ import { ExpandCell, SortableTable } from "../../components/SortableTable";
 import { Timeline } from "../../components/Timeline";
 import { viewAround } from "../../components/timelineMath";
 import * as I from "../../components/icons";
+import { NormaliserButtons } from "../../components/NormaliserButtons";
 import { AnchorButton, Bar, Button, Chip, cx, Empty, ErrorNote, PageHeader, Panel, Select, Spinner } from "../../components/ui";
-import { Crumbs, latestRuns, RunPickers, Switcher, useDoneRuns, useSwitchLinks } from "./common";
+import { AsrViews, Crumbs, latestRuns, RunPickers, Switcher, useDoneRuns, useSwitchLinks } from "./common";
+import { Link } from "react-router-dom";
 
 interface Summary {
   run: Run;
@@ -30,9 +32,8 @@ interface Summary {
 export function AsrErrors() {
   const { runId } = useParams();
   const [params, setParams] = useSearchParams();
-  const [normaliser, setNormaliser] = useNormaliser();
+  const [normaliser] = useNormaliser();
   const compare = params.get("compare") ?? undefined;
-  const { data: norms } = useNormalisers();
   const s = useQuery({
     queryKey: ["asr-summary", runId, normaliser, compare],
     queryFn: () => api.get<Summary>(`/errors/asr/summary${qs({ run_id: runId, normaliser, compare_run_id: compare })}`),
@@ -60,6 +61,9 @@ export function AsrErrors() {
     { key: "s", label: "Substitutions", color: "var(--color-sub)", fmt: (v) => num(v), sub: `${pct((t.s ?? 0) / (t.n || 1))} of words`, count: true },
     { key: "d", label: "Deletions", color: "var(--color-del)", fmt: (v) => num(v), sub: `${pct((t.d ?? 0) / (t.n || 1))} of words`, count: true },
     { key: "i", label: "Insertions", color: "var(--color-ins)", fmt: (v) => num(v), sub: `${pct((t.i ?? 0) / (t.n || 1))} of words`, count: true },
+    { key: "mer", label: "MER", fmt: (v) => pct(v), sub: "wrong aligned pairs" },
+    { key: "wil", label: "WIL", fmt: (v) => pct(v), sub: "word information lost" },
+    { key: "wip", label: "WIP", fmt: (v) => pct(v), sub: "higher is better" },
   ];
 
   return (
@@ -87,19 +91,14 @@ export function AsrErrors() {
                     </option>
                   ))}
                 </Select>
-                <Select label="Normaliser" value={normaliser} onChange={(e) => setNormaliser(e.target.value)}>
-                  {(norms ?? []).map((n) => (
-                    <option key={n.id} value={n.id}>
-                      {n.label}
-                    </option>
-                  ))}
-                </Select>
+                <NormaliserButtons />
               </>
             }
           />
         }
       />
       <Switcher current="asr" links={links} />
+      <AsrViews runId={d.run.id} current="utterances" />
       <div className="flex flex-wrap gap-3">
         {tiles.map((k) => (
           <MetricTile
@@ -108,7 +107,7 @@ export function AsrErrors() {
             color={k.color}
             value={k.fmt(t[k.key])}
             sub={c ? `vs ${d.compare!.run.label}: ${k.fmt(c[k.key])}` : k.sub}
-            delta={c && <Delta value={t[k.key]} compare={c[k.key]} format={(x) => (k.count ? num(x) : deltaPts(x).replace(/^[+−]/, ""))} />}
+            delta={c && <Delta value={t[k.key]} compare={c[k.key]} lowerIsBetter={k.key !== "wip"} format={(x) => (k.count ? num(x) : deltaPts(x).replace(/^[+−]/, ""))} />}
           />
         ))}
       </div>
@@ -187,7 +186,14 @@ export function AsrErrors() {
             </div>
           ))}
         </Panel>
-        <Panel title="WER by slice" subtitle="File metadata, utterance length and speaker">
+        <Panel
+          title="WER by slice"
+          subtitle={
+            <>
+              File metadata, utterance length and speaker · <Link to={`/errors/asr/${d.run.id}/labels`}>Break down by any label</Link>
+            </>
+          }
+        >
           {d.slices.length === 0 && <span className="text-[13px] text-muted">No slices: add metadata fields (e.g. condition) to the annotations.</span>}
           {d.slices.map((sl) => (
             <div key={`${sl.group}-${sl.label}`} className="grid grid-cols-[minmax(0,1fr)_90px_56px] gap-2 items-center text-[13px]">

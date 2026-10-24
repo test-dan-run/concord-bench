@@ -1,19 +1,42 @@
-import { useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import type { ColumnDef } from "@tanstack/react-table";
 import { useMemo, useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
-import { api, qs, type ErrorRegion, type Lane, type Page, type Run } from "../../lib/api";
+import { api, qs, type ErrorRegion, type Lane, type Page, type Run, type SliceReport } from "../../lib/api";
 import { useConfig } from "../../lib/config";
 import { ERROR_COLORS, ERROR_LABELS, SPEAKERS, speakerColors } from "../../lib/colors";
-import { clock, deltaPts, num, pct } from "../../lib/format";
-import { AudioPlayer, PlayFrom, useAudio } from "../../components/AudioPlayer";
+import { clock, deltaPts, duration, hwLabel, num, pct, rtf, speed } from "../../lib/format";
+import { AudioPlayer, ClipButton, PlayFrom, useAudio } from "../../components/AudioPlayer";
 import { Delta, MetricTile } from "../../components/MetricTile";
 import { ExpandCell, SortableTable } from "../../components/SortableTable";
 import { ErrorLegend, Timeline, type LaneGroup } from "../../components/Timeline";
 import { lanesBySpeaker } from "../../components/timelineMath";
 import * as I from "../../components/icons";
-import { AnchorButton, Bar, Chip, ErrorNote, PageHeader, Panel, Select, Spinner } from "../../components/ui";
+import { AnchorButton, Bar, Chip, cx, ErrorNote, PageHeader, Panel, Select, Spinner } from "../../components/ui";
 import { Crumbs, latestRuns, RunPickers, Switcher, useDoneRuns, useSwitchLinks } from "./common";
+import { SliceTable } from "./AsrLabels";
+
+interface RegionRow {
+  key: string;
+  label: string;
+  seconds: number;
+  speech_s: number;
+  error_s: number;
+  share_speech: number | null;
+  share_errors: number | null;
+  lift: number | null;
+  mix: Record<string, number>;
+  der: number | null;
+  worst: { file_id: number; file: string; start: number; end: number; dur: number; type: string }[];
+}
+
+interface Regions {
+  rows: RegionRow[];
+  speech_s: number;
+  error_s: number;
+}
+
+const CONTEXT: Record<string, string> = { overlap: "overlap", near_change: "near a speaker change", short: "short turn", nonspeech: "non-speech" };
 
 interface Summary {
   run: Run;
@@ -21,7 +44,10 @@ interface Summary {
   collar: number;
   has_speakers: boolean;
   tiles: Record<string, number | null>;
-  compare: { run: Run; tiles: Record<string, number | null> } | null;
+  skip_overlap: boolean;
+  compare: { run: Run; score_id: number; tiles: Record<string, number | null>; regions: Regions } | null;
+  regions: Regions;
+  speaker_counts: { rows: { label: number; cells: number[] }[]; cols: number[]; files: number; exact: number; under: number; over: number };
   conditions: { group: string; label: string; der: number | null; vad_error: number | null; files: number }[];
   turns_found: { label: string; turns: number; found: number; rate: number | null }[];
   boundaries: { edges: number[]; counts: number[]; n: number; median_abs: number | null };
@@ -50,9 +76,12 @@ interface FileDetail extends FileRow {
   ref: Lane[];
   hyp: Lane[];
   mapping: Record<string, string>;
-  errors: ErrorRegion[];
+  errors: (ErrorRegion & { context?: string[] })[];
   overlaps: { start: number; end: number }[];
-  largest: ErrorRegion[];
+  largest: (ErrorRegion & { context?: string[] })[];
+  speaker_matrix: { cols: string[]; rows: { speaker: string; talk_s: number; cells: number[]; missed_s: number }[]; mapping: Record<string, string>; notes: { kind: "merge" | "split"; hyp: string | string[]; ref: string[] }[] };
+  speaker_labels: Record<string, Record<string, unknown>>;
+  file_labels: Record<string, unknown>;
   label_url: string | null;
 }
 
@@ -81,9 +110,16 @@ export function DiarErrors() {
   const { data: cfg } = useConfig();
   const collar = params.get("collar") ?? undefined;
   const compare = params.get("compare") ?? undefined;
+  const skipOverlap = params.get("skip_overlap") === "1";
   const s = useQuery({
-    queryKey: ["diar-summary", runId, collar, compare],
-    queryFn: () => api.get<Summary>(`/errors/diar/summary${qs({ run_id: runId, collar, compare_run_id: compare })}`),
+    queryKey: ["diar-summary", runId, collar, compare, skipOverlap],
+    queryFn: () => api.get<Summary>(`/errors/diar/summary${qs({ run_id: runId, collar, compare_run_id: compare, skip_overlap: skipOverlap || undefined })}`),
+    placeholderData: keepPreviousData,
+  });
+  const bySlice = useQuery({
+    queryKey: ["slices", s.data?.score_id, s.data?.compare?.score_id],
+    queryFn: () => api.get<SliceReport>(`/errors/slices${qs({ score_id: s.data!.score_id, compare_score_id: s.data!.compare?.score_id })}`),
+    enabled: !!s.data,
   });
   const links = useSwitchLinks(s.data?.run.dataset_id, "");
   const others = latestRuns(useDoneRuns("seg").data ?? []).filter((r) => s.data && r.dataset_id === s.data.run.dataset_id && r.id !== s.data.run.id);
@@ -145,6 +181,10 @@ export function DiarErrors() {
                     </option>
                   ))}
                 </Select>
+                <label className="flex items-center gap-2 text-xs text-muted cursor-pointer" title="Leave overlapped speech out of DER and JER">
+                  <input type="checkbox" checked={!skipOverlap} onChange={(e) => set("skip_overlap", e.target.checked ? undefined : "1")} className="accent-[#06B6D4]" />
+                  Score overlapping speech
+                </label>
               </>
             }
           />
@@ -163,6 +203,19 @@ export function DiarErrors() {
           />
         ))}
       </div>
+      <ComputeStrip run={d.run} compare={d.compare?.run} />
+      <WhereErrors regions={d.regions} compare={d.compare?.regions} compareName={d.compare?.run.label} />
+      {d.has_speakers && (
+        <div className="grid gap-5 lg:grid-cols-2">
+          <SpeakerCounts sc={d.speaker_counts} />
+          <Confusion scoreId={d.score_id} />
+        </div>
+      )}
+      {bySlice.data && (bySlice.data.labels.some((l) => l.kind !== "unused") ? (
+        <Panel id="dlbl-h" title={`Where ${d.run.label} fails, by label`} subtitle={`File labels. Diarisation is scored per file, so intervals are resampled by file and are wider than for ASR; fewer than ${bySlice.data.min_units} files is too few to call.`}>
+          <SliceTable rows={bySlice.data.finder ?? []} overall={bySlice.data.overall.value} low cmpName={d.compare?.run.label} unit="Files" />
+        </Panel>
+      ) : null)}
       <Panel id="files-h" title="Files" subtitle="Sort by any column; open a file for speaker lanes, the error lane and the largest errors." actions={<ErrorLegend />}>
         <FileTable scoreId={d.score_id} hasSpeakers={d.has_speakers} modelName={d.run.label} />
       </Panel>
@@ -311,10 +364,231 @@ function FileDetailView({ id, modelName }: { id: number; modelName: string }) {
                 {ERROR_LABELS[e.type]}
               </span>
               <span className="num text-muted">{e.dur.toFixed(2)} s</span>
+              {(e.context ?? []).map((c) => (
+                <Chip key={c}>{CONTEXT[c] ?? c}</Chip>
+              ))}
             </div>
           ))}
         </div>
       </div>
     </div>
+  );
+}
+
+function ComputeStrip({ run, compare }: { run: Run; compare?: Run }) {
+  const h = Object.values(run.hardware ?? {}).find((x) => x.device);
+  const r = run.rtf?.total ?? null;
+  const ch = compare ? Object.values(compare.hardware ?? {}).find((x) => x.device) : undefined;
+  return (
+    <div className="flex flex-wrap items-center gap-x-5 gap-y-1.5 bg-panel border border-track rounded-lg px-4 py-2.5 text-xs">
+      <span className="flex items-center gap-1.5 text-muted">
+        <I.Cpu size={14} /> Compute
+      </span>
+      <span className="num">{hwLabel(h)}{h?.vram_gb ? ` · ${h.vram_gb} GB declared VRAM` : ""}{h?.peak_vram_gb ? ` · ${h.peak_vram_gb.toFixed(1)} GB peak` : ""}</span>
+      <span className="num">RTF {rtf(r)} · {speed(r)}</span>
+      {run.wall_s !== null && <span className="num">{duration(run.wall_s)}{run.rtf?.audio_s ? ` for ${duration(run.rtf.audio_s)} of audio` : ""}</span>}
+      <span className="num text-subtle">cold start not in RTF</span>
+      {compare && <span className="num text-muted">{compare.label}: {hwLabel(ch)} · RTF {rtf(compare.rtf?.total)}</span>}
+    </div>
+  );
+}
+
+function WhereErrors({ regions, compare, compareName }: { regions: Regions; compare?: Regions; compareName?: string }) {
+  const [open, setOpen] = useState<string | null>(null);
+  const rows = regions.rows.filter((r) => r.seconds > 0);
+  const cur = rows.find((r) => r.key === open) ?? rows.slice().sort((a, b) => (b.lift ?? 0) - (a.lift ?? 0))[0];
+  if (!rows.length) return null;
+  return (
+    <Panel
+      id="where-h"
+      title="Where the errors are"
+      subtitle={`Each kind of moment's share of reference speech against its share of error time (${duration(regions.error_s)} of errors in ${duration(regions.speech_s)} of speech). Lift above 1 means errors gather there. Kinds overlap.`}
+      actions={
+        <span className="flex flex-wrap gap-3 text-[11px] text-muted">
+          <span className="flex items-center gap-1.5"><span className="h-1.5 w-4 rounded bg-secondary" />Share of speech</span>
+          <span className="flex items-center gap-1.5"><span className="h-1.5 w-4 rounded bg-bad" />Share of errors</span>
+          {(["missed", "false_alarm", "confusion"] as const).map((k) => (
+            <span key={k} className="flex items-center gap-1.5"><span className="size-2.5 rounded-sm" style={{ background: ERROR_COLORS[k] }} />{ERROR_LABELS[k]}</span>
+          ))}
+        </span>
+      }
+    >
+      <div className="grid gap-5 xl:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
+        <div className="flex flex-col gap-1 min-w-0">
+          <div className="grid grid-cols-[minmax(150px,1.2fr)_minmax(140px,1.4fr)_56px_100px_90px] gap-3 text-[11px] text-muted uppercase tracking-wider px-2">
+            <span>Moment</span>
+            <span>Speech vs errors</span>
+            <span className="text-right">Lift</span>
+            <span>Error mix</span>
+            <span className="text-right">DER here</span>
+          </div>
+          {rows.map((r) => {
+            const c = compare?.rows.find((x) => x.key === r.key);
+            return (
+              <button key={r.key} type="button" aria-pressed={cur?.key === r.key} onClick={() => setOpen(r.key)} className={cx("grid grid-cols-[minmax(150px,1.2fr)_minmax(140px,1.4fr)_56px_100px_90px] gap-3 items-center px-2 py-2 rounded-md cursor-pointer border text-left", cur?.key === r.key ? "border-focus bg-active/50" : "border-transparent bg-transparent hover:bg-track")}>
+                <span className="text-[13px]">{r.label}</span>
+                <span className="flex flex-col gap-1">
+                  <span className="flex items-center gap-2"><Bar value={r.share_speech} color="var(--color-secondary)" className="flex-1" /><span className="num text-[11px] w-10 text-right">{pct(r.share_speech, 0)}</span></span>
+                  <span className="flex items-center gap-2"><Bar value={r.share_errors} color="var(--color-bad)" className="flex-1" /><span className="num text-[11px] w-10 text-right">{pct(r.share_errors, 0)}</span></span>
+                </span>
+                <span className={cx("num text-right", (r.lift ?? 0) > 1.2 ? "text-bad" : "text-muted")}>{r.lift === null ? "—" : `${r.lift.toFixed(1)}×`}</span>
+                <span className="flex h-2 rounded overflow-hidden bg-track">
+                  {(["missed", "false_alarm", "confusion"] as const).map((k) => (
+                    <span key={k} style={{ width: `${(r.mix[k] ?? 0) * 100}%`, background: ERROR_COLORS[k] }} />
+                  ))}
+                </span>
+                <span className="flex flex-col items-end">
+                  <span className="num">{r.key === "nonspeech" ? `${duration(r.error_s)} FA` : pct(r.der)}</span>
+                  {c && <span className="num text-[11px] text-muted">{compareName?.split(" ")[0]} {c.key === "nonspeech" ? duration(c.error_s) : pct(c.der)}</span>}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+        <div className="flex flex-col gap-2">
+          <span className="text-[11px] text-muted uppercase tracking-wider">Worst moments · {cur?.label}</span>
+          {(cur?.worst ?? []).length === 0 && <span className="text-[13px] text-muted">No errors here.</span>}
+          {(cur?.worst ?? []).map((m, k) => (
+            <div key={k} className="flex items-center gap-3 text-[13px]">
+              <ClipButton fileId={m.file_id} start={Math.max(0, m.start - 0.5)} end={m.end + 0.5} label={`Play ${m.file} at ${clock(m.start)}`} />
+              <span className="flex flex-col min-w-0">
+                <span className="flex items-center gap-1.5">
+                  <span className="size-2.5 rounded-sm" style={{ background: ERROR_COLORS[m.type] }} />
+                  {ERROR_LABELS[m.type]} <span className="num text-muted">{m.dur.toFixed(2)} s</span>
+                </span>
+                <span className="num text-[11px] text-subtle truncate">{m.file} · {clock(m.start)}</span>
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </Panel>
+  );
+}
+
+function SpeakerCounts({ sc }: { sc: Summary["speaker_counts"] }) {
+  if (!sc.files) return null;
+  const max = Math.max(1, ...sc.rows.flatMap((r) => r.cells));
+  return (
+    <Panel id="cnt-h" title="How many speakers it finds" subtitle="Files by true speaker count (rows) and the count the model found (columns)">
+      <table className="border-collapse text-[13px] self-start">
+        <thead>
+          <tr>
+            <th scope="col" className="text-left text-[11px] text-muted font-medium px-2 py-1">True ╲ found</th>
+            {sc.cols.map((c) => (
+              <th key={c} scope="col" className="num text-[11px] text-muted font-medium px-3 py-1">{c}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {sc.rows.map((r) => (
+            <tr key={r.label}>
+              <th scope="row" className="num font-normal text-left px-2 py-1">{r.label}</th>
+              {r.cells.map((n, i) => (
+                <td key={i} className="p-0.5">
+                  <span className={cx("num flex items-center justify-center w-12 h-8 rounded", sc.cols[i] === r.label && n ? "border border-good/60" : "")} style={{ background: n ? `rgba(99,102,241,${(0.15 + (n / max) * 0.55).toFixed(2)})` : "rgba(30,41,59,0.5)" }}>
+                    {n || ""}
+                  </span>
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <span className="text-xs text-muted">
+        Exact in <span className="num">{sc.exact} of {sc.files}</span> files. Under-counting (<span className="num">{sc.under}</span>) {sc.under > sc.over ? "is more common than" : sc.under < sc.over ? "is less common than" : "is as common as"} over-counting (<span className="num">{sc.over}</span>){sc.under > sc.over ? ": speakers get merged, not split." : "."}
+      </span>
+    </Panel>
+  );
+}
+
+function Confusion({ scoreId }: { scoreId: number }) {
+  const files = useQuery({ queryKey: ["diar-files-all", scoreId], queryFn: () => api.get<Page<FileRow>>(`/errors/diar/files${qs({ score_id: scoreId, sort: "der", order: "desc", limit: 200 })}`) });
+  const [fid, setFid] = useState<number | null>(null);
+  const id = fid ?? files.data?.rows[0]?.id;
+  const f = useQuery({ queryKey: ["diar-file", id], queryFn: () => api.get<FileDetail>(`/errors/diar/files/${id}`), enabled: !!id });
+  const cm = f.data?.speaker_matrix;
+  const colors = speakerColors(cm?.rows.map((r) => r.speaker) ?? []);
+  return (
+    <Panel
+      id="cm-h"
+      title="Who was mistaken for whom"
+      subtitle="Seconds of each reference speaker's speech, by the model speaker it went to"
+      actions={
+        <Select label="File" value={id ?? ""} onChange={(e) => setFid(Number(e.target.value))}>
+          {(files.data?.rows ?? []).map((r) => (
+            <option key={r.id} value={r.id}>
+              {r.key} · DER {pct(r.der)}
+            </option>
+          ))}
+        </Select>
+      }
+    >
+      {!cm ? (
+        <Spinner />
+      ) : (
+        <>
+          <div className="overflow-x-auto scroll-thin">
+            <table className="border-collapse text-[12px]">
+              <thead>
+                <tr>
+                  <th scope="col" className="text-left text-[11px] text-muted font-medium px-2 py-1">Reference speaker</th>
+                  {cm.cols.map((c) => (
+                    <th key={c} scope="col" className="num text-[11px] text-muted font-medium px-2 py-1">{c}{cm.mapping[c] ? ` → ${cm.mapping[c]}` : ""}</th>
+                  ))}
+                  <th scope="col" className="num text-[11px] text-muted font-medium px-2 py-1">missed</th>
+                </tr>
+              </thead>
+              <tbody>
+                {cm.rows.map((r) => {
+                  const tags = f.data?.speaker_labels?.[r.speaker] ?? {};
+                  return (
+                    <tr key={r.speaker}>
+                      <th scope="row" className="text-left font-normal px-2 py-1">
+                        <span className="flex flex-col">
+                          <span className="flex items-center gap-1.5">
+                            <span className="size-2 rounded-sm" style={{ background: colors[r.speaker] }} />
+                            <span className="num">{r.speaker}</span>
+                            <span className="num text-[11px] text-subtle">{r.talk_s.toFixed(1)} s</span>
+                          </span>
+                          {Object.keys(tags).length > 0 && (
+                            <span className="flex flex-wrap gap-1">
+                              {Object.entries(tags).slice(0, 3).map(([k, v]) => (
+                                <span key={k} className="text-[10px] text-muted border border-line rounded px-1">{String(v)}</span>
+                              ))}
+                            </span>
+                          )}
+                        </span>
+                      </th>
+                      {r.cells.map((v, i) => {
+                        const share = r.talk_s ? v / r.talk_s : 0;
+                        const right = cm.mapping[cm.cols[i]] === r.speaker;
+                        return (
+                          <td key={i} className="p-0.5" title={`${r.speaker} → ${cm.cols[i]}: ${v.toFixed(1)} s (${pct(share, 0)})`}>
+                            <span className="num flex items-center justify-center min-w-14 h-7 rounded px-1" style={{ background: v ? (right ? `rgba(16,185,129,${(0.12 + share * 0.5).toFixed(2)})` : `rgba(168,85,247,${(0.12 + share * 0.6).toFixed(2)})`) : "rgba(30,41,59,0.5)" }}>
+                              {v ? v.toFixed(1) : ""}
+                            </span>
+                          </td>
+                        );
+                      })}
+                      <td className="p-0.5"><span className="num flex items-center justify-center min-w-14 h-7 rounded px-1" style={{ background: r.missed_s ? "rgba(244,63,94,0.25)" : "rgba(30,41,59,0.5)" }}>{r.missed_s ? r.missed_s.toFixed(1) : ""}</span></td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          {cm.notes.map((n, k) => (
+            <div key={k} role="note" className="flex items-start gap-2 text-xs text-muted">
+              <I.Info size={14} />
+              <span>
+                <span className="text-fg">{n.kind === "merge" ? "Merge:" : "Split:"}</span>{" "}
+                {n.kind === "merge" ? `most of ${n.ref.join(" and ")}'s speech went to ${String(n.hyp)}, so the model heard one voice.` : `${n.ref[0]}'s speech is spread over ${(n.hyp as string[]).join(" and ")}.`}
+              </span>
+            </div>
+          ))}
+        </>
+      )}
+    </Panel>
   );
 }

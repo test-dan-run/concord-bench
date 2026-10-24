@@ -123,6 +123,67 @@ export interface Dataset {
   previous_version_id: number | null;
   versions?: { id: number; name: string; export_version: number | null; status: string; created_at: string }[];
   previous_plan?: PreviousPlan | null;
+  /** Detail: the dataset's enhanced copies; list: a short form of them. */
+  enhanced?: EnhancedCopy[] | { enh_model_id: number; display_name: string; status: string; progress: number }[];
+  slices?: SavedSlice[];
+}
+
+/** An enhanced copy of a dataset's audio, made by one enhancement model's build (EVALUATE_PLAN.md §5.2). */
+export interface EnhancedCopy {
+  id: number;
+  dataset_id: number;
+  model_id: number;
+  model: string;
+  display_name: string;
+  generative: boolean;
+  build_key: string | null;
+  status: "building" | "ready" | "failed" | "cancelled" | "deleted";
+  progress: number;
+  error: string | null;
+  size_bytes: number | null;
+  files: number | null;
+  length_check: "ok" | "trimmed" | "failed" | null;
+  max_shift_ms: number | null;
+  rtf: number | null;
+  audio_s: number | null;
+  hardware: Hardware;
+  image: string | null;
+  job_id: number | null;
+  runs: number;
+  created_at: string;
+  finished_at: string | null;
+}
+
+export interface SavedSlice {
+  id: number;
+  dataset_id: number;
+  name: string;
+  filters: SliceFilter[];
+  created_at?: string;
+}
+
+export type SliceFilter = { key: string; value: string | number | boolean } | { key: string; min?: number; max?: number };
+
+/** Where a model ran, as the model catalog reported it (EVALUATE_PLAN.md §3.4); absent fields are unknown. */
+export interface Hardware {
+  device?: "gpu" | "cpu" | "hosted";
+  vram_gb?: number;
+  gpu_total_gb?: number;
+  engine?: string;
+  image?: string;
+  hosted_at?: string;
+  precision?: string;
+  batch_size?: number;
+  gpu_name?: string;
+  gpu_count?: number;
+  driver_version?: string;
+  cuda_version?: string;
+  cpu_model?: string;
+  cpu_cores?: number;
+  hostname?: string;
+  peak_vram_gb?: number;
+  generative?: boolean;
+  reused?: boolean;
 }
 
 // ---------------------------------------------------------------- reference packages (CONTRACTS.md §2, §4)
@@ -208,6 +269,20 @@ export interface TaskMatch {
   preview: { file: string; start: number | null; end: number | null; speaker: string | null; text: string | null }[];
 }
 
+/** A label for slicing found in the references (datasets.labels). */
+export interface LabelSummary {
+  key: string;
+  kind: "discrete" | "continuous" | "unused";
+  level: "file" | "utterance";
+  have: number;
+  of: number;
+  distinct: number;
+  reason?: string;
+  values?: { value: string | number | boolean; n: number }[];
+  more?: number;
+  range?: { min: number; max: number; median: number };
+}
+
 export interface Inspection {
   audio_files: number;
   audio_bytes: number;
@@ -219,6 +294,7 @@ export interface Inspection {
   duplicate_stems: string[];
   parse_errors: { file: string; format: string; errors: string[]; count: number }[];
   files_by_format: { file: string; format: string; records: number; tasks: string[] }[];
+  labels?: LabelSummary[];
 }
 
 export interface DatasetReport {
@@ -235,6 +311,7 @@ export interface DatasetReport {
   duplicate_stems: string[];
   parse_errors: Inspection["parse_errors"];
   has_speaker_text: boolean;
+  labels?: LabelSummary[];
 }
 
 export type ModelState = "running" | "stopped" | "starting" | "stopping" | "queued" | "failed";
@@ -271,6 +348,9 @@ export interface CatalogModel {
   usable: boolean;
   not_usable: string | null;
   runs: number;
+  generative?: boolean;
+  /** Enhancers: what the catalog measured on its check clip. */
+  check_sample?: { si_sdr_input_db?: number; si_sdr_output_db?: number; length_diff_samples?: number } | null;
 }
 
 export interface CatalogInfo {
@@ -302,6 +382,7 @@ export interface PlanPreview {
   mode: "grid" | "stages";
   plan: { pipeline: string; steps: PlanStep[]; loads: number; est_load_s: number; hits: number; fits_together: boolean } | null;
   error: string | null;
+  copies?: { model: string; display_name: string; generative: boolean; status: "new" | "building" | "ready"; progress: number; copy_id: number | null }[];
 }
 
 export interface Normaliser {
@@ -318,24 +399,68 @@ export interface Breakdown {
   facts: Record<string, number | null>;
 }
 
+export type AsrMetric = "wer" | "cer" | "mer" | "wil" | "wip";
+
+export interface AsrMetrics {
+  wer: number | null;
+  cer: number | null;
+  mer: number | null;
+  wil: number | null;
+  wip: number | null;
+  n: number | null;
+  p: number | null;
+  h: number | null;
+  s: number | null;
+  d: number | null;
+  i: number | null;
+  errors: number | null;
+  utterances: number | null;
+  with_errors: number | null;
+}
+
 export interface BenchCell {
   model_id: number;
   dataset_id: number;
+  /** null: original audio; else the enhancement model whose copy the run read. */
+  enh_model_id: number | null;
   status: string | null;
   run_id: number | null;
   value: number | null;
   prev: number | null;
   delta: number | null;
+  vs_original?: number;
   metric?: string;
+  metrics?: AsrMetrics;
   score_id?: number;
   breakdown?: Breakdown;
   rtf?: number | null;
+  rtf_by_stage?: Record<string, number | null>;
+  wall_s?: number | null;
+  audio_s?: number | null;
+  hardware?: Record<string, Hardware>;
   finished_at?: string | null;
   image?: string | null;
   build_key?: string | null;
   error?: string | null;
   rerunning?: boolean;
   pending_score_job?: number;
+  slices?: Record<string, { value: number | null; n: number }>;
+}
+
+export interface Enhancer {
+  id: number;
+  display_name: string;
+  catalog_id: string;
+  generative: boolean;
+}
+
+export interface CopyState {
+  dataset_id: number;
+  enh_model_id: number;
+  copy_id: number;
+  status: "building" | "ready" | "failed";
+  progress: number;
+  rtf: number | null;
 }
 
 export interface BenchDataset {
@@ -355,6 +480,11 @@ export interface BenchTable {
   tab: string;
   normaliser: string;
   collar: number;
+  metric: AsrMetric;
+  skip_overlap: boolean;
+  enhancers: Enhancer[];
+  copies: CopyState[];
+  slices: SavedSlice[];
   datasets: BenchDataset[];
   models: { id: number; display_name: string; catalog_id: string; tags: string[]; capabilities: string[]; timing_level: string | null; kind: string }[];
   cells: BenchCell[];
@@ -387,9 +517,12 @@ export interface PipeCell {
   score_id?: number;
   wer?: number | null;
   cpwer?: number | null;
+  tcpwer?: number | null;
   der?: number | null;
   rtf?: number | null;
   rtf_by_stage?: Record<string, number | null>;
+  wall_s?: number | null;
+  hardware?: Record<string, Hardware>;
   attribution?: Attribution | null;
   wrong_speaker_pairs?: { word: string; move: string; n: number }[];
   label?: string;
@@ -397,12 +530,29 @@ export interface PipeCell {
   error?: string | null;
 }
 
+/** One combination on the pipeline leaderboard: enhancement (or none), VAD / diarisation, ASR. */
+export interface PipeRow extends PipeCell {
+  enh_model_id: number | null;
+  placement: "before" | "after" | null;
+  generative: boolean;
+  rtf_total: number;
+  vs_original?: number;
+  vs_metric?: "cpwer" | "wer";
+}
+
 export interface PipeGrid {
   normaliser: string;
   collar: number;
+  skip_overlap: boolean;
+  tcp_collar: number;
+  tcp_collars: number[];
   dataset_id: number | null;
   dataset?: BenchDataset;
   datasets: BenchDataset[];
+  enhancers: Enhancer[];
+  leaderboard: PipeRow[];
+  queued?: number;
+  copies: CopyState[];
   rows: { seg_model_id: number | null; name: string; oracle: boolean; has_speakers: boolean; available: boolean }[];
   cols: { asr_model_id: number; name: string; timing_level: string | null }[];
   cells: PipeCell[];
@@ -420,9 +570,16 @@ export interface Run {
   status: string;
   error: string | null;
   /** The builds behind the run's outputs, per catalog model; runs from before the catalog have only `image`. */
-  builds: Record<string, { build_key?: string | null; image?: string | null; labels?: Record<string, string> }>;
+  builds: Record<string, { build_key?: string | null; image?: string | null; labels?: Record<string, string>; copy_id?: number }>;
   params: Record<string, unknown>;
   rtf: Record<string, number | null>;
+  hardware: Record<string, Hardware>;
+  wall_s: number | null;
+  enh_model_id: number | null;
+  enh_copy_id: number | null;
+  enh_placement: "before" | "after" | null;
+  enhancer: string | null;
+  generative: boolean;
   created_at: string;
   started_at: string | null;
   finished_at: string | null;
@@ -459,6 +616,9 @@ export interface Utterance {
   errors: number;
   wer: number | null;
   cer: number | null;
+  mer?: number | null;
+  wil?: number | null;
+  wip?: number | null;
   flagged: boolean | null;
 }
 
@@ -507,4 +667,70 @@ export interface FlaggedReference {
   text: string | null;
   note: string | null;
   updated_at: string | null;
+}
+
+// ---------------------------------------------------------------- slices by label (EVALUATE_PLAN.md §7)
+
+export type SlicePattern = "worse" | "better" | "same" | "too_few" | "hard" | "none";
+
+export interface SliceRow {
+  key: string;
+  kind: "discrete" | "continuous";
+  value: string | number | boolean;
+  min?: number;
+  max?: number;
+  bin?: number;
+  n: number;
+  score: number | null;
+  ci: [number, number] | null;
+  delta: number | null;
+  pattern: SlicePattern;
+  compare?: { n: number; score: number | null; ci: [number, number] | null };
+}
+
+export interface SliceLabel {
+  key: string;
+  kind: "discrete" | "continuous" | "unused";
+  have: number;
+  of: number;
+  derived: boolean;
+  reason?: string;
+  weak?: number;
+  values?: number;
+}
+
+export interface SliceReport {
+  score_id: number;
+  task: string;
+  metric: string;
+  low_better: boolean;
+  overall: { n: number; value: number | null; ci: [number, number] | null };
+  compare_overall?: { n: number; value: number | null };
+  labels: SliceLabel[];
+  min_units: number;
+  label?: string;
+  rows?: SliceRow[];
+  unlabelled?: number;
+  finder?: SliceRow[];
+}
+
+export interface Heatmap {
+  metric: string;
+  min_units: number;
+  overall: number | null;
+  cols: (string | number)[];
+  rows: { label: string | number; cells: { score: number | null; n: number; colour: boolean }[] }[];
+  col_filters: SliceFilter[];
+  row_filters: SliceFilter[];
+}
+
+export interface SliceUnits {
+  metric: string;
+  n: number;
+  of: number;
+  value: number | null;
+  ci: [number, number] | null;
+  overall: number | null;
+  counts: Record<string, number>;
+  worst: { id: number; key: string; file_id: number; score: number | null; ref: string | null; hyp: string | null; labels: Record<string, unknown> }[];
 }

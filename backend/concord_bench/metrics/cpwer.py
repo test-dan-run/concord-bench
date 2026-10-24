@@ -14,7 +14,9 @@ character-based pseudo word timing). tcpWER minus cpWER is the error that timing
 
 from __future__ import annotations
 
+import logging
 from collections import Counter
+from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any
 
@@ -104,9 +106,22 @@ def tcpwer(ref: list[SpkSegment], hyp: list[SpkSegment], collar: float = DEFAULT
         return SegLST(rows or [{"session_id": "f", "speaker": "__none__", "start_time": 0.0, "end_time": 0.0,
                                 "words": ""}])
 
-    res = time_constrained_minimum_permutation_word_error_rate(seglst(ref), seglst(hyp), collar=collar)
+    with _quiet_meeteval():
+        res = time_constrained_minimum_permutation_word_error_rate(seglst(ref), seglst(hyp), collar=collar)
     return {"tcpwer": res.error_rate if res.length else None, "errors": res.errors, "n": res.length,
             "s": res.substitutions, "d": res.deletions, "i": res.insertions, "collar": collar}
+
+
+@contextmanager
+def _quiet_meeteval():
+    """meeteval warns (logger "preprocess") when words are longer on average than a short collar; expected here."""
+    lg = logging.getLogger("preprocess")
+    old = lg.level
+    lg.setLevel(logging.ERROR)
+    try:
+        yield
+    finally:
+        lg.setLevel(old)
 
 
 def tcp_key(collar: float) -> str:

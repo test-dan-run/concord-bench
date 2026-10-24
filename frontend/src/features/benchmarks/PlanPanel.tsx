@@ -3,28 +3,35 @@
 // Each model shows its state in the catalog (running, stopped, starting, queued), what the verifier found
 // and its cold start. With a dataset, the catalog's plan is shown before anything is queued: stages, the
 // model loads it expects, outputs already in the index, and the estimated load time.
-// Shared by the Upload page (before the dataset exists) and the Benchmarks "Run evaluation" panel.
+// Shared by the Upload page (before the dataset exists) and the Benchmarks "Run evaluation" popup.
+// Speech enhancement (EVALUATE_PLAN.md §6): every model above also runs on each ticked enhancer's copy of
+// the dataset; "No enhancement" keeps the original audio as the baseline; pipelines place the copy before
+// and / or after diarisation.
 
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { api, qs, type CatalogInfo, type CatalogModel, type PlanPreview } from "../../lib/api";
 import { capLabel, coldStart, modelStateLabel } from "../../lib/format";
-import { Chip, cx, ErrorNote, StatusDot, Toggle } from "../../components/ui";
+import { Chip, cx, EnhChip, ErrorNote, StatusDot, Toggle } from "../../components/ui";
 
 export interface PlanValue {
   seg_models: string[];
   asr_models: string[];
   oracle: boolean;
   mode: "grid" | "stages";
+  enhancers: string[];
+  include_original: boolean;
+  placements: ("before" | "after")[];
 }
 
-export const EMPTY_PLAN: PlanValue = { seg_models: [], asr_models: [], oracle: false, mode: "grid" };
+export const EMPTY_PLAN: PlanValue = { seg_models: [], asr_models: [], oracle: false, mode: "grid", enhancers: [], include_original: true, placements: ["before"] };
 
 type Suggested = CatalogModel & { shared_tags: string[]; preselect: boolean };
 
 interface Suggestions {
   seg: Suggested[];
   asr: Suggested[];
+  enh?: Suggested[];
   oracle_available: boolean;
   labels: string[];
   catalog: CatalogInfo;
@@ -32,15 +39,25 @@ interface Suggestions {
 
 type Key = "seg_models" | "asr_models";
 
+/** Runs a plan queues (api.benchmarks.plan_size): once per audio version, the oracle once per enhancer. */
 export function planCount(p: PlanValue, labels: string[]): number {
   const hasAsr = labels.includes("asr");
   const hasDiar = labels.includes("diar");
-  if (p.mode === "grid") return hasAsr ? (p.seg_models.length + (p.oracle && hasDiar ? 1 : 0)) * p.asr_models.length : 0;
-  return (hasDiar ? p.seg_models.length : 0) + (hasAsr ? p.asr_models.length : 0);
+  const enh = p.enhancers?.length ?? 0;
+  const orig = p.include_original !== false || !enh ? 1 : 0;
+  const places = enh ? Math.max(1, p.placements?.length ?? 1) : 1;
+  if (p.mode === "grid") {
+    if (!hasAsr) return 0;
+    const oracle = p.oracle && hasDiar ? 1 : 0;
+    return p.seg_models.length * p.asr_models.length * (orig + enh * places) + oracle * p.asr_models.length * (orig + enh);
+  }
+  return ((hasDiar ? p.seg_models.length : 0) + (hasAsr ? p.asr_models.length : 0)) * (orig + enh);
 }
 
 /** A preset plan limited to the models the catalog still offers (and has verified) for this dataset. */
-export function presetFor(preset: PlanValue, data: Pick<Suggestions, "seg" | "asr" | "oracle_available">): PlanValue {
+export type PresetPlan = Pick<PlanValue, "seg_models" | "asr_models" | "oracle" | "mode"> & Partial<PlanValue>;
+
+export function presetFor(preset: PresetPlan, data: Pick<Suggestions, "seg" | "asr" | "oracle_available">): PlanValue {
   const seg = new Set(data.seg.filter((m) => m.usable).map((m) => m.catalog_id));
   const asr = new Set(data.asr.filter((m) => m.usable).map((m) => m.catalog_id));
   return {
@@ -48,11 +65,14 @@ export function presetFor(preset: PlanValue, data: Pick<Suggestions, "seg" | "as
     seg_models: preset.seg_models.filter((i) => seg.has(i)),
     asr_models: preset.asr_models.filter((i) => asr.has(i)),
     oracle: preset.oracle && data.oracle_available,
+    enhancers: preset.enhancers ?? [],
+    include_original: preset.include_original ?? true,
+    placements: preset.placements ?? ["before"],
   };
 }
 
-function ModelRow({ m, checked, onToggle, stage }: { m: Suggested; checked: boolean; onToggle: () => void; stage: Key }) {
-  const caps = m.capabilities.filter((c) => (stage === "seg_models" ? c !== "asr" : c === "asr"));
+function ModelRow({ m, checked, onToggle, stage, note }: { m: Suggested; checked: boolean; onToggle: () => void; stage: Key | "enhancers"; note?: React.ReactNode }) {
+  const caps = m.capabilities.filter((c) => (stage === "seg_models" ? c === "vad" || c === "diar" : stage === "asr_models" ? c === "asr" : c === "enhance"));
   return (
     <label
       title={m.not_usable ?? m.state_detail ?? undefined}
@@ -65,6 +85,8 @@ function ModelRow({ m, checked, onToggle, stage }: { m: Suggested; checked: bool
           <StatusDot state={m.state ?? "unknown"} />
           {modelStateLabel(m.state)}
         </span>
+        {m.generative && <EnhChip title="The catalog marks this enhancer as able to shift timing or invent speech">generative</EnhChip>}
+        {note}
         {m.usable ? (
           caps.map((c) => <Chip key={c}>{capLabel(c)}</Chip>)
         ) : (
@@ -98,15 +120,21 @@ function CatalogPlan({ datasetId, value }: { datasetId: number; value: PlanValue
   if (data.error) return <span className="text-xs text-warn">No plan from the model catalog: {data.error}</span>;
   if (!data.plan) return null;
   const p = data.plan;
+  const toBuild = (data.copies ?? []).filter((c) => c.status !== "ready");
   return (
     <div className="flex flex-col gap-1.5" aria-label="Plan">
+      {toBuild.length > 0 && (
+        <span className="text-xs text-enh-soft">
+          Enhanced copies to build first: {toBuild.map((c) => (c.status === "building" ? `${c.display_name} (${Math.round(c.progress * 100)}% built)` : c.display_name)).join(", ")}
+        </span>
+      )}
       <span className="text-[11px] text-muted uppercase tracking-wider">
         Plan {value.mode === "grid" ? "· stage by stage, each model loads once" : ""}
       </span>
       <ol className="m-0 p-0 list-none flex flex-col gap-1">
         {p.steps.map((s) => (
           <li key={`${s.stage}-${s.model}`} className="flex flex-wrap items-center gap-2 text-xs">
-            <Chip>{s.stage === "seg" ? "VAD / diarisation" : "ASR"}</Chip>
+            <Chip>{s.stage === "seg" ? "VAD / diarisation" : s.stage === "enh" ? "Enhancement" : "ASR"}</Chip>
             <span className="flex-1 min-w-[140px] num">{s.model}</span>
             <span className="text-muted">
               {s.skip ? "all stored: skipped" : s.load ? `loads (${coldStart(s.cold_start_s)})` : "already running"}
@@ -142,7 +170,7 @@ export function PlanPanel({
   value: PlanValue;
   onChange: (v: PlanValue) => void;
   /** Pre-tick these instead of the tag matches (e.g. the models run on a dataset's previous version). */
-  preset?: PlanValue;
+  preset?: PresetPlan;
 }) {
   const query = datasetId
     ? qs({ dataset_id: datasetId })
@@ -210,6 +238,37 @@ export function PlanPanel({
         ) : undefined,
       )}
       {group("ASR", "asr_models", data.asr)}
+      {(data.enh?.length ?? 0) > 0 && (
+        <fieldset className="border-0 p-0 m-0 flex flex-col gap-1.5">
+          <legend className="text-[11px] text-muted uppercase tracking-wider mb-1">Speech enhancement ablation</legend>
+          <span className="text-xs text-muted leading-relaxed">
+            Every model above runs once per audio version ticked here. Each enhancer builds one cleaned copy of the dataset, shared with other runs; the original audio is never changed.
+          </span>
+          <label className={cx("flex items-center gap-2.5 min-h-9 px-2 rounded-md cursor-pointer hover:bg-track", value.include_original && "bg-active/60")}>
+            <input type="checkbox" checked={value.include_original} onChange={() => set({ include_original: !value.include_original })} className="accent-[#06B6D4]" />
+            <span className="text-[13px] flex-1">No enhancement · original audio</span>
+            <Chip>baseline</Chip>
+          </label>
+          {data.enh!.map((m) => (
+            <ModelRow key={m.catalog_id} m={m} stage="enhancers" checked={value.enhancers.includes(m.catalog_id)} onToggle={() => set({ enhancers: value.enhancers.includes(m.catalog_id) ? value.enhancers.filter((x) => x !== m.catalog_id) : [...value.enhancers, m.catalog_id] })} />
+          ))}
+          {value.mode === "grid" && value.enhancers.length > 0 && (
+            <span className="flex flex-wrap items-center gap-2 mt-1">
+              <span className="text-xs text-muted">Placement in pipelines</span>
+              <Toggle
+                label="Enhancement placement"
+                value={value.placements.length === 2 ? "both" : value.placements[0] ?? "before"}
+                onChange={(v) => set({ placements: v === "both" ? ["before", "after"] : [v as "before" | "after"] })}
+                options={[
+                  { value: "before", label: "Before diarisation" },
+                  { value: "after", label: "After diarisation" },
+                  { value: "both", label: "Both" },
+                ]}
+              />
+            </span>
+          )}
+        </fieldset>
+      )}
       <div className="flex flex-col gap-1.5">
         <span className="text-[11px] text-muted uppercase tracking-wider">Run as</span>
         <Toggle
@@ -225,7 +284,8 @@ export function PlanPanel({
       </div>
       {datasetId !== undefined && planCount(value, labels) > 0 && <CatalogPlan datasetId={datasetId} value={value} />}
       <span className="num text-xs text-muted">
-        {planCount(value, labels)} run{planCount(value, labels) === 1 ? "" : "s"} · the model catalog starts models as their turn comes
+        {planCount(value, labels)} run{planCount(value, labels) === 1 ? "" : "s"}
+        {value.enhancers.length ? ` · ${value.enhancers.length} enhanced cop${value.enhancers.length === 1 ? "y" : "ies"}` : ""} · the model catalog starts models as their turn comes
       </span>
     </div>
   );

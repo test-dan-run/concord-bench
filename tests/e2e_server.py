@@ -30,12 +30,13 @@ def main() -> int:
     import uvicorn
     from fastapi.testclient import TestClient
 
-    from concord_bench.acceptance import run_flow
+    from concord_bench.acceptance import run_enhancement_flow, run_flow
     from concord_bench.api.app import create_app
 
     app = create_app()
     with TestClient(app) as client:
-        run_flow(client, work / "staging", log=lambda m: print(m, flush=True))
+        out = run_flow(client, work / "staging", log=lambda m: print(m, flush=True))
+        run_enhancement_flow(client, out["dataset"]["id"], log=lambda m: print(m, flush=True))
     # Jobs started from the browser (e.g. a rescore) need a worker, as under `just dev`.
     from concord_bench.runs import jobs
 

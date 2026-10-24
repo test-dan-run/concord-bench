@@ -83,3 +83,14 @@ describe("formatting and deltas", () => {
     expect(deltaInfo(null, 0.2)).toBeNull();
   });
 });
+
+describe("planCount", () => {
+  it("counts each audio version, the oracle once per enhancer", async () => {
+    const { planCount, EMPTY_PLAN } = await import("../features/benchmarks/PlanPanel");
+    const base = { ...EMPTY_PLAN, seg_models: ["a", "b"], asr_models: ["x", "y", "z"], oracle: true };
+    expect(planCount(base, ["asr", "diar"])).toBe(9);
+    expect(planCount({ ...base, enhancers: ["e1", "e2"], placements: ["before", "after"] }, ["asr", "diar"])).toBe(2 * 3 * 5 + 3 * 3);
+    expect(planCount({ ...base, oracle: false, enhancers: ["e1"], include_original: false }, ["asr", "diar"])).toBe(6);
+    expect(planCount({ ...base, mode: "stages", enhancers: ["e1"] }, ["asr", "diar"])).toBe(10);
+  });
+});

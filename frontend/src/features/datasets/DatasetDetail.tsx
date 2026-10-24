@@ -1,13 +1,15 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { api, type Dataset, type FlaggedReference, type Run } from "../../lib/api";
+import { api, type Dataset, type EnhancedCopy, type FlaggedReference, type Run } from "../../lib/api";
 import { useConfig } from "../../lib/config";
-import { ago, clock, hours, num } from "../../lib/format";
+import { ago, bytes, clock, hours, num, rtf } from "../../lib/format";
 import { flagsPushBlocker, fromLabel, provenanceOf } from "../../lib/peer";
 import * as I from "../../components/icons";
+import { LabelsTable } from "../../components/LabelsTable";
 import { TagInput } from "../../components/TagInput";
-import { Button, Chip, Empty, ErrorNote, Fact, JobPill, PageHeader, Panel, Spinner, StatusDot } from "../../components/ui";
+import { Button, Chip, Empty, EnhChip, ErrorNote, Fact, JobPill, PageHeader, Panel, Spinner, StatusDot } from "../../components/ui";
+import { AddEnhancement } from "./AddEnhancement";
 import { EMPTY_PLAN, PlanPanel, planCount, type PlanValue } from "../benchmarks/PlanPanel";
 
 interface FileRow {
@@ -29,8 +31,19 @@ export function DatasetDetail() {
   const q = useQuery({
     queryKey: ["dataset", id],
     queryFn: () => api.get<Dataset>(`/datasets/${id}`),
-    refetchInterval: (query) => (query.state.data?.status === "ingesting" ? 1500 : false),
+    refetchInterval: (query) =>
+      query.state.data?.status === "ingesting" || ((query.state.data?.enhanced ?? []) as EnhancedCopy[]).some((c) => c.status === "building") ? 1500 : false,
   });
+  const [addEnh, setAddEnh] = useState(false);
+  const [confirmCopy, setConfirmCopy] = useState<number | null>(null);
+  const dropCopy = useMutation({
+    mutationFn: (copyId: number) => api.del(`/enhanced/${copyId}`),
+    onSuccess: () => {
+      setConfirmCopy(null);
+      void qc.invalidateQueries();
+    },
+  });
+  const dropSlice = useMutation({ mutationFn: (sliceId: number) => api.del(`/slices/${sliceId}`), onSuccess: () => qc.invalidateQueries({ queryKey: ["dataset", id] }) });
   const files = useQuery({ queryKey: ["dataset-files", id, q.data?.status], queryFn: () => api.get<FileRow[]>(`/datasets/${id}/files`), enabled: q.data?.status === "ready" });
   const flags = useQuery({ queryKey: ["dataset-flags", id], queryFn: () => api.get<FlaggedReference[]>(`/datasets/${id}/flags`), enabled: q.data?.status === "ready" });
   const unflag = useMutation({
@@ -66,9 +79,13 @@ export function DatasetDetail() {
   const nRerun = planCount(rerun, d.label_types);
   const flagBlocker = flagsPushBlocker(cfg, d);
   const nFlags = (flags.data ?? []).length;
+  const copies = (d.enhanced ?? []) as EnhancedCopy[];
+  const live = copies.filter((c) => c.status === "ready" || c.status === "building");
+  const usableLabels = (rep?.labels ?? []).filter((l) => l.kind !== "unused");
 
   return (
     <>
+      {addEnh && <AddEnhancement datasets={[d]} initial={d.id} onClose={() => setAddEnh(false)} />}
       <PageHeader
         crumbs={<><Link to="/datasets">Datasets</Link> / {d.name}</>}
         title={d.name}
@@ -102,6 +119,8 @@ export function DatasetDetail() {
                 <Fact k="Audio" v={`${hours(rep.usable_hours)} usable of ${hours(rep.hours)}`} />
                 <Fact k="Labels" v={d.label_types.length ? d.label_types.map((l) => (l === "asr" ? "ASR" : "Diarisation")).join(" + ") : "—"} />
                 <Fact k="cpWER-ready" v={rep.has_speaker_text ? "yes (speaker-attributed transcripts)" : "no"} />
+                <Fact k="Enhanced copies" v={<a href="#enh-h">{live.length ? `${live.filter((c) => c.status === "ready").length} ready${live.some((c) => c.status === "building") ? ` · ${live.filter((c) => c.status === "building").length} building` : ""}` : "none"}</a>} />
+                <Fact k="Labels for slicing" v={<a href="#lbl-h">{usableLabels.length ? usableLabels.map((l) => l.key).join(", ") : "none"}</a>} />
                 <Fact k="Language" v={d.language ?? "—"} />
                 <div className="flex flex-col gap-1.5 pt-1">
                   <span className="text-[11px] text-muted uppercase tracking-wider">Sample rates</span>
@@ -162,6 +181,115 @@ export function DatasetDetail() {
                   </tbody>
                 </table>
               </div>
+            </Panel>
+            <Panel id="lbl-h" title="Labels for slicing" subtitle="Attributes that came with the references. Error analysis breaks scores down by each one.">
+              <LabelsTable labels={rep.labels ?? []} />
+              <span className="text-xs text-subtle">Labels are read from the references when the dataset is added and can't be edited here. A file or utterance without a value is left out of that label's slices.</span>
+              {(d.slices ?? []).length > 0 && (
+                <div className="flex flex-col gap-1.5 pt-1">
+                  <span className="text-[11px] text-muted uppercase tracking-wider">Saved slices</span>
+                  {(d.slices ?? []).map((s) => (
+                    <div key={s.id} className="flex flex-wrap items-center gap-2 text-[13px]">
+                      <span className="flex-1">{s.name}</span>
+                      <span className="num text-xs text-muted">{s.filters.map((f) => ("value" in f ? `${f.key} = ${String(f.value)}` : `${f.key} ${f.min ?? ""}–${f.max ?? ""}`)).join(", ")}</span>
+                      <Button size="sm" onClick={() => dropSlice.mutate(s.id)} aria-label={`Delete slice ${s.name}`}>
+                        Delete
+                      </Button>
+                    </div>
+                  ))}
+                  <span className="text-xs text-subtle">Each saved slice is a column next to this dataset on Benchmarks.</span>
+                </div>
+              )}
+            </Panel>
+            <Panel
+              id="enh-h"
+              title="Enhanced copies"
+              subtitle="One cleaned copy of the audio per enhancer, with the same file names and length as the originals, which are never changed. Benchmarks and pipelines offer each ready copy as an audio version."
+              actions={
+                <Button size="sm" onClick={() => setAddEnh(true)} aria-haspopup="dialog">
+                  <span className="text-enh">
+                    <I.Pulse size={14} />
+                  </span>
+                  Add enhancement
+                </Button>
+              }
+            >
+              {copies.length === 0 ? (
+                <span className="text-[13px] text-muted">No enhanced copies. Add an enhancer to compare models on cleaned audio.</span>
+              ) : (
+                <div className="overflow-x-auto scroll-thin">
+                  <table className="w-full border-collapse text-[13px]">
+                    <thead>
+                      <tr className="text-[11px] text-muted uppercase tracking-wider text-left">
+                        <th scope="col" className="font-medium px-3 py-2 border-b border-line">Enhancer</th>
+                        <th scope="col" className="font-medium px-3 py-2 border-b border-line">Status</th>
+                        <th scope="col" className="font-medium px-3 py-2 border-b border-line text-right">Size</th>
+                        <th scope="col" className="font-medium px-3 py-2 border-b border-line">Length check</th>
+                        <th scope="col" className="font-medium px-3 py-2 border-b border-line text-right">RTF</th>
+                        <th scope="col" className="font-medium px-3 py-2 border-b border-line text-right">Used by</th>
+                        <th scope="col" className="px-3 py-2 border-b border-line">
+                          <span className="sr-only">Actions</span>
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {copies.map((c) => {
+                        const building = c.status === "building";
+                        const asking = confirmCopy === c.id;
+                        return (
+                          <tr key={c.id} className="border-b border-track align-middle">
+                            <td className="px-3 py-2">
+                              <span className="flex flex-col">
+                                <span className="flex items-center gap-1.5">
+                                  {c.display_name} {c.generative && <EnhChip>generative</EnhChip>}
+                                </span>
+                                <span className="num text-[11px] text-subtle">{building ? `started ${ago(c.created_at)}` : c.finished_at ? `built ${ago(c.finished_at)}` : ""}</span>
+                              </span>
+                            </td>
+                            <td className="px-3 py-2">
+                              {c.status === "failed" ? <Chip tone="bad" title={c.error ?? undefined}>failed</Chip> : c.status === "cancelled" ? <Chip>cancelled</Chip> : <EnhChip dashed={building}>{building ? `building · ${Math.round(c.progress * 100)}%` : "ready"}</EnhChip>}
+                            </td>
+                            <td className="px-3 py-2 text-right num text-xs">{c.size_bytes ? bytes(c.size_bytes) : "—"}</td>
+                            <td className="px-3 py-2">
+                              {c.length_check === "ok" ? (
+                                <Chip tone="good" title="Every file matches its original to the sample">same length</Chip>
+                              ) : c.length_check === "trimmed" ? (
+                                <Chip tone="warn" title="Some files were off by up to 10 ms and were padded or trimmed to the original length">fixed, up to {c.max_shift_ms?.toFixed(1)} ms</Chip>
+                              ) : c.length_check === "failed" ? (
+                                <Chip tone="bad" title={c.error ?? undefined}>failed</Chip>
+                              ) : (
+                                <Chip title="Checked once every file is enhanced">after the build</Chip>
+                              )}
+                            </td>
+                            <td className="px-3 py-2 text-right num text-xs">{rtf(c.rtf)}</td>
+                            <td className="px-3 py-2 text-right num text-xs">{c.runs ? `${c.runs} run${c.runs === 1 ? "" : "s"}` : "—"}</td>
+                            <td className="px-3 py-2 text-right whitespace-nowrap">
+                              {c.status === "failed" || c.status === "cancelled" ? null : asking ? (
+                                <span className="inline-flex flex-wrap items-center justify-end gap-2">
+                                  <span role="status" className="text-xs">{building ? `Stop building the ${c.display_name} copy?` : `Delete the ${c.size_bytes ? bytes(c.size_bytes) : ""} ${c.display_name} copy?`}</span>
+                                  <Button size="sm" onClick={() => setConfirmCopy(null)}>Keep</Button>
+                                  <Button size="sm" variant="danger" disabled={dropCopy.isPending} onClick={() => dropCopy.mutate(c.id)}>{building ? "Cancel build" : "Delete"}</Button>
+                                </span>
+                              ) : (
+                                <Button size="sm" onClick={() => setConfirmCopy(c.id)} aria-label={`${building ? "Cancel the" : "Delete the"} ${c.display_name} copy`}>
+                                  {building ? "Cancel build" : "Delete"}
+                                </Button>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+              {copies.some((c) => c.size_bytes) && (
+                <span className="flex flex-wrap items-baseline justify-between gap-2 text-xs">
+                  <span className="num text-muted">{bytes(copies.reduce((a, c) => a + (c.size_bytes ?? 0), 0))} on disk</span>
+                  <span className="text-subtle">Deleting a copy frees its disk space. Scores from runs that used it stay; a new run that needs it builds the copy again.</span>
+                </span>
+              )}
+              <ErrorNote error={dropCopy.error} />
             </Panel>
             <Panel
               title="Flagged references"

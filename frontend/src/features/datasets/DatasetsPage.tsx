@@ -1,16 +1,21 @@
 import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
 import { Link } from "react-router-dom";
 import { api, type Dataset } from "../../lib/api";
 import { ago, hours, num } from "../../lib/format";
 import * as I from "../../components/icons";
-import { Chip, Empty, ErrorNote, JobPill, LinkButton, PageHeader, Panel, Spinner } from "../../components/ui";
+import { Button, Chip, Empty, EnhChip, ErrorNote, JobPill, LinkButton, PageHeader, Panel, Spinner } from "../../components/ui";
+import { AddEnhancement } from "./AddEnhancement";
 
 export function DatasetsPage() {
   const q = useQuery({
     queryKey: ["datasets"],
     queryFn: () => api.get<Dataset[]>("/datasets"),
-    refetchInterval: (query) => (query.state.data?.some((d) => d.status === "ingesting") ? 2000 : false),
+    refetchInterval: (query) =>
+      query.state.data?.some((d) => d.status === "ingesting" || (d.enhanced ?? []).some((c) => c.status === "building")) ? 2000 : false,
   });
+  const [addFor, setAddFor] = useState<number | null>(null);
+  const ready = (q.data ?? []).filter((d) => d.status === "ready");
   return (
     <>
       <PageHeader
@@ -19,6 +24,14 @@ export function DatasetsPage() {
         subtitle="Every upload is its own dataset. No train/dev/test splits inside a dataset."
         actions={
           <>
+            {ready.length > 0 && (
+              <Button onClick={() => setAddFor(ready[0].id)} aria-haspopup="dialog">
+                <span className="text-enh">
+                  <I.Pulse size={16} />
+                </span>
+                Add enhancement
+              </Button>
+            )}
             <LinkButton to="/datasets/import">
               <I.Download /> Import reference package
             </LinkButton>
@@ -28,6 +41,7 @@ export function DatasetsPage() {
           </>
         }
       />
+      {addFor !== null && <AddEnhancement datasets={ready} initial={addFor} onClose={() => setAddFor(null)} />}
       <Panel>
         {q.isLoading && <Spinner />}
         <ErrorNote error={q.error} />
@@ -42,6 +56,7 @@ export function DatasetsPage() {
                   <th scope="col" className="font-medium px-3 py-2 border-b border-line text-right">Files</th>
                   <th scope="col" className="font-medium px-3 py-2 border-b border-line text-right">Audio</th>
                   <th scope="col" className="font-medium px-3 py-2 border-b border-line">Flagged</th>
+                  <th scope="col" className="font-medium px-3 py-2 border-b border-line">Enhanced copies</th>
                   <th scope="col" className="font-medium px-3 py-2 border-b border-line">Tags</th>
                   <th scope="col" className="font-medium px-3 py-2 border-b border-line">Added</th>
                 </tr>
@@ -66,6 +81,26 @@ export function DatasetsPage() {
                     <td className="px-3 py-2.5 text-right num">{hours(d.usable_hours)}</td>
                     <td className="px-3 py-2.5 text-xs text-muted num">
                       {Object.entries(d.flagged).filter(([, n]) => n).map(([k, n]) => `${n} ${k.replace("_", " ")}`).join(" · ") || "—"}
+                    </td>
+                    <td className="px-3 py-2.5">
+                      <span className="flex flex-wrap items-center gap-1">
+                        {d.status !== "ready" ? (
+                          <span className="text-[11px] text-subtle" title="Enhanced copies can be added once the dataset finishes ingesting">after ingest</span>
+                        ) : (
+                          <>
+                            {(d.enhanced ?? []).filter((c) => c.status !== "failed" && c.status !== "cancelled").map((c) => (
+                              <EnhChip key={c.display_name} dashed={c.status === "building"} title={`${c.display_name} · ${c.status}`}>
+                                {c.display_name}
+                                {c.status === "building" ? ` · ${Math.round(c.progress * 100)}%` : ""}
+                              </EnhChip>
+                            ))}
+                            {!(d.enhanced ?? []).length && <span className="text-xs text-subtle">none</span>}
+                            <button type="button" aria-label={`Add enhancement models to ${d.name}`} onClick={() => setAddFor(d.id)} className="inline-flex items-center min-h-[22px] px-2 border border-dashed border-line rounded bg-transparent text-muted text-[11px] cursor-pointer hover:text-fg">
+                              + Add
+                            </button>
+                          </>
+                        )}
+                      </span>
                     </td>
                     <td className="px-3 py-2.5"><span className="flex flex-wrap gap-1">{d.tags.map((t) => <Chip key={t}>#{t}</Chip>)}</span></td>
                     <td className="px-3 py-2.5 text-xs text-muted">{ago(d.created_at)}</td>

@@ -1,6 +1,6 @@
 // Small building blocks in the AeroAudio style: buttons, panels, chips, selects, status pills.
 
-import type { ButtonHTMLAttributes, ReactNode, SelectHTMLAttributes } from "react";
+import { useEffect, useId, useRef, type ButtonHTMLAttributes, type ReactNode, type SelectHTMLAttributes } from "react";
 import { Link } from "react-router-dom";
 
 export function cx(...c: (string | false | null | undefined)[]): string {
@@ -249,6 +249,127 @@ export function Toggle({ options, value, onChange, label }: { options: { value: 
           {o.label}
         </button>
       ))}
+    </span>
+  );
+}
+
+const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+/** A modal dialog: focus moves into it and stays there (Tab cycles), Escape or the close button closes it,
+ * and focus goes back to whatever opened it. Every popup in the app uses it. */
+export function Dialog({
+  title,
+  subtitle,
+  onClose,
+  children,
+  footer,
+  width = 640,
+}: {
+  title: ReactNode;
+  subtitle?: ReactNode;
+  onClose: () => void;
+  children: ReactNode;
+  footer?: ReactNode;
+  width?: number;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const id = useId();
+  useEffect(() => {
+    const opener = document.activeElement as HTMLElement | null;
+    const first = ref.current?.querySelector<HTMLElement>(FOCUSABLE);
+    (first ?? ref.current)?.focus();
+    return () => opener?.focus?.();
+  }, []);
+  const onKey = (e: React.KeyboardEvent) => {
+    if (e.key === "Escape") {
+      e.stopPropagation();
+      onClose();
+      return;
+    }
+    if (e.key !== "Tab" || !ref.current) return;
+    const items = [...ref.current.querySelectorAll<HTMLElement>(FOCUSABLE)].filter((el) => el.offsetParent !== null);
+    if (!items.length) return;
+    const [a, b] = [items[0], items[items.length - 1]];
+    if (e.shiftKey && document.activeElement === a) {
+      e.preventDefault();
+      b.focus();
+    } else if (!e.shiftKey && document.activeElement === b) {
+      e.preventDefault();
+      a.focus();
+    }
+  };
+  return (
+    <div className="fixed inset-0 z-50 bg-[rgba(2,6,23,0.72)] flex justify-center items-start overflow-y-auto px-4 py-12 sm:py-16" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      <div
+        ref={ref}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={`${id}-t`}
+        tabIndex={-1}
+        onKeyDown={onKey}
+        style={{ maxWidth: width }}
+        className="w-full bg-panel border border-line rounded-[10px] shadow-[0_24px_64px_rgba(0,0,0,0.5)] flex flex-col outline-none"
+      >
+        <div className="flex items-start gap-3 px-5 py-4 border-b border-track">
+          <div className="flex flex-col gap-1 flex-1 min-w-0">
+            <h2 id={`${id}-t`} className="m-0 text-base font-semibold">
+              {title}
+            </h2>
+            {subtitle && <span className="text-xs text-muted leading-relaxed">{subtitle}</span>}
+          </div>
+          <button type="button" aria-label="Close" onClick={onClose} className="size-8 shrink-0 rounded-md border border-line bg-transparent text-muted hover:text-fg cursor-pointer inline-flex items-center justify-center">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
+              <path d="M6 6l12 12M18 6L6 18" />
+            </svg>
+          </button>
+        </div>
+        <div className="px-5 py-4 flex flex-col gap-4 min-w-0">{children}</div>
+        {footer && <div className="flex flex-wrap items-center justify-end gap-3 px-5 py-3.5 border-t border-track bg-canvas rounded-b-[10px]">{footer}</div>}
+      </div>
+    </div>
+  );
+}
+
+/** A small labelled group of toggle buttons (the leaderboards' View, Metric, Hardware, Enhancement...). */
+export function Segmented<T extends string | number>({
+  label,
+  options,
+  value,
+  onChange,
+  hideLabel,
+}: {
+  label: string;
+  options: { value: T; label: string; title?: string }[];
+  value: T;
+  onChange: (v: T) => void;
+  hideLabel?: boolean;
+}) {
+  return (
+    <span className="inline-flex flex-wrap items-center gap-2">
+      {!hideLabel && <span className="text-[11px] text-muted uppercase tracking-wider">{label}</span>}
+      <span role="group" aria-label={label} className="inline-flex flex-wrap border border-line rounded-md overflow-hidden">
+        {options.map((o) => (
+          <button
+            key={String(o.value)}
+            type="button"
+            aria-pressed={o.value === value}
+            title={o.title}
+            onClick={() => onChange(o.value)}
+            className={cx("min-h-8 px-3 text-xs cursor-pointer border-0", o.value === value ? "bg-active text-fg" : "bg-transparent text-muted hover:text-fg")}
+          >
+            {o.label}
+          </button>
+        ))}
+      </span>
+    </span>
+  );
+}
+
+/** A chip for things that come from speech enhancement (an enhancer, a copy, a model + enhancer row). */
+export function EnhChip({ children, title, dashed }: { children: ReactNode; title?: string; dashed?: boolean }) {
+  return (
+    <span title={title} className={cx("inline-flex items-center gap-1 rounded px-1.5 py-px text-[11px] whitespace-nowrap text-enh-soft", dashed ? "border border-dashed border-enh/60" : "bg-enh/15")}>
+      {children}
     </span>
   );
 }

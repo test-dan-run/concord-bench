@@ -345,7 +345,7 @@ def test_diarisation_regions_and_matrices(flow, client, session):
     assert ds["speaker_counts"]["files"] == 6
     files = client.get(f"/api/errors/diar/files?score_id={ds['score_id']}").json()["rows"]
     fd = client.get(f"/api/errors/diar/files/{files[0]['id']}").json()
-    assert fd["confusion"]["rows"] and all("context" in e for e in fd["errors"])
+    assert fd["speaker_matrix"]["rows"] and all("context" in e for e in fd["errors"])
 
 
 def test_pipeline_stage_cards_waterfall_and_causes(flow, client, session):
@@ -367,3 +367,24 @@ def test_pipeline_stage_cards_waterfall_and_causes(flow, client, session):
         assert tagged == wrong
         checked += 1
     assert checked
+
+
+def test_enhancement_on_the_replayed_fixtures(flow, client, session):
+    """The identity enhancer's copy has the originals' audio, so enhanced runs replay and change nothing."""
+    from concord_bench.acceptance import run_enhancement_flow
+    from concord_bench.core.models import EnhancedCopy
+
+    out = run_enhancement_flow(client, flow["dataset"]["id"], log=lambda m: None)
+    assert [c["status"] for c in out["copies"]] == ["ready"] and out["copies"][0]["length_check"] == "ok"
+    enh = [c for c in out["asr"]["cells"] if c["enh_model_id"]]
+    assert len(enh) == 2 and all(c["vs_original"] == pytest.approx(0.0) for c in enh)
+    rows = [r for r in out["pipelines"]["leaderboard"] if r["enh_model_id"]]
+    assert {r["placement"] for r in rows} == {"before", "after"}
+    assert all(r["vs_original"] == pytest.approx(0.0) for r in rows)
+    copy = session.query(EnhancedCopy).one()
+    clips = client.get("/api/errors/enh/clips", params={"run_id": rows[0]["run_id"], "base_run_id": next(
+        r["run_id"] for r in out["pipelines"]["leaderboard"] if r["enh_model_id"] is None and
+        r["seg_model_id"] == rows[0]["seg_model_id"] and r["asr_model_id"] == rows[0]["asr_model_id"])}).json()
+    assert clips["copy_id"] == copy.id and clips["clips"] == []  # nothing changed
+    models = {m["catalog_id"]: m for m in client.get("/api/models").json()["models"]}
+    assert models["identity-enhancer"]["runs"] == 2 + len(rows)  # the runs that read its copy

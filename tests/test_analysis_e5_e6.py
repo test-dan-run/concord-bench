@@ -95,9 +95,13 @@ def test_saved_slices_belong_to_one_dataset(client, session):
 def test_moment_kinds():
     segs = [SpkSegment(0.0, 2.0, "A", "x"), SpkSegment(2.2, 2.8, "B", "y"), SpkSegment(2.5, 40.0, "A", "z")]
     kinds = scoring.moment_kinds(segs)
-    assert kinds[0] == {"near_change"}
-    assert kinds[1] == {"short", "near_change", "overlap"}
+    assert kinds[0] == set()
+    assert kinds[1] == {"short", "overlap"}
     assert {"long", "overlap"} <= kinds[2]
+    assert scoring.change_times(segs) == [2.1, 2.65]
+    # 4 words over 0-2 s at 0.25, 0.75, 1.25, 1.75 s: only the last is within 0.5 s of the change at 2.1 s
+    near = ["near_change" in k for k in scoring.word_kinds(segs[0], 4, kinds[0], scoring.change_times(segs))]
+    assert near == [False, False, False, True]
 
 
 def test_every_error_word_gets_one_cause_and_they_add_up():
@@ -113,7 +117,7 @@ def test_every_error_word_gets_one_cause_and_they_add_up():
     assert causes["A"][2] == "asr"  # "sat" is wrong even with reference segments
     assert "speaker" in tags  # B's words went to A's speaker
     assert [w["w"] for w in lines[0]["words"]] == ["the", "cat", "sat"]
-    assert moments["near_change"]["words"] == 6
+    assert moments["near_change"]["words"] == 2  # "sat" (1.67 s) and "on" (2.33 s), around the change at 2.0 s
 
 
 # ---------------------------------------------------------------- diarisation regions and matrices

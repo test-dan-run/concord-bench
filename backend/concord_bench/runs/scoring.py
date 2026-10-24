@@ -32,7 +32,7 @@ from .executor import file_refs
 from .references import FileRefs
 
 NO_NORMALISER = "-"
-SCORE_VERSION = 2  # 2: MER / WIL / WIP, tcpWER, per-word error causes and moments in pipelines
+SCORE_VERSION = 3  # 2: MER / WIL / WIP, tcpWER, per-word error causes and moments in pipelines; 3: near_change per word
 
 # Kinds of moment a reference segment can be in (a segment can be in several).
 NEAR_CHANGE_S = 0.5
@@ -234,7 +234,8 @@ def _score_seg(session: Session, run: Run, refs: dict[str, FileRefs], collar: fl
 # ---------------------------------------------------------------- pipelines
 
 def moment_kinds(segs: list[Any]) -> list[set[str]]:
-    """The kinds of moment (MOMENTS) each reference segment (start, end, speaker) is in."""
+    """The kinds of moment (MOMENTS) each reference segment (start, end, speaker) is in as a whole: short,
+    long, overlap. near_change is decided per word (word_kinds)."""
     out: list[set[str]] = []
     for k, s in enumerate(segs):
         kinds: set[str] = set()
@@ -243,14 +244,34 @@ def moment_kinds(segs: list[Any]) -> list[set[str]]:
             kinds.add("short")
         if dur > LONG_SEGMENT_S:
             kinds.add("long")
-        for j, o in enumerate(segs):
-            if j == k or o.speaker == s.speaker:
-                continue
-            if min(s.end, o.end) - max(s.start, o.start) > 0.05:
-                kinds.add("overlap")
-            if abs(s.start - o.end) <= NEAR_CHANGE_S or abs(o.start - s.end) <= NEAR_CHANGE_S:
-                kinds.add("near_change")
+        if any(j != k and o.speaker != s.speaker and min(s.end, o.end) - max(s.start, o.start) > 0.05
+               for j, o in enumerate(segs)):
+            kinds.add("overlap")
         out.append(kinds)
+    return out
+
+
+def change_times(segs: list[Any]) -> list[float]:
+    """Speaker changes: where one speaker's segment ends and another's starts within NEAR_CHANGE_S, at the
+    midpoint of the two."""
+    out = []
+    for s in segs:
+        for o in segs:
+            if o.speaker != s.speaker and abs(o.start - s.end) <= NEAR_CHANGE_S:
+                out.append((o.start + s.end) / 2)
+    return sorted(out)
+
+
+def word_kinds(seg: Any, n: int, kinds: set[str], changes: list[float]) -> list[set[str]]:
+    """Each of a segment's n words' kinds of moment: the segment's own, plus near_change for a word whose
+    time (spread evenly over the segment, as references have no word times) is within NEAR_CHANGE_S of a
+    speaker change."""
+    dur = seg.end - seg.start
+    out = []
+    for i in range(n):
+        t = seg.start + (i + 0.5) / n * dur
+        near = any(abs(t - c) <= NEAR_CHANGE_S for c in changes)
+        out.append(kinds | {"near_change"} if near else kinds)
     return out
 
 
@@ -271,6 +292,7 @@ def word_causes(ref_segs: list[cpwer.SpkSegment], res_a: dict[str, Any], res_b: 
     wa, wb, wc = _wrong_words(res_a), _wrong_words(res_b), _wrong_words(res_c)
     ordered = sorted(ref_segs, key=lambda s: (s.start, s.end))
     kinds = moment_kinds(ordered)
+    changes = change_times(ordered)
     causes: dict[str, list[str | None]] = {}
     pos: dict[str, int] = {}
     moments: dict[str, dict[str, int]] = {k: {"words": 0, "asr": 0, "segmentation": 0, "speaker": 0} for k in MOMENTS}
@@ -291,11 +313,13 @@ def word_causes(ref_segs: list[cpwer.SpkSegment], res_a: dict[str, Any], res_b: 
             tags.append(tag)
         pos[seg.speaker] = start + len(words)
         causes.setdefault(seg.speaker, []).extend(tags)
-        for k in kk:
-            moments[k]["words"] += len(words)
-            for tag in tags:
+        wk = word_kinds(seg, len(words), kk, changes)
+        for kinds_w, tag in zip(wk, tags, strict=True):
+            for k in kinds_w:
+                moments[k]["words"] += 1
                 if tag:
                     moments[k][tag] += 1
+        kk = set().union(kk, *wk)
         lines.append({"start": seg.start, "end": seg.end, "speaker": seg.speaker, "kinds": sorted(kk),
                       "words": [{"w": w, "cause": c} for w, c in zip(words, tags, strict=True)]})
     return causes, moments, lines

@@ -18,8 +18,9 @@ function watchErrors(page: Page): string[] {
 }
 
 async function expectPlays(page: Page) {
-  const audio = page.locator("audio").first();
-  await expect.poll(async () => audio.evaluate((a: HTMLAudioElement) => a.currentTime), { timeout: 15_000 }).toBeGreaterThan(0.05);
+  // pages hold several players (a file's, and one per listed moment): one of them must be playing
+  const furthest = () => page.locator("audio").evaluateAll((els) => Math.max(0, ...els.map((a) => (a as HTMLAudioElement).currentTime)));
+  await expect.poll(furthest, { timeout: 15_000 }).toBeGreaterThan(0.05);
 }
 
 test("benchmarks: ASR, diarisation and pipeline tabs show scores", async ({ page }) => {
@@ -34,32 +35,65 @@ test("benchmarks: ASR, diarisation and pipeline tabs show scores", async ({ page
   await expect(page.getByRole("button", { name: /pyannote-diarization on Synth fixtures: DER/ })).toBeVisible();
   await expect(page.getByRole("button", { name: /silero-vad on Synth fixtures: VAD error/ })).toBeVisible();
   await page.getByRole("tab", { name: "ASR + diarisation pipelines" }).click();
-  await expect(page.getByRole("heading", { name: /Ablation grid/ })).toBeVisible();
-  await expect(page.getByRole("button", { name: /Reference segments \+ speakers → whisper-large-v3: \d/ })).toBeVisible();
-  await expect(page.getByRole("button", { name: /silero-vad → whisper-large-v3: n\/a/ })).toBeVisible();
-  // The panel opens on the best run (the oracle, which has no attribution); pick a real diariser.
-  await page.getByRole("button", { name: /nemotron-3-diarization → whisper-large-v3: \d/ }).click();
+  await expect(page.getByRole("heading", { name: "Pipeline leaderboard" })).toBeVisible();
+  const lb = page.getByRole("table");
+  await expect(lb.getByRole("row", { name: /Reference segments \+ speakers → whisper-large-v3/ })).toBeVisible();
+  await expect(lb.getByRole("row", { name: /silero-vad → whisper-large-v3 .*WER only/ }).first()).toBeVisible();
+  await lb.getByRole("row", { name: /nemotron-3-diarization → whisper-large-v3/ }).getByRole("button", { name: "Inspect" }).click();
   await expect(page.getByText("Where the errors come from")).toBeVisible();
+  expect(errors).toEqual([]);
+});
+
+test("leaderboards: run setup popup, sorting, metrics, enhancement and hardware controls", async ({ page }) => {
+  const errors = watchErrors(page);
+  await page.goto("/benchmarks/asr");
+  // Run evaluation is a popup: focus moves in, Escape closes it and focus returns
+  const opener = page.getByRole("button", { name: "Run evaluation" });
+  await opener.click();
+  const dialog = page.getByRole("dialog", { name: "Run ASR evaluation" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByText("ASR", { exact: true }).first()).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
+  await expect(opener).toBeFocused();
+  // sort by a column: best first, then worst first
+  const mean = page.getByRole("columnheader", { name: /Mean/ });
+  await expect(mean).toHaveAttribute("aria-sort", "ascending");
+  await mean.getByRole("button").click();
+  await expect(mean).toHaveAttribute("aria-sort", "descending");
+  // another metric across datasets, then every metric on one dataset
+  await page.getByRole("group", { name: "Metric" }).getByRole("button", { name: "MER" }).click();
+  await expect(page.getByRole("heading", { name: "Match error rate" })).toBeVisible();
+  await page.getByRole("group", { name: "View" }).getByRole("button", { name: "All metrics, one dataset" }).click();
+  await expect(page.getByRole("columnheader", { name: /WIP/ })).toBeVisible();
+  await expect(page.getByRole("group", { name: "Enhancement" })).toBeVisible();
+  await expect(page.getByRole("group", { name: "Hardware" })).toBeVisible();
+  await page.getByRole("button", { name: /faster-whisper-large-v3 on Synth fixtures: WER/ }).click();
+  await expect(page.getByRole("heading", { name: "Compute" })).toBeVisible();
+  await page.goto("/models");
+  await page.getByRole("tab", { name: /Enhancement/ }).click();
+  await expect(page.getByText(/cleaned audio out/)).toBeVisible();
   expect(errors).toEqual([]);
 });
 
 test("the text normaliser stays the same across Benchmarks and Error analysis", async ({ page }) => {
   const errors = watchErrors(page);
+  const norm = (name: string) => page.getByRole("group", { name: "Text normaliser" }).getByRole("button", { name });
   await page.goto("/benchmarks/asr");
-  await page.getByLabel("Text normaliser").selectOption("whisper_en");
+  await norm("Whisper EN").click();
   await expect(page.getByText(/normaliser whisper_en@1/)).toBeVisible();
   // nav links carry no query string: the choice still holds
   await page.getByRole("navigation", { name: "Primary" }).getByRole("link", { name: "Error analysis" }).click();
   await expect(page).toHaveURL(/\/errors\/asr\/\d+/);
-  await expect(page.getByLabel("Normaliser")).toHaveValue("whisper_en");
-  await page.getByLabel("Normaliser").selectOption("none");
+  await expect(norm("Whisper EN")).toHaveAttribute("aria-pressed", "true");
+  await norm("None (raw)").click();
   await page.getByRole("navigation", { name: "Primary" }).getByRole("link", { name: "Benchmarks" }).click();
-  await expect(page.getByLabel("Text normaliser")).toHaveValue("none");
+  await expect(norm("None (raw)")).toHaveAttribute("aria-pressed", "true");
   await page.getByRole("tab", { name: "ASR + diarisation pipelines" }).click();
-  await expect(page.getByLabel("Text normaliser")).toHaveValue("none");
+  await expect(norm("None (raw)")).toHaveAttribute("aria-pressed", "true");
   // ...and survives a reload (each test starts with fresh browser storage)
   await page.goto("/benchmarks/asr");
-  await expect(page.getByLabel("Text normaliser")).toHaveValue("none");
+  await expect(norm("None (raw)")).toHaveAttribute("aria-pressed", "true");
   expect(errors).toEqual([]);
 });
 
@@ -81,6 +115,15 @@ test("ASR errors: loads, sorts, expands and plays", async ({ page }) => {
   await page.getByRole("button", { name: "Play utterance" }).click();
   await expectPlays(page);
   await expect(page.getByText("Most mis-transcribed words")).toBeVisible();
+  // scores by label: derived labels (speaker, utterance length) exist on any dataset
+  await page.getByRole("navigation", { name: "ASR view" }).getByRole("link", { name: "Label" }).click();
+  await expect(page).toHaveURL(/\/errors\/asr\/\d+\/labels/);
+  await expect(page.getByRole("heading", { name: /Where .* fails/ })).toBeVisible();
+  await page.getByRole("region", { name: "Labels on this dataset" }).getByRole("button", { name: /duration_s/ }).click();
+  await page.getByRole("group", { name: "Bins" }).getByRole("button", { name: /Quantiles/ }).click();
+  await expect(page.getByRole("heading", { name: /by duration_s/ })).toBeVisible();
+  await page.getByRole("button", { name: /^Inspect/ }).first().click();
+  await expect(page.getByText("Worst utterances here")).toBeVisible();
   expect(errors).toEqual([]);
 });
 
@@ -92,11 +135,18 @@ test("VAD / diarisation errors: loads, sorts, expands and plays", async ({ page 
   await expect(page.getByRole("heading", { name: "Files" })).toBeVisible();
   await page.getByRole("columnheader", { name: /Duration/ }).getByRole("button").click();
   await expect(page.getByRole("columnheader", { name: /Duration/ })).toHaveAttribute("aria-sort", /descending|ascending/);
-  await page.locator("tbody tr").first().click();
+  await page.getByRole("region", { name: "Files" }).locator("tbody tr").first().click();
   await expect(page.getByRole("img", { name: "Speaker and error lanes" })).toBeVisible();
   await page.getByRole("button", { name: "Play file" }).click();
   await expectPlays(page);
   await expect(page.getByText("Boundary accuracy")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Where the errors are" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Who was mistaken for whom" })).toBeVisible();
+  const overlap = page.getByLabel("Score overlapping speech");
+  await overlap.click();
+  await expect(page).toHaveURL(/skip_overlap=1/);
+  await expect(overlap).not.toBeChecked();
+  await expect(page.getByRole("heading", { name: "Where the errors are" })).toBeVisible();
   expect(errors).toEqual([]);
 });
 
@@ -107,10 +157,46 @@ test("pipeline errors: loads, sorts, expands and plays", async ({ page }) => {
   await expect(page).toHaveURL(/\/errors\/pipeline\/\d+/);
   await expect(page.getByRole("heading", { name: "Files" })).toBeVisible();
   await page.getByRole("columnheader", { name: /DER/ }).getByRole("button").click();
-  await page.locator("tbody tr").first().click();
+  await expect(page.getByRole("heading", { name: "How the errors add up" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Which stage to upgrade" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Where errors start" })).toBeVisible();
+  await page.getByRole("region", { name: "Files" }).locator("tbody tr").first().click();
   await expect(page.getByText("Pipeline output")).toBeVisible();
+  await expect(page.getByText(/every error tagged by its cause/)).toBeVisible();
   await page.getByRole("button", { name: "Play file" }).click();
   await expectPlays(page);
+  expect(errors).toEqual([]);
+});
+
+test("speech enhancement: copies, model + enhancer rows, placements and the enhancement page", async ({ page }) => {
+  // The e2e data includes an identity enhancer (concord_bench.acceptance.run_enhancement_flow): its copy holds
+  // the original audio, so every enhanced score equals the original one.
+  const errors = watchErrors(page);
+  await page.goto("/benchmarks/asr");
+  await page.getByRole("group", { name: "Enhancement" }).getByRole("button", { name: "All variants" }).click();
+  const enhCell = page.getByRole("button", { name: /whisper-large-v3 \+ identity-enhancer on Synth fixtures: WER/ }).first();
+  await expect(enhCell).toBeVisible();
+  await enhCell.click();
+  await expect(page.getByRole("heading", { name: "Enhancement effect" })).toBeVisible();
+  await expect(page.getByText(/on original audio →/)).toBeVisible();
+  await page.goto("/benchmarks/pipeline");
+  const row = page.getByRole("row", { name: /identity-enhancer.*pyannote-diarization → whisper-large-v3.*Before diarisation/ });
+  await expect(row).toBeVisible();
+  await expect(page.getByRole("row", { name: /After diarisation/ })).toBeVisible();
+  await row.getByRole("button", { name: "Inspect" }).click();
+  await page.getByRole("link", { name: /Open enhancement error analysis/ }).click();
+  await expect(page).toHaveURL(/\/errors\/enh\/\d+/);
+  await expect(page.getByRole("heading", { name: /Placement · identity-enhancer/ })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /Enhancer × placement/ })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Enhancement models" })).toBeVisible();
+  await page.goto("/datasets");
+  await expect(page.getByRole("cell", { name: /identity-enhancer/ })).toBeVisible();
+  await page.getByRole("button", { name: "Add enhancement models to Synth fixtures" }).click();
+  const dialog = page.getByRole("dialog", { name: "Add enhancement models" });
+  await expect(dialog.getByText("copy ready")).toBeVisible();
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+  await page.getByRole("link", { name: "Synth fixtures" }).click();
+  await expect(page.getByRole("region", { name: "Enhanced copies" }).getByText("same length")).toBeVisible();
   expect(errors).toEqual([]);
 });
 
@@ -123,6 +209,8 @@ test("bring-your-own screens load; Bench has no Label or Training pages", async 
   await expect(page.getByText(/Undecodable/)).toBeVisible();
   await expect(page.getByText(/Over the length cap/)).toHaveCount(0); // no duration cap
   await expect(page.getByText("Flagged references")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Labels for slicing" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Enhanced copies" })).toBeVisible();
   await expect(page.getByRole("link", { name: /Pseudo-label|Open in annotator/ })).toHaveCount(0);
   await page.goto("/datasets/upload");
   await expect(page.getByRole("heading", { name: "Upload dataset" })).toBeVisible();

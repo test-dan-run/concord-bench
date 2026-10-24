@@ -2,6 +2,8 @@ import { createBrowserRouter, Navigate, Outlet, useRouteError } from "react-rout
 import { Nav } from "./Nav";
 import { BenchmarksPage } from "../features/benchmarks/BenchmarksPage";
 import { AsrErrors } from "../features/errors/AsrErrors";
+import { AsrLabels } from "../features/errors/AsrLabels";
+import { EnhanceErrors, EnhanceIndex } from "../features/errors/EnhanceErrors";
 import { DiarErrors } from "../features/errors/DiarErrors";
 import { ErrorsIndex } from "../features/errors/ErrorsIndex";
 import { PipelineErrors } from "../features/errors/PipelineErrors";
@@ -44,6 +46,9 @@ export const router = createBrowserRouter([
       { path: "benchmarks/:tab", element: <BenchmarksPage /> },
       { path: "errors", element: <ErrorsIndex /> },
       { path: "errors/asr/:runId", element: <AsrErrors /> },
+      { path: "errors/asr/:runId/labels", element: <AsrLabels /> },
+      { path: "errors/enh", element: <EnhanceIndex /> },
+      { path: "errors/enh/:runId", element: <EnhanceErrors /> },
       { path: "errors/diar/:runId", element: <DiarErrors /> },
       { path: "errors/pipeline/:runId", element: <PipelineErrors /> },
       { path: "datasets", element: <DatasetsPage /> },

@@ -54,7 +54,7 @@ describe("reference imports", () => {
       { seg_models: ["pyannote", "gone"], asr_models: ["whisper", "fw", "stale"], oracle: true, mode: "grid" },
       { seg: [m("pyannote")], asr: [m("whisper"), m("fw"), m("other"), m("stale", false)], oracle_available: false },
     );
-    expect(plan).toEqual({ seg_models: ["pyannote"], asr_models: ["whisper", "fw"], oracle: false, mode: "grid" });
+    expect(plan).toEqual({ seg_models: ["pyannote"], asr_models: ["whisper", "fw"], oracle: false, mode: "grid", enhancers: [], include_original: true, placements: ["before"] });
   });
 
   it("summarise skipped outputs", () => {

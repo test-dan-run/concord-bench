@@ -19,11 +19,8 @@ class Settings(BaseSettings):
 
     # Audio, derived files and the database (Q2: local disk only).
     concord_data: Path = Field(default=REPO_ROOT / "data")
-    # Platform repo: the aicore endpoint map is generated here, and offline kits are written with its tools.
+    # Platform repo: the aicore endpoint map is generated here.
     platform_dir: Path = Field(default=REPO_ROOT.parent.parent / "platform")
-    # A ready environment for the platform's tools (containers): bundle.py then runs with
-    # `uv run --no-sync` in it, so the platform's own .venv on the host is never touched.
-    platform_venv: Path | None = None
     # Passed through to aicore; unset means the map bundled with the aicore package.
     aicore_endpoints: Path | None = None
     # localhost on the host; `{name}` inside a container on ai-net.
@@ -42,8 +39,6 @@ class Settings(BaseSettings):
     replay_dir: Path | None = None
     # Write every live model response into this folder (to refresh recordings).
     record_dir: Path | None = None
-    # The Concord Bench image a full offline kit carries unless the export form picks another (Q3).
-    concord_image: str = "concord-bench:0.2.0"
     # Concord Label's base URL (SPLIT_PLAN.md §5): "Open in Label" and "Send flags to Label". Unset: no links.
     label_url: str | None = None
     # Built frontend served by FastAPI; absent in development (Vite serves it).

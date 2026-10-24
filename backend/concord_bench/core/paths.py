@@ -37,11 +37,6 @@ def reference_import(import_id: int) -> Path:
     return data_root() / "imports" / str(import_id)
 
 
-def offline_kits() -> Path:
-    """Default destination of offline kits (the export form can name any folder)."""
-    return data_root() / "offline"
-
-
 def job_log(job_id: int) -> Path:
     return data_root() / "logs" / f"job-{job_id}.log"
 

@@ -12,7 +12,6 @@ Job types:
                                           one ASR model over the cuts of every seg source (Bench model ids,
                                           None = oracle) of a grid
 - score      {run_id, normaliser, collar} rescoring with a platform normaliser (through the catalog's gateway)
-- export     {export_id, services, kind, dest, ...}  an offline kit; needs no model
 
 Models come from the model catalog (platform/catalog/README.md). A job that needs models
 (`required_services`, catalog model ids) takes one catalog lease on them as `bench:job-<id>`; the aicore
@@ -42,7 +41,7 @@ from sqlalchemy.orm import Session
 
 from ..core import paths
 from ..core.db import SessionLocal
-from ..core.models import Dataset, Job, JobStatus, Model, OfflineExport, Run, utcnow
+from ..core.models import Dataset, Job, JobStatus, Model, Run, utcnow
 from ..platform import catalog
 from . import executor, scoring
 
@@ -464,33 +463,8 @@ def _handle_score(session: Session, job: Job, ctx: JobContext) -> dict[str, Any]
     return {"run_id": run.id, "score_id": sc.id}
 
 
-def _handle_export(session: Session, job: Job, ctx: JobContext) -> dict[str, Any]:
-    from ..offline import export as offline
-
-    p = job.payload
-    rec = session.get(OfflineExport, p["export_id"])
-    if rec is None:
-        raise ValueError(f"offline export {p['export_id']} not found")
-    rec.status, rec.error = "running", None
-    session.commit()
-    try:
-        # jobs queued before kits could carry both apps name one image of this app
-        apps = p["apps"] if "apps" in p else {offline.THIS_APP: p["concord_image"]} if p.get("concord_image") else None
-        out = offline.export(p["services"], p["kind"], Path(p["dest"]), apps, p.get("name"),
-                             ctx.log, ctx.progress)
-    except Exception as exc:
-        session.rollback()
-        rec = session.get(OfflineExport, p["export_id"])
-        rec.status, rec.error, rec.finished_at = "failed", str(exc)[:2000], utcnow()
-        session.commit()
-        raise
-    rec.status, rec.path, rec.bytes, rec.finished_at = "done", out["path"], out["bytes"], utcnow()
-    session.commit()
-    return {"export_id": rec.id, "path": out["path"], "bytes": out["bytes"]}
-
-
 HANDLERS = {"ingest": _handle_ingest, "run": _handle_run, "seg_stage": _handle_seg_stage,
-            "asr_stage": _handle_asr_stage, "score": _handle_score, "export": _handle_export}
+            "asr_stage": _handle_asr_stage, "score": _handle_score}
 # Before leasing: the models still needed once stored and indexed outputs are counted.
 PREPARE = {"seg_stage": _prepare_seg_stage, "asr_stage": _prepare_asr_stage}
 
@@ -566,10 +540,6 @@ def retry(session: Session, job: Job) -> None:
         run = session.get(Run, job.payload["run_id"])
         if run is not None:
             run.status, run.error = "queued", None
-    if job.type == "export":
-        rec = session.get(OfflineExport, job.payload["export_id"])
-        if rec is not None:
-            rec.status, rec.error, rec.finished_at = "queued", None, None
     for dep in session.scalars(select(Job).where(Job.status == JobStatus.blocked)).all():
         if job.id in (dep.after or []):
             retry(session, dep)

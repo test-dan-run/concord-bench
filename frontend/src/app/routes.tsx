@@ -11,7 +11,6 @@ import { UploadDataset } from "../features/datasets/UploadDataset";
 import { ImportReference } from "../features/datasets/ImportReference";
 import { ModelsPage } from "../features/models/ModelsPage";
 import { JobsPage } from "../features/jobs/JobsPage";
-import { ExportOffline } from "../features/offline/ExportOffline";
 
 function Layout() {
   return (
@@ -52,7 +51,6 @@ export const router = createBrowserRouter([
       { path: "datasets/import", element: <ImportReference /> },
       { path: "datasets/:id", element: <DatasetDetail /> },
       { path: "models", element: <ModelsPage /> },
-      { path: "offline", element: <ExportOffline /> },
       { path: "jobs", element: <JobsPage /> },
       { path: "*", element: <Navigate to="/benchmarks" replace /> },
     ],

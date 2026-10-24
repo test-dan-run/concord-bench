@@ -63,8 +63,9 @@ own data directory and database.
   package from the same source becomes `<name> v<N>`). Back the other way: "Open in Label" on the error
   pages, the locked score in Label's live evaluation, and "Send flags to Label" on the dataset page.
   `just e2e-handoff` in the Label repository runs this round trip with both images.
-- **Offline.** A full offline kit written by either app can hold Bench, Label or both; with both, they
-  start from one compose file and already know each other's address (see Offline kits).
+- **Offline.** Bench no longer writes offline kits (EVALUATE_PLAN.md §9). Models go to an air-gapped
+  machine as a model catalog bundle, and the Bench image goes with `docker save` (see Air-gapped machines).
+  Concord Label still has its own copy of the old kit code.
 - **Contracts.** `just check-contracts` checks `contracts/samples` and compares `CONTRACTS.md` and
   `contracts/` with `../concord-label` (or `--peer PATH`); they must stay byte-identical.
 - **Fixtures.** Bench owns `fixtures/generated` and `fixtures/recorded`. When `just fixtures` or
@@ -76,14 +77,13 @@ own data directory and database.
 backend/concord_bench/
   core/        settings, paths (the only module that knows where files live), SQLite models, db
   datasets/    audio (ffmpeg probe and decode, clipping, 16 kHz derive, peaks), annotation parsers, ingest
-  platform/    the model catalog (records, leases, plans, index, peer reads; replay stand-in), platform tools
+  platform/    the model catalog (records, leases, plans, index, peer reads; replay stand-in)
   adapters/    openai_asr, openai_chat_audio, oip_segmenter; record and replay transport
   runs/        job queue and worker, executor (ASR, seg, pipelines), output cache, references, scoring
   metrics/     normalisers, wer (jiwer), der, jer and vad (pyannote.metrics), cpwer (meeteval), rtf, attribution
   analysis/    top words, substitution pairs, slices, diarisation cards, tag-overlap suggestions
-  offline/     offline kits: export, kit files, install.sh, merge
   api/         FastAPI routers
-  migrations/  Alembic (bench_0001...; bench_0004 moved models to the catalog)
+  migrations/  Alembic (bench_0001...; bench_0004 moved models to the catalog; bench_0005 dropped offline export)
   acceptance.py, recording.py   the Phase 1 acceptance flow, and `just record` on top of it
 frontend/src/  React, TanStack Query, Table and Virtual, Tailwind (AeroAudio tokens in index.css)
 fixtures/      synth/ (kokoro-tts dialogue specs and committed turns), generated/ (audio, refs, templates),
@@ -93,9 +93,10 @@ tests/         pytest; `-m live` for tests against running services
 ```
 
 Concord Label started as a copy of this repository. The modules both apps still have (core, datasets,
-registry, platform, adapters, runs/cache.py, runs/jobs.py, runs/worker.py, offline, and the frontend's
-shared components and lib) are listed in SPLIT_PLAN.md §2.2. When you fix one of them here, check the
-same code in Concord Label. (`registry/` and `platform/services.py` are gone since the model catalog.)
+registry, platform, adapters, runs/cache.py, runs/jobs.py, runs/worker.py, and the frontend's shared
+components and lib) are listed in SPLIT_PLAN.md §2.2. When you fix one of them here, check the same code in
+Concord Label. (`registry/` and `platform/services.py` are gone since the model catalog, and `offline/`
+is gone from Bench since EVALUATE_PLAN.md §9; Label keeps its copy for now.)
 
 ## How it works
 
@@ -195,10 +196,6 @@ copy them there again when they change.
 - `just e2e`: Playwright smoke tests on replayed fixtures. The API runs in the `concord-bench:0.2.0` image
   (build it first with `just build`) with this checkout's backend, tests and `frontend/dist` mounted;
   browsers run in the Playwright image.
-- `just test-offline`: the air-gap test of an offline kit (Docker, no GPU, about two minutes): a kit with
-  Bench alone (plus a model kit merged with `install.sh --add`) and a kit with both apps, each installed
-  on an `--internal` network and benchmarked there. Needs `concord-bench:0.2.0` and, for the second,
-  `concord-label:0.2.0` (`just build` in each repository), and ports 8600 and 8620 free.
 - `just e2e-handoff` in the Label repository: the round trip between the two images.
 - `just test-live`, `just test-perf`: against the live catalog and its services, and at realistic size.
 
@@ -213,50 +210,19 @@ docker run -d --name concord-bench --network ai-net -p 127.0.0.1:8600:8600 \
 ```
 
 The image sets `CATALOG_URL=http://catalog:8700`, `PUBLIC_URL=http://concord-bench:8600` (where Label reads
-Bench's outputs) and `AI_HOST={name}`. Writing offline kits also needs the Docker socket
-(`-v /var/run/docker.sock:/var/run/docker.sock`) and the platform mounted at the same absolute path it has
-on the host, because the platform's `tools/bundle.py` runs against the host's Docker daemon. In development,
-run Bench on the host instead.
+Bench's outputs) and `AI_HOST={name}`. The platform is mounted for the aicore endpoint map
+(`AICORE_ENDPOINTS`). In development, run Bench on the host instead.
 
-## Offline kits
+## Air-gapped machines
 
-Concord Bench, Concord Label or both, and chosen models, can go to a machine with no internet access
-(CONTRACTS.md §6). **Export for offline** lists every
-platform service with its image and weight sizes; tick the models, pick a kit kind, tick the apps a full
-kit carries ("Include Concord Bench" is ticked; "Include Concord Label" shows Label's local image tag, or
-says to run `just build` in that repository) and a destination folder, and the worker writes the kit
-there (progress on the Jobs page). From the command line:
+Bench does not write offline kits any more (EVALUATE_PLAN.md §9). To run it on a machine with no internet
+access:
 
-```bash
-just export-offline silero-vad whisper-large-v3 --kind full --out /mnt/usb   # Bench + platform + models
-just export-offline silero-vad --kind full --app concord-bench --app concord-label --out /mnt/usb  # both apps
-just export-offline whisper-large-v3-turbo --kind models --out /mnt/usb       # models only, for an existing install
-just verify-kit /mnt/usb/concord-offline-...                                  # checksums against manifest.json
-```
-
-`--app concord-label=concord-label:0.2.0` picks a tag; without one the other app's image is its contract
-name, `concord-label:<this version>`, or else the first tag `docker images concord-label` lists.
-
-- A kit is a folder: `images/` (one `docker save` of the models' images, plus `concord-bench.tar` and/or
-  `concord-label.tar` in a full kit), `assets/` (weights in `AI_ASSETS` layout; Hugging Face models as a
-  fresh cache entry with real files), `platform/` (a runnable platform tree holding only the chosen
-  services), `concord/compose.yml`, `install.sh`, `README.md`, `manifest.json` (with `"apps"`) and
-  `SHA256SUMS`. The platform's `tools/bundle.py` writes the first three.
-- Missing images or weights stop the export (`just build NAME`, `docker pull`, `just fetch-weights NAME`,
-  or start an engine model once so it downloads). Not fitting under `util_limit` together is only a
-  warning.
-- On the offline machine, `./install.sh` (full kit) verifies the checksums, loads the images, writes
-  `platform/.env` (`AI_ASSETS=<kit>/assets`, `HF_HUB_OFFLINE=1`) and `concord/.env` (`BENCH_IMAGE`,
-  `LABEL_IMAGE`), and starts the apps from `concord/compose.yml` (services `concord-bench` on
-  http://127.0.0.1:8600 and `concord-label` on http://127.0.0.1:8620, with `platform/` and `assets/`
-  mounted at their host paths). With both apps, `LABEL_URL` and `BENCH_URL` point at each other, so Send
-  to Bench, Open in Label and the locked score work there too.
-  `./install.sh --add <install>` (model kit) merges models into it; a service already there with another
-  image is refused unless `--replace`. Register models there in the model catalog: no registrations,
-  scores or datasets travel. Kits do not carry the catalog yet, so an installed kit can export and list
-  but cannot run models until it does (`just test-offline` fails until then).
-- Exporting from a containerised Bench needs the platform and `$AI_ASSETS` mounted read-only at their
-  host paths and the destination folder mounted; on the host none of this applies.
+1. Export the models from the model catalog (`POST /api/exports` or its UI) and import the bundle on the
+   target with `python -m catalog import <bundle>` (platform `catalog/README.md`, Export and import).
+2. Save the Bench image here with `docker save concord-bench:0.2.0 -o concord-bench.tar`, copy it over, and
+   load it there with `docker load -i concord-bench.tar`.
+3. Start it as in Image above, next to the target's platform. Datasets, runs and scores do not travel.
 
 ## Status
 
@@ -267,7 +233,8 @@ or both apps (S7). The split (SPLIT_PLAN.md) is built.
 
 Since then, models come from the platform's model catalog (MODEL_CATALOG_REDESIGN.md): registration and
 checks moved there, jobs lease models from it, outputs are keyed by build and shared with Label through
-its index, and pipeline grids run stage by stage.
+its index, and pipeline grids run stage by stage. The offline export is removed (EVALUATE_PLAN.md §9), and
+the revised Evaluate design is being built from EVALUATE_PLAN.md (milestones E0 to E7).
 
 Known limits:
 - KWS is not built (Q6). Only its hooks exist: the enums, the `keyword_event` table, task-keyed

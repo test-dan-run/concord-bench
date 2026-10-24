@@ -138,14 +138,16 @@ test("bring-your-own screens load; Bench has no Label or Training pages", async 
   await expect(primary.getByText("Model contract")).toHaveCount(0);
   await page.goto("/models/add");
   await expect(page).toHaveURL(/\/benchmarks$/); // removed routes fall back to the benchmarks
+  await page.goto("/offline");
+  await expect(page).toHaveURL(/\/benchmarks$/); // offline export was removed (EVALUATE_PLAN.md §9)
   await page.goto("/jobs");
   await expect(page.getByRole("heading", { name: "Jobs" })).toBeVisible();
   const nav = page.getByRole("navigation", { name: "Primary" });
   await expect(nav.getByText("Concord Bench")).toBeVisible();
-  for (const name of ["Benchmarks", "Error analysis", "Datasets", "Import references", "Models", "Export for offline"]) {
+  for (const name of ["Benchmarks", "Error analysis", "Datasets", "Import references", "Models"]) {
     await expect(nav.getByRole("link", { name, exact: true })).toBeVisible();
   }
-  for (const name of ["Training", "Review console", "Pseudo-label", "Annotate", "Live evaluation", "Import / export"]) {
+  for (const name of ["Training", "Review console", "Pseudo-label", "Annotate", "Live evaluation", "Import / export", "Export for offline"]) {
     await expect(nav.getByRole("link", { name })).toHaveCount(0);
   }
   for (const path of ["/training", "/label", "/label/annotate"]) {

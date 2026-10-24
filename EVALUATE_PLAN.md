@@ -457,13 +457,14 @@ All of the offline export leaves Bench (§1). Concord Label's copy of the same c
 | Settings and paths | `paths.offline_kits()`, the Concord Bench image setting for kits in `core/settings.py`, and the kit comment in `.env.example`. `PLATFORM_DIR` stays, because Bench still reads the aicore endpoint map from it. |
 | Image | In the `Dockerfile`, the docker CLI and compose plugin, the platform tools' environment and `UV_OFFLINE`, which only kits needed. Check that nothing else uses them first. |
 | Tests | `tests/test_offline.py`, `tests/test_offline_airgap.py`, `tests/airgap_flow.py`, the `offline` marker in `pyproject.toml` and its handling in `tests/conftest.py` |
+| Contracts | CONTRACTS.md §6 and `contracts/samples/kit/` (see below) |
 | Docs | The offline sections of `README.md`, including the `just test-offline` limitation note |
 
-Two things stay for now:
+Two more points:
 
-- **CONTRACTS.md §6 and `contracts/samples/kit/`** describe the apps in a kit, and the contract files must
-  stay identical in both repositories (`just check-contracts`). Remove them in the same sitting as Label's
-  copy, once the Label repository is free.
+- **CONTRACTS.md §6 and `contracts/samples/kit/`** describe the apps in a kit. Concord Label had already
+  removed both in its commit f6ee7e4, so removing them from Bench in E0 made the two copies identical again
+  (`just check-contracts`), with no change to the Label repository.
 - **Shipping Bench to an air-gapped machine.** The platform's catalog export bundles models only
   (`POST /api/exports`), not app images. The README describes the manual way instead: `docker save` the
   Bench image, `docker load` it on the target, and import a catalog bundle for the models.
@@ -489,7 +490,7 @@ developer.
 | E5b | Bench + Label | Reference package version 2 with attributes (§7.2) | E5a; the Label repository free | Contract tests pass in both; `just check-contracts` | 2 d |
 | E5c | Bench | Slice statistics, Label view, saved slices, "by label" sections (§7.3, §7.4) | E5a | Slice tests; e2e opens the Label view | 4 to 5 d |
 | E6 | Bench | Diarisation and pipeline error analysis additions (§8) | E1; E5c for "by label" | Region and cause tests; e2e opens both pages | 6 to 8 d |
-| E7 | Bench | Docs: HANDOFF.md §3.6 metric table and canvas link, README, PLAN.md; CONTRACTS.md §6 removal with Label (§9) | all | Docs match the build | 1 d |
+| E7 | Bench | Docs: HANDOFF.md §3.6 metric table and canvas link, README, PLAN.md | all | Docs match the build | 1 d |
 
 About 7 to 9 weeks in total for Bench. E5a can start right after E0, and E1, E2, E5 and E6 can run side by
 side with E3. E4 needs E3. P1 is independent, and Bench shows more hardware fields once it lands.
@@ -548,4 +549,4 @@ None. Every question from 2026-10-23 and 2026-10-24 is answered and worked into 
 | The bootstrap is slow on large datasets | Cache per run, normaliser and label (§7.3) |
 | Labels with many values or IDs make useless slices | The kind rules in §7.1 skip them, and the upload page shows what was skipped |
 | The reference package change breaks Concord Label | Version 2 with version 1 still read, sample files tested in both repositories, `just check-contracts`, done only when the Label repository is free (§7.2) |
-| Removing offline code leaves Bench's and Label's shared copies further apart | Expected, since Label keeps its copy for now. CONTRACTS.md §6 stays identical until both are changed together (§9) |
+| Removing offline code leaves Bench's and Label's shared copies further apart | Expected, since Label keeps its copy of the code for now. The contract files are identical again (§9) |

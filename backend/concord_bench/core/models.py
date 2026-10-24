@@ -313,7 +313,7 @@ class Result(Base):
 class Job(Base):
     __tablename__ = "job"
     id: Mapped[int] = mapped_column(primary_key=True)
-    type: Mapped[str] = mapped_column(String(32))  # ingest | run | seg_stage | asr_stage | score | export
+    type: Mapped[str] = mapped_column(String(32))  # ingest | run | seg_stage | asr_stage | score
     payload: Mapped[dict[str, Any]] = mapped_column(default=dict)
     status: Mapped[str] = mapped_column(String(16), default=JobStatus.queued)
     required_services: Mapped[list[str]] = mapped_column(default=list)  # catalog model ids it leases
@@ -348,24 +348,3 @@ class ReferenceImport(Base):
     job_id: Mapped[int | None] = mapped_column(ForeignKey("job.id", ondelete="SET NULL"))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     decided_at: Mapped[datetime | None] = mapped_column(DateTime)
-
-
-class OfflineExport(Base):
-    """One offline kit written by this install. The kit is a folder on disk;
-    nothing of Concord's own state goes into it."""
-
-    __tablename__ = "offline_export"
-    id: Mapped[int] = mapped_column(primary_key=True)
-    kind: Mapped[str] = mapped_column(String(8))  # full | models
-    services: Mapped[list[str]] = mapped_column(default=list)
-    # Full kits only: the app images in the kit, ", "-separated (CONTRACTS.md §6).
-    concord_image: Mapped[str | None] = mapped_column(String(300))
-    dest: Mapped[str] = mapped_column(String(1000))  # the folder the kit is written into
-    name: Mapped[str | None] = mapped_column(String(200))
-    status: Mapped[str] = mapped_column(String(16), default="queued")  # queued | running | done | failed
-    path: Mapped[str | None] = mapped_column(String(1000))  # the kit folder, once written
-    bytes: Mapped[int | None] = mapped_column(Integer)
-    error: Mapped[str | None] = mapped_column(Text)
-    job_id: Mapped[int | None] = mapped_column(ForeignKey("job.id", ondelete="SET NULL"))
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
-    finished_at: Mapped[datetime | None] = mapped_column(DateTime)

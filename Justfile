@@ -52,10 +52,6 @@ test *args:
 test-live *args:
     uv run pytest -m live -o addopts="--import-mode=importlib" {{args}}
 
-# air-gap test: full silero-vad kit installed on an --internal network, VAD benchmarked there (Docker, no GPU)
-test-offline *args:
-    uv run pytest -m offline -o addopts="--import-mode=importlib" -s tests/test_offline_airgap.py {{args}}
-
 # M7 performance check at realistic size (synthetic database, no audio)
 test-perf:
     uv run pytest -m perf -o addopts="--import-mode=importlib" -s tests/test_perf.py
@@ -97,14 +93,6 @@ fixtures:
 # re-record adapter responses through the live model catalog into fixtures/recorded (it starts what is needed)
 record:
     {{py}} -m concord_bench.cli record --out {{recorded}}
-
-# offline kit of platform services: just export-offline NAME... [--kind full|models] [--out DIR] [--app APP[=IMAGE]]...
-export-offline +args:
-    {{py}} -m concord_bench.cli export-offline {{args}}
-
-# check an offline kit's files against its manifest.json
-verify-kit dir:
-    {{py}} -m concord_bench.cli verify-kit {{dir}}
 
 # frontend production build into frontend/dist
 build-web:

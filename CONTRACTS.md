@@ -16,7 +16,6 @@ know are ignored, so a newer writer can add fields without a version bump.
 | 3. Flags file, format version 1 | Bench | Label | `samples/flags.json` |
 | 4. Bench endpoints Label calls | Bench serves | Label | `samples/api/bench.*.json` |
 | 5. Label endpoints Bench calls or links to | Label serves | Bench | `samples/api/label.*.json` |
-| 6. Apps in an offline kit | either app | the kit's `install.sh` and compose | `samples/kit/compose.yml` |
 
 Times are seconds as JSON numbers. Timestamps are ISO 8601 in UTC with a `Z`. Paths inside packages are
 relative POSIX paths without `..`. JSON files are UTF-8.
@@ -178,25 +177,3 @@ else its latest score.
 | `GET /api/files/by-sha/{sha256}?dataset_uid=<uid>` | none | `{"file_id", "dataset_id"}`; `404` when not found |
 | Page `/label/file/by-sha/{sha256}?dataset_uid=<uid>&t=<seconds>` | browser link | opens the annotator on that file at `t` |
 | `POST /api/flags/import` | a flags file (§3) | `{"matched", "unmatched"}`; `404` when no dataset has `source.dataset_uid` |
-
----
-
-## 6. Apps in an offline kit
-
-Either app can write a full kit holding one or both app images. The kit's `concord/compose.yml` has one
-service per app, as in `samples/kit/compose.yml`:
-
-| | Bench | Label |
-|---|---|---|
-| Compose service and hostname | `concord-bench` | `concord-label` |
-| Image | `concord-bench:<version>` | `concord-label:<version>` |
-| Port inside the container and on `127.0.0.1` | 8600 | 8620 |
-| Image tar in the kit | `images/concord-bench.tar` | `images/concord-label.tar` |
-| Data volume | `bench-data` at `/data` | `label-data` at `/data` |
-| Peer URL set when both are in the kit | `LABEL_URL=http://concord-label:8620` | `BENCH_URL=http://concord-bench:8600` |
-
-Both services also get `PLATFORM_DIR=${KIT_DIR}/platform`, `AICORE_ENDPOINTS=${KIT_DIR}/platform/clients/aicore/src/aicore/endpoints.generated.yaml`,
-`UV_OFFLINE=1`, the Docker socket, and `platform/` and `assets/` mounted at the same absolute path they
-have on the host (the app runs `docker compose` against the host's Docker daemon, which resolves the
-platform's bind mounts on the host). The kit's `manifest.json` lists the apps it holds as
-`"apps": [{"app", "image", "tar"}]`.

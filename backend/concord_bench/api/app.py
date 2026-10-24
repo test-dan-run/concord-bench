@@ -13,7 +13,7 @@ from .. import __version__
 from ..core import db
 from ..core.settings import get_settings
 from ..platform import catalog
-from . import audio, benchmarks, config, datasets, errors, models, offline, outputs, references, runs
+from . import audio, benchmarks, config, datasets, errors, models, outputs, references, runs
 
 log = logging.getLogger("concord_bench")
 
@@ -35,7 +35,7 @@ def create_app(migrate: bool = True) -> FastAPI:
 
     app = FastAPI(title="Concord Bench", version=__version__, lifespan=lifespan)
     for r in (config.router, datasets.router, models.router, runs.router, benchmarks.router, errors.router,
-              audio.router, offline.router, references.router, outputs.router):
+              audio.router, references.router, outputs.router):
         app.include_router(r, prefix="/api")
 
     dist = settings.frontend_dist

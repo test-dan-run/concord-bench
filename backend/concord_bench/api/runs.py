@@ -305,9 +305,6 @@ def job_label(session: Session, j: Job) -> str:
         return f"check · {p.get('service')}"
     if j.type == "score":
         return f"rescore · run {p.get('run_id')} · {p.get('normaliser')}"
-    if j.type == "export":
-        kind = "full kit" if p.get("kind") == "full" else "model kit"
-        return f"offline {kind} · {', '.join(p.get('services') or [])}"
     return j.type
 
 

@@ -101,7 +101,6 @@ export function Nav() {
         <Item to="/datasets/import" icon={<I.Download />}>Import references</Item>
         <Item to="/datasets" icon={<I.Database />}>Datasets</Item>
         <Item to="/models" icon={<I.Cpu />}>Models</Item>
-        <Item to="/offline" icon={<I.Download />}>Export for offline</Item>
       </Group>
       <Jobs />
       </div>

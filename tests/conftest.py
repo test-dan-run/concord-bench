@@ -31,7 +31,7 @@ def fake_catalog(request):
     from concord_bench.platform import catalog
     from concord_bench.runs import jobs
 
-    if request.node.get_closest_marker("live") or request.node.get_closest_marker("offline"):
+    if request.node.get_closest_marker("live"):
         catalog.reset()
         yield None
         return

@@ -240,3 +240,17 @@ def test_concurrency_by_model_then_engine_then_default(data_dir, monkeypatch):
     assert executor.concurrency_for(model("meralion-3-3b-asr", "custom")) == 1
     assert executor.concurrency_for(model("qwen3-asr-1-7b", "vllm")) == 16
     assert executor.concurrency_for(model("ark-asr-0-6b", "custom")) == executor.CONCURRENCY["default"]
+
+
+def test_infer_stopped_from_progress_keeps_what_finished(session, cat, monkeypatch):
+    monkeypatch.setattr(executor, "_load_audio", lambda r: AUDIO)
+    a = SlowASR(delay=0.05)
+
+    def progress(f, m):
+        raise RuntimeError("stop")  # what JobContext.progress raises when the job is asked to stop
+
+    with pytest.raises(RuntimeError, match="stop"):
+        executor.infer(session, OutputCache(session), a, {"build_key": BUILD}, _work(5), progress, "asr", concurrency=2)
+    session.rollback()
+    stored = session.query(ModelOutput).count()
+    assert 1 <= stored <= a.calls <= 2  # the first batch is kept; no call starts after the stop

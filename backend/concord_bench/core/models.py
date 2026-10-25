@@ -74,6 +74,7 @@ class JobStatus(enum.StrEnum):
     done = "done"
     failed = "failed"
     blocked = "blocked"  # cannot run: unknown or unverified model, a failed lease, or a failed earlier stage
+    stopped = "stopped"  # someone stopped it (runs.jobs.request_stop); retrying queues it again
 
 
 class Dataset(Base):
@@ -242,7 +243,7 @@ class Run(Base):
     model_id: Mapped[int | None] = mapped_column(ForeignKey("model.id", ondelete="CASCADE"))
     pipeline_id: Mapped[int | None] = mapped_column(ForeignKey("pipeline.id", ondelete="CASCADE"))
     dataset_id: Mapped[int] = mapped_column(ForeignKey("dataset.id", ondelete="CASCADE"))
-    status: Mapped[str] = mapped_column(String(16), default="queued")  # queued | waiting | running | done | failed | blocked
+    status: Mapped[str] = mapped_column(String(16), default="queued")  # queued | waiting | running | done | failed | blocked | stopped
     error: Mapped[str | None] = mapped_column(Text)
     # The builds that produced the run's outputs: catalog model id -> {build_key, image}. Runs from before
     # the catalog have {image, labels} (the pinned tag) and no build key.

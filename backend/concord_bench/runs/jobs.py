@@ -28,6 +28,11 @@ index) and lease nothing when nothing is missing. Among runnable jobs, those who
 running go first. `after` lists jobs that must be done first (a grid's stages): when one of them fails,
 the job is `blocked`, and retrying it requeues them. A model the catalog does not know or has not
 verified, or a lease that fails, blocks the job with the reason.
+
+Stopping (`request_stop`): a job that has not started stops at once; a running one stops at its next
+progress report (between batches of model calls, files, or before scoring), keeping the outputs it has
+stored, and releases its lease. Later stages that need it are blocked, as after a failure, and retrying
+the stopped job queues them again.
 """
 
 from __future__ import annotations
@@ -58,6 +63,14 @@ class JobBlocked(Exception):
     """The job cannot run: unknown or unverified model, a failed lease, a failed earlier stage."""
 
 
+class JobStopped(Exception):
+    """Someone asked the job to stop; raised at its next progress report."""
+
+
+def stop_requested(job_id: int) -> bool:
+    return paths.job_stop(job_id).exists()
+
+
 class JobContext:
     """Log lines and progress go to files beside the job, never to the database: the job's own
     session may hold SQLite's single write lock, and a second writer would wait on it."""
@@ -82,10 +95,13 @@ class JobContext:
         self._write_progress()
 
     def progress(self, p: float, msg: str | None = None) -> None:
+        """Report progress; handlers call it at points where stopping keeps what they stored."""
         self._progress = max(0.0, min(1.0, p))
         if msg:
             self._message = msg
         self._write_progress()
+        if stop_requested(self.job_id):
+            raise JobStopped("stopped by the user")
 
     @property
     def message(self) -> str:
@@ -211,11 +227,44 @@ def _block(session: Session, job: Job, msg: str, ctx: JobContext | None = None) 
     session.commit()
 
 
+def request_stop(session: Session, job: Job) -> None:
+    """Ask a job to stop. One not running yet stops now; a running one at its next progress report. The
+    request is a file beside the job, like its progress, so asking never waits on the running job's write
+    lock; it also covers a job the worker claims at the same moment."""
+    p = paths.job_stop(job.id)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.touch()
+    if job.status in (JobStatus.queued, JobStatus.waiting):
+        res = session.execute(update(Job).where(Job.id == job.id, Job.status == job.status)
+                              .values(status=JobStatus.stopped, lease=None, finished_at=utcnow(),
+                                      message="stopped before it ran"))
+        if res.rowcount:
+            _mirror_run(session, job, "stopped")  # a waiting job's queued lease is released by _poll_waiting
+            JobContext(job.id).log("stopped before it ran")
+    session.commit()
+    session.refresh(job)
+
+
+def _stopped(session: Session, job: Job, ctx: JobContext) -> None:
+    ctx.log("stopped by the user")
+    job.status, job.finished_at, job.lease, job.message = JobStatus.stopped, utcnow(), None, ctx.message[:300]
+    _mirror_run(session, job, "stopped")
+    session.commit()
+
+
 def recover(session: Session) -> int:
-    """After a crash: running and waiting jobs go back to the queue (their leases expire on their own)."""
-    res = session.execute(update(Job).where(Job.status.in_((JobStatus.running, JobStatus.waiting)))
-                          .values(status=JobStatus.queued, lease=None))
-    return res.rowcount or 0
+    """After a crash: running and waiting jobs go back to the queue (their leases expire on their own),
+    unless someone asked them to stop."""
+    n = 0
+    for job in session.scalars(select(Job).where(Job.status.in_((JobStatus.running, JobStatus.waiting)))).all():
+        if stop_requested(job.id):
+            job.status, job.lease, job.finished_at = JobStatus.stopped, None, utcnow()
+            _mirror_run(session, job, "stopped")
+        else:
+            job.status, job.lease = JobStatus.queued, None
+            n += 1
+    session.commit()
+    return n
 
 
 # ---------------------------------------------------------------- scheduling
@@ -227,7 +276,7 @@ def _deps(session: Session, job: Job) -> tuple[str, str | None]:
         dep = session.get(Job, jid)
         if dep is None or dep.status == JobStatus.done:
             continue
-        if dep.status in (JobStatus.failed, JobStatus.blocked):
+        if dep.status in (JobStatus.failed, JobStatus.blocked, JobStatus.stopped):
             return "failed", f"needs job #{dep.id} ({dep.type}), which is {dep.status}: {dep.error or ''}".strip()
         pending = True
     return ("pending", None) if pending else ("ready", None)
@@ -595,6 +644,8 @@ def run_job(job_id: int, lease: Lease | None = None) -> None:
     try:
         job = session.get(Job, job_id)
         assert job is not None
+        if stop_requested(job_id):
+            raise JobStopped("stopped before it ran")
         if lease is None:
             lease = _take_lease(session, job, ctx)
             if lease is not None and not lease.active:
@@ -611,6 +662,9 @@ def run_job(job_id: int, lease: Lease | None = None) -> None:
     except JobBlocked as exc:
         session.rollback()
         _block(session, session.get(Job, job_id), str(exc), ctx)
+    except JobStopped:
+        session.rollback()
+        _stopped(session, session.get(Job, job_id), ctx)
     except Exception as exc:  # noqa: BLE001 - recorded on the job
         session.rollback()
         ctx.log("failed: " + "".join(traceback.format_exception_only(exc)).strip())
@@ -621,6 +675,8 @@ def run_job(job_id: int, lease: Lease | None = None) -> None:
         job.message = ctx.message[:300] or None
         session.commit()
     finally:
+        if not keep_lease:
+            paths.job_stop(job_id).unlink(missing_ok=True)  # the job has ended: a late request is moot
         if lease is not None and not keep_lease:
             peaks = catalog.peak_vram(lease)  # read while the lease is live: the catalog's running peak
             try:
@@ -675,7 +731,8 @@ def run_pending(max_jobs: int | None = None, poll_s: float = 0.5) -> int:
 
 
 def retry(session: Session, job: Job) -> None:
-    """Queue a failed or blocked job again, with the later stages it blocked."""
+    """Queue a failed, blocked or stopped job again, with the later stages it blocked."""
+    paths.job_stop(job.id).unlink(missing_ok=True)
     job.status, job.error, job.progress, job.message, job.lease = JobStatus.queued, None, 0.0, None, None
     if job.type in RUN_JOBS:
         run = session.get(Run, job.payload["run_id"])

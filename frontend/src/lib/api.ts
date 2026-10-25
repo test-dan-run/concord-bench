@@ -86,7 +86,8 @@ export interface JobLease {
 export interface Job {
   id: number;
   type: string;
-  status: "queued" | "waiting" | "running" | "done" | "failed" | "blocked";
+  status: "queued" | "waiting" | "running" | "done" | "failed" | "blocked" | "stopped";
+  stopping?: boolean; // running, asked to stop: it stops at its next progress report
   progress: number;
   message: string | null;
   error: string | null;

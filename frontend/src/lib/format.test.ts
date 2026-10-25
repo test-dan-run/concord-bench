@@ -11,6 +11,7 @@ describe("catalog formatting", () => {
     );
     expect(jobStatusText({ status: "running", progress: 0.4, lease: null })).toBe("40%");
     expect(jobStatusText({ status: "blocked", progress: 0, lease: null })).toBe("blocked");
+    expect(jobStatusText({ status: "running", progress: 0.4, lease: null, stopping: true })).toBe("stopping");
   });
 
   it("formats cold starts, marking estimates", () => {

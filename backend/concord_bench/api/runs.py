@@ -381,8 +381,20 @@ def retry_job(job_id: int, session: Session = Depends(get_session)) -> dict[str,
     j = session.get(Job, job_id)
     if j is None:
         raise HTTPException(404, "job not found")
-    if j.status not in (JobStatus.failed, JobStatus.blocked):
+    if j.status not in (JobStatus.failed, JobStatus.blocked, JobStatus.stopped):
         raise HTTPException(409, f"job is {j.status}")
     jobs.retry(session, j)
     session.commit()
+    return job_brief(j)
+
+
+@router.post("/jobs/{job_id}/stop")
+def stop_job(job_id: int, session: Session = Depends(get_session)) -> dict[str, Any]:
+    """Stop a job: at once when it has not started, else at its next progress report (`stopping` until then)."""
+    j = session.get(Job, job_id)
+    if j is None:
+        raise HTTPException(404, "job not found")
+    if j.status not in ACTIVE:
+        raise HTTPException(409, f"job is {j.status}")
+    jobs.request_stop(session, j)
     return job_brief(j)

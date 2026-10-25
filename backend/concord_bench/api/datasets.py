@@ -231,6 +231,7 @@ def previous_plan(session: Session, ds: Dataset) -> dict[str, Any] | None:
 def job_brief(job: Job) -> dict[str, Any]:
     live = jobs.live_progress(job.id) if job.status == "running" else None
     return {"id": job.id, "type": job.type, "status": job.status,
+            "stopping": job.status == "running" and jobs.stop_requested(job.id),
             "progress": live["progress"] if live else job.progress,
             "message": live["message"] if live else job.message,
             "error": job.error, "required_services": job.required_services, "payload": job.payload,

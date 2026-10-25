@@ -181,8 +181,16 @@ export function StatusDot({ state }: { state: string }) {
   return <span aria-hidden className={cx("inline-block size-2 rounded-full shrink-0", color, (state === "running" || state === "starting") && "animate-pulse")} />;
 }
 
-export function JobPill({ status, progress, position }: { status: string; progress?: number; position?: number | null }) {
-  const tone = { done: "good", failed: "bad", blocked: "warn", running: "info", queued: "default", waiting: "warn" }[status] as
+export function JobPill({ status, progress, position, stopping }: { status: string; progress?: number; position?: number | null; stopping?: boolean }) {
+  if (stopping) {
+    return (
+      <Chip>
+        <StatusDot state="stopping" />
+        stopping
+      </Chip>
+    );
+  }
+  const tone = { done: "good", failed: "bad", blocked: "warn", running: "info", queued: "default", waiting: "warn", stopped: "default" }[status] as
     | "good"
     | "bad"
     | "warn"

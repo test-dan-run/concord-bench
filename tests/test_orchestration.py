@@ -7,6 +7,8 @@ from __future__ import annotations
 import pytest
 from aicore.catalog import FakeCatalog
 
+from concord_bench.core import paths
+from concord_bench.core.db import SessionLocal
 from concord_bench.core.models import Job, Run
 from concord_bench.platform import catalog
 from concord_bench.runs import jobs
@@ -242,3 +244,75 @@ def test_later_stages_wait_and_block_with_their_earlier_stage(session, cat, monk
 
 def test_holder_names_the_app_and_job():
     assert jobs.holder_for(12) == "bench:job-12"
+
+
+def test_running_job_stops_at_its_next_progress_report(session, cat, monkeypatch):
+    steps: list[int] = []
+
+    def handler(s, job, ctx):
+        for i in range(5):
+            ctx.progress(i / 5, f"step {i}")
+            steps.append(i)
+            if i == 1 and job.attempts == 1:
+                other = SessionLocal()  # the API, asking from its own session
+                jobs.request_stop(other, other.get(Job, job.id))
+                other.close()
+        return {}
+
+    first = _job(session, monkeypatch, handler)
+    monkeypatch.setitem(jobs.HANDLERS, "assemble", lambda *a: {})
+    second = jobs.enqueue(session, "assemble", {}, [], [first]).id
+    session.commit()
+    jobs.run_pending()
+    job = _status(session, first)
+    assert steps == [0, 1] and job.status == "stopped" and job.error is None
+    assert cat.leases() == [] and not paths.job_stop(first).exists()
+    assert "stopped by the user" in jobs.read_log(first)[-1]
+    blocked = _status(session, second)
+    assert blocked.status == "blocked" and "which is stopped" in blocked.error
+    jobs.retry(session, job)  # queues the stopped job and what it blocked
+    session.commit()
+    assert _status(session, second).status == "queued"
+    jobs.run_pending()
+    assert steps[2:] == [0, 1, 2, 3, 4] and _status(session, second).status == "done"
+
+
+def test_queued_job_stops_at_once_and_its_run_mirrors_it(session, cat, monkeypatch):
+    job_id = _job(session, monkeypatch, lambda *a: pytest.fail("must not run"))
+    jobs.request_stop(session, session.get(Job, job_id))
+    job = _status(session, job_id)
+    assert (job.status, job.message) == ("stopped", "stopped before it ran") and job.finished_at is not None
+    assert jobs.run_pending() == 0
+
+
+def test_waiting_job_stops_and_its_queued_lease_is_released(session, monkeypatch):
+    cat = QueuedCatalog([catalog_model("a", ["vad"])])
+    catalog.use(cat)
+    job_id = _job(session, monkeypatch, lambda *a: pytest.fail("must not run"))
+    jobs.run_pending(max_jobs=1)
+    assert _status(session, job_id).status == "waiting" and len(cat.leases()) == 1
+    jobs.request_stop(session, _status(session, job_id))
+    cat.grant()  # even a lease granted meanwhile is not used
+    jobs.run_pending(poll_s=0.01)
+    assert _status(session, job_id).status == "stopped" and cat.leases() == []
+
+
+def test_recover_keeps_jobs_asked_to_stop_stopped(session, cat, monkeypatch):
+    a = _job(session, monkeypatch, lambda *x: {})
+    b = _job(session, monkeypatch, lambda *x: {})
+    for j in (a, b):
+        session.get(Job, j).status = "running"
+    session.commit()
+    paths.job_stop(a).parent.mkdir(parents=True, exist_ok=True)
+    paths.job_stop(a).touch()
+    assert jobs.recover(session) == 1
+    assert (_status(session, a).status, _status(session, b).status) == ("stopped", "queued")
+
+
+def test_stop_api(client, session, cat, monkeypatch):
+    job_id = _job(session, monkeypatch, lambda *a: {})
+    r = client.post(f"/api/jobs/{job_id}/stop")
+    assert r.status_code == 200 and r.json()["status"] == "stopped"
+    assert client.post(f"/api/jobs/{job_id}/stop").status_code == 409
+    assert client.post(f"/api/jobs/{job_id}/retry").json()["status"] == "queued"
+    assert client.post("/api/jobs/999/stop").status_code == 404

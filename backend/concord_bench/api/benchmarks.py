@@ -185,7 +185,7 @@ def _cell(session: Session, tab: str, m: Model, d: Dataset, rs: list[Run], nkey:
     latest = rs[-1] if rs else None
     cell: dict[str, Any] = {"model_id": m.id, "dataset_id": d.id, "status": latest.status if latest else None,
                             "run_id": None, "value": None, "prev": None, "delta": None}
-    if latest and latest.status in ("failed", "blocked"):
+    if latest and latest.status in ("failed", "blocked", "stopped"):
         cell["error"] = latest.error
     if done:
         cur = done[-1]
@@ -266,7 +266,7 @@ def pipeline_grid(dataset_id: int | None = None, normaliser: str | None = None, 
             cell: dict[str, Any] = {"seg_model_id": row["seg_model_id"], "asr_model_id": col["asr_model_id"],
                                     "pipeline_id": p.id if p else None, "status": rs[-1].status if rs else None,
                                     "run_id": None, "has_speakers": row["has_speakers"], "oracle": row["oracle"]}
-            if rs and rs[-1].status in ("failed", "blocked"):
+            if rs and rs[-1].status in ("failed", "blocked", "stopped"):
                 cell["error"] = rs[-1].error
             if done:
                 cur = done[-1]

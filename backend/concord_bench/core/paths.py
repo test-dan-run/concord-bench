@@ -75,6 +75,11 @@ def job_progress(job_id: int) -> Path:
     return data_root() / "logs" / f"job-{job_id}.progress.json"
 
 
+def job_stop(job_id: int) -> Path:
+    """Present while someone has asked the job to stop (runs.jobs.request_stop)."""
+    return data_root() / "logs" / f"job-{job_id}.stop"
+
+
 def ensure_dirs() -> None:
     subs = ("derived", "peaks", "uploads", "logs") + (() if store() is not None else ("originals",))
     for sub in subs:

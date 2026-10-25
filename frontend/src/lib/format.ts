@@ -128,7 +128,8 @@ export function modelStateLabel(state: string | null | undefined): string {
 }
 
 /** "running 40%", or "waiting for compute #2" while the job's lease is queued in the model catalog. */
-export function jobStatusText(j: Pick<Job, "status" | "progress" | "lease">): string {
+export function jobStatusText(j: Pick<Job, "status" | "progress" | "lease" | "stopping">): string {
+  if (j.stopping) return "stopping";
   if (j.status === "running") return `${Math.round(j.progress * 100)}%`;
   if (j.status === "waiting") {
     if (j.lease?.state === "starting") return "starting models";

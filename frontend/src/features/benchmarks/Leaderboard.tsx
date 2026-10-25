@@ -516,8 +516,8 @@ function CellView({
     const busy = c?.status === "queued" || c?.status === "waiting" || c?.status === "running" || running;
     return (
       <span className="inline-flex items-center justify-end gap-2 min-h-9 px-2">
-        {c?.status === "failed" || c?.status === "blocked" ? (
-          <span className="text-[11px] text-bad" title={c.error ?? undefined}>
+        {c?.status === "failed" || c?.status === "blocked" || c?.status === "stopped" ? (
+          <span className={cx("text-[11px]", c.status === "stopped" ? "text-muted" : "text-bad")} title={c.error ?? undefined}>
             {c.status}
           </span>
         ) : (

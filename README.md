@@ -177,7 +177,10 @@ Concord Bench", lists which ones now differ.
   the job is `waiting` ("waiting for compute #2", with what it waits for) and the worker runs jobs that need
   no model meanwhile; among runnable jobs, those whose models are already running go first. A model the
   catalog does not know or has not verified for its current build, or a lease that fails, makes the job
-  `blocked` with the reason (Retry on the Jobs page). Every model call goes through the output cache, keyed
+  `blocked` with the reason (Retry on the Jobs page). Stop on the Jobs page (`POST /api/jobs/{id}/stop`)
+  ends a queued or waiting job at once; a running one finishes the model calls in flight, keeps what it
+  stored, releases its lease and is `stopped` (later stages that need it are blocked; Retry carries on from
+  the stored outputs). Every model call goes through the output cache, keyed
   on model, **build key** (the catalog's image + config + weights hash), audio, span and params hash
   (`aicore.catalog.params_hash`, the same in Label). A lookup tries the local `model_output` table, then the
   catalog's output index once per file or stage: an output Label already has is read from Label

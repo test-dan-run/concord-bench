@@ -1,24 +1,28 @@
 # Concord Bench
 
-Benchmark speech models (ASR, VAD and speaker diarisation) served by the personal AI platform on
-reference datasets you upload, and read their errors. Speech enhancement models can be added to any
-benchmark as an ablation, and scores can be broken down by the labels that come with the references.
+Concord Bench measures how well speech models work on reference datasets that you upload, and it shows
+you each error that a model makes. It was built to compare the speech recognition (ASR), voice activity
+detection (VAD), and speaker diarisation models that the personal AI platform serves. Speaker diarisation
+means working out who spoke when. You can also add a speech enhancement model to any benchmark to see how
+enhanced audio changes the scores, and you can break the scores down by the labels that come with the
+references, e.g., speaker gender.
 
-Concord Bench is one of two apps. Its partner, **Concord Label**, turns unlabelled audio into reviewed
-references (pseudo-labelling, annotation, live evaluation). The two apps share no code and keep separate
-databases. They agree only on the formats and endpoints in [CONTRACTS.md](CONTRACTS.md), with sample
-files in `contracts/`. [SPLIT_PLAN.md](SPLIT_PLAN.md) describes the split. [PLAN.md](PLAN.md) §5 (Phase 1)
-and [HANDOFF.md](HANDOFF.md) describe what Bench does.
+Concord Bench works alongside a second app, Concord Label, which turns unlabelled audio into reviewed
+references through pseudo-labelling, annotation, and live evaluation. The two apps share no code and keep
+separate databases, and they agree only on the formats and endpoints in [CONTRACTS.md](CONTRACTS.md).
+Sample files for the contract are in `contracts/`. [SPLIT_PLAN.md](SPLIT_PLAN.md) describes how the
+original Concord app was split in two. [PLAN.md](PLAN.md) §5 (Phase 1) and [HANDOFF.md](HANDOFF.md)
+describe what Bench does.
 
-Concord Bench does not register, verify, start or call models directly. The platform's **Model Catalog**
-(`../../platform/catalog/README.md`) does: Bench lists the catalog's models, leases the ones a job needs,
-sends every inference call through the catalog's gateway (`aicore` with `AICORE_CATALOG`), and shares its
-outputs with Concord Label through the catalog's output index.
+Concord Bench doesn't register, verify, start, or call models itself, because the platform's Model Catalog
+(`../../platform/catalog/README.md`) handles models. Bench lists the catalog's models and leases the models
+that a job needs. It sends every inference call through the catalog's gateway (`aicore` with
+`AICORE_CATALOG`), and it shares its outputs with Concord Label through the catalog's output index.
 
-The same catalog service also runs the platform's **Dataset Catalog** (`../../platform/catalog/README.md`,
-Dataset Catalog). When `DATASET_STORE` is set, Bench keeps its original audio in the Dataset Catalog's
-store, imports datasets that Concord Label published there, and publishes its own datasets there (see
-Dataset Catalog below).
+The same catalog service also runs the platform's Dataset Catalog (`../../platform/catalog/README.md`,
+Dataset Catalog section), which stores datasets for the platform's apps. When `DATASET_STORE` is set, Bench
+keeps its original audio in the Dataset Catalog's store. Bench also imports the datasets that Concord Label
+published there, and it publishes its own datasets there (see Dataset Catalog under Features).
 
 ## Quickstart
 
@@ -114,121 +118,268 @@ is gone from Bench since EVALUATE_PLAN.md §9; Label keeps its copy for now.) Th
 changed several of these modules in different ways in the two apps. Label's AGENTS.md, "Code shared with
 Concord Bench", lists which ones now differ.
 
-## How it works
+## Features
 
-- **Datasets.** Upload a folder or zip (chunked), or point at a local folder. Every dataset needs
-  references: an upload whose annotations match no audio file is refused (label such audio in Concord
-  Label). Originals go to the Dataset Catalog's store when `DATASET_STORE` is set (see Dataset Catalog
-  below), and to `CONCORD_DATA/originals/<sha256>` when it isn't; models and playback use a derived
-  16 kHz mono FLAC. There is no length limit, but each file (or reference segment) goes to a model in one
-  request, so a very long file works only if the model takes it: VAD and diarisation receive the audio as
-  JSON numbers, about 1.25 GB per hour of audio. Annotations are matched to
-  audio by file stem: ASR (JSONL, NeMo manifest, CSV, `.txt`), diarisation (RTTM, JSON segments, NeMo
-  diarisation manifest plus its RTTMs), and speaker-attributed transcripts for cpWER (JSON or JSONL
-  segments, STM, SegLST, NeMo diarisation output JSON). Templates are under
-  `fixtures/generated/templates`.
-- **Reference packages** (CONTRACTS.md §2, SPLIT_PLAN.md §4). Datasets -> Import reference package takes
-  a package folder or zip, downloaded from the Dataset Catalog or Concord Label, from another tool or by hand (template:
-  `reference_package.zip`). It is staged with a preview until accepted, then ingested from its audio
-  (or Bench's stored originals, by sha256) and its one references file. The dataset keeps where the
-  references came from; a package from the same source is a new dataset `<name> v<N>` linked to the
-  earlier versions, and the dataset page offers to run the models benchmarked on the previous version.
-  Format version 2 packages also carry labels for slicing, on the records and in `refs/attributes.json`
-  (file and speaker labels, CONTRACTS.md §2.7). Format version 3 allows a package with audio only, which
-  Bench refuses because it has no references; versions 1 and 2 are still read.
-  Seg-model outputs in the package go into the output cache when their `build_key` is the build the catalog
-  runs now (CONTRACTS.md §2.5; rows without one are skipped), and into the catalog's index. Label calls
-  only `GET /api/datasets/by-catalog/<catalog dataset id>/scores` (CONTRACTS.md §4).
-- **Dataset Catalog** (platform DATASET_CATALOG_PLAN.md §9, §12). It is on when `DATASET_STORE` is set
-  to the store's folder as Bench sees it (read-only), and Bench talks to the catalog service at
-  `CATALOG_URL` as the app `concord-bench`. With it off, Bench keeps its originals in `CONCORD_DATA` and
-  hides the Dataset Catalog's pages and panels.
-  - *Audio in the store.* Ingest uploads each original to the store (only the files the store lacks are
-    sent) and places a hold on it, and Bench reads originals from the store. The derived FLAC, peaks and
-    enhanced copies stay in `CONCORD_DATA`. Deleting a dataset releases the holds that no other Bench
-    dataset needs. While the catalog service is down, an upload fails and a delete answers 503, and the
-    dataset is kept. Datasets that are already in Bench keep working.
-  - *Import.* **Import reference package**, From Dataset Catalog, lists the catalog's datasets and the
-    versions that have references. Bench can't import a version with audio only. A version is staged from
-    its folder in the store, with the same preview a zip gets, and no audio is copied. Accepting it makes a
-    Bench dataset that holds the version's audio and records a use on the version, so the catalog shows
-    where it is used. A later version of the same catalog dataset becomes `<name> v<N>`.
-  - *Publish.* The dataset page's Dataset Catalog panel publishes a dataset from an annotated upload or a
-    zip, as version 1 of a new catalog dataset or as the next version of an existing one. After a zip
-    import, the import page links to this panel. Bench writes the version from its own segments and
-    labels, uploads any audio the store lacks, and records a use. When another app published a newer
-    version since the page loaded, Bench asks whether to publish anyway. A dataset is published once. A dataset made from a catalog version isn't published from Bench, because
-    its references are corrected in Concord Label.
-  - *Moving old audio.* `just move-originals` uploads every file in `CONCORD_DATA/originals/` to the
-    store, holds the ones a Bench dataset uses, and renames the folder to `originals.moved/`. It never
-    deletes audio. Delete `originals.moved/` yourself once you are satisfied. If the store refuses a file,
-    the command lists it and leaves `originals/` in place, and running it again finishes the job.
-- **Models** come from the Model Catalog: it registers them (display name, tags, "derived from"),
-  verifies them on its check clip and records their capabilities (ASR, VAD, diarisation) and timing
-  (word, segment or text) per build. The Models page lists the catalog's speech models read-only, with
-  state (running, stopped, starting, queued), capabilities, cold start and build key, and links to the
-  catalog's UI (`CATALOG_UI_URL`). Enhancement models (the catalog's `enhance` task) have their own tab,
-  with the SI-SDR the catalog measured on its check clip and a "generative" chip when the catalog flags one. Bench makes its own `model` row when a model is first used, so runs and
-  pipelines keep pointing at it, and keeps the last record it saw so old runs read fine while the catalog is
-  down. Pickers rank catalog models by shared tags; unverified ones are shown but not offered.
-- **Runs.** One worker process works through the `job` table. A job that needs models takes one catalog lease
-  on them as `bench:job-<id>` (the aicore client heartbeats it every 30 s), so neither the catalog nor
-  Concord Label's jobs stop them mid-run, and releases it at the end. When the catalog cannot grant it yet
-  the job is `waiting` ("waiting for compute #2", with what it waits for) and the worker runs jobs that need
-  no model meanwhile; among runnable jobs, those whose models are already running go first. A model the
-  catalog does not know or has not verified for its current build, or a lease that fails, makes the job
-  `blocked` with the reason (Retry on the Jobs page). Stop on the Jobs page (`POST /api/jobs/{id}/stop`)
-  ends a queued or waiting job at once; a running one finishes the model calls in flight, keeps what it
-  stored, releases its lease and is `stopped` (later stages that need it are blocked; Retry carries on from
-  the stored outputs). Every model call goes through the output cache, keyed
-  on model, **build key** (the catalog's image + config + weights hash), audio, span and params hash
-  (`aicore.catalog.params_hash`, the same in Label). A lookup tries the local `model_output` table, then the
-  catalog's output index once per file or stage: an output Label already has is read from Label
-  (`POST <owner>/api/outputs/batch`) and copied in with its provenance. New outputs are recorded in the
-  index. Outputs from before the catalog have no build key: old runs still score, but they never match.
-  A run records the builds it used (`run.builds`), the hardware the catalog reports for each model
-  (`run.hardware`, with "-" in the UI for fields the catalog doesn't report yet) and its wall time.
-- **Pipelines** run stage by stage (MODEL_CATALOG_REDESIGN.md, "Job planning"): Run evaluation first
-  shows the catalog's plan (stages, model loads, outputs already in the index, estimated load time). Then
-  one seg-stage job per segmenter runs over every file of the dataset, one ASR-stage job per ASR model
-  transcribes the cuts of every seg source (oracle included) in one stretch, and one assemble job per
-  pipeline puts it together from stored outputs with no model. Each model loads once; a stage whose outputs
-  are all stored (locally or at Label) leases nothing. The seg stage (or the dataset's own segments,
-  "oracle") gives segments; short ones are merged, each is padded by 0.1 s and transcribed, and the result
-  is a speaker-attributed hypothesis. cpWER error attribution: ASR = A, segmentation = B − A, speaker =
-  C − B (PLAN.md §5 M4).
-- **Speech enhancement** (EVALUATE_PLAN.md §5). An enhancement model builds an enhanced copy of a dataset
-  once, and every ASR, diarisation and pipeline run that asks for that enhancer reads the copy. Files up to
-  60 s go to the model whole, and longer ones go in 30 s chunks joined with a crossfade. Every output must
-  be within 10 ms of its input's length, and it is padded or trimmed to the exact length, or the file fails.
-  Enhanced files are stored by sha256 like other derived audio, so the output cache works on them as it
-  does on the originals. In a pipeline, the copy goes in before diarisation (both stages hear it) or after
-  (only ASR hears it, cut at the segments diarised on the original). Copies are listed, added, cancelled
-  and deleted on the dataset page, and a deleted copy's runs keep their scores.
-- **Labels and slices** (EVALUATE_PLAN.md §7). Extra fields on the reference records become labels,
-  including nested ones such as a NeMo manifest's `"attribute": {"gender": ..., "ethnicity": ...}`
-  (read as `attribute.gender`). Each label is sorted into discrete, continuous (binned) or unused. Error
-  pages break every score down by label with a 95% bootstrap interval, mark slices that are reliably worse
-  than the whole dataset, and cross two labels in a heatmap. A slice can be saved on its dataset.
-- **Outputs for Concord Label.** At startup Bench registers itself with the catalog as `bench` at
-  `PUBLIC_URL` (a catalog that is down is tolerated), and serves `POST /api/outputs/batch` so Label reads
-  outputs the index says Bench has instead of computing them again.
-- **Metrics.** WER and CER via jiwer after a normaliser (`basic` by default, `whisper_en`, `none`, or any
-  platform `text.transform` service the catalog knows, called through its gateway, followed by `basic`),
-  with MER, WIL and WIP from the same alignment. DER, JER and VAD error via pyannote.metrics with a
-  NIST-style collar (seconds each side, 0.25 s by default), with or without overlapping speech. cpWER and
-  tcpWER (collar 2, 5 or 10 s) via meeteval. Scores store a version (`SCORE_VERSION`), and a score from an
-  older version is computed again when it is read.
-- **Errors.** ASR, diarisation, pipeline and enhancement error pages sort, filter, expand and play every
-  utterance or file. The diarisation page shows where errors gather (overlap, speaker changes, short
-  turns), speaker counts and who was mistaken for whom. The pipeline page traces each wrong word to the
-  stage that caused it, and shows which stage to upgrade. The enhancement page compares placements and
-  plays clips where enhancement changed the transcript. "Flag reference as wrong" on the ASR page marks a reference segment; flagged references are
-  listed on the dataset page. Scores keep using them until the references are corrected. For a dataset
-  that is a Dataset Catalog version (imported from it or published to it), the error pages link to the file
-  in Label ("Open in Label") and the dataset page sends the flags back ("Send flags to Label", or download
-  the flags file, CONTRACTS.md §3). Both name the catalog dataset id. A dataset that came from Label before
-  contract version 3 keeps its flags in Bench, and its page says why.
+### Datasets
+
+You add a dataset by uploading a folder or zip file, or by pointing Bench at a local folder. Bench sends
+large uploads in chunks. Every dataset needs references, so Bench refuses an upload whose annotations match
+no audio file. You can label such audio in Concord Label first.
+
+Bench keeps each original audio file unchanged, and models and playback use a 16 kHz mono FLAC copy that
+Bench derives from it. The originals go to the Dataset Catalog's store when `DATASET_STORE` is set (see
+Dataset Catalog below), and to `CONCORD_DATA/originals/<sha256>` when it isn't.
+
+Bench matches annotations to audio files by file stem, which is the file name without its extension. It
+reads the following annotation formats:
+
+- ASR: JSONL, NeMo manifest, CSV, and `.txt`.
+- Diarisation: RTTM, JSON segments, and a NeMo diarisation manifest with its RTTM files.
+- Speaker-attributed transcripts for cpWER: JSON or JSONL segments, STM, SegLST, and NeMo diarisation
+  output JSON.
+
+Templates for each format are in `fixtures/generated/templates`.
+
+### Reference packages
+
+A reference package is a folder or zip file that holds one references file and the audio it describes, in
+the format that CONTRACTS.md §2 defines (see also SPLIT_PLAN.md §4). You can download a package from the
+Dataset Catalog or Concord Label, export one from another tool, or write one by hand, and the template is
+`reference_package.zip`. A package can leave out audio that Bench already stores, because Bench finds the
+stored original by its sha256 hash.
+
+To import a package, open Datasets and choose Import reference package. Bench stages the package and shows
+a preview, and it ingests the package only after you accept it. Bench records where each dataset's
+references came from. When you import a second package from the same source, Bench makes a new dataset
+named `<name> v<N>` and links it to the earlier versions. The dataset page then offers to run the models
+that were benchmarked on the previous version.
+
+Bench reads each package format version:
+
+- Version 1 is the first format.
+- Version 2 adds labels for slicing, both on the records and in `refs/attributes.json`, which holds file
+  and speaker labels (CONTRACTS.md §2.7).
+- Version 3 allows a package that has audio but no references. Bench refuses such a package, because it
+  can't score a dataset without references.
+
+A package can also carry segmentation model outputs (CONTRACTS.md §2.5). Bench copies an output into its
+output cache when the output's `build_key` matches the build that the catalog runs now, and it records the
+output in the catalog's index. Bench skips rows that have no `build_key`.
+
+### Dataset Catalog
+
+Bench can keep its audio in the platform's Dataset Catalog, and it can move datasets to and from the
+catalog (platform DATASET_CATALOG_PLAN.md §9 and §12). The feature is on when `DATASET_STORE` is set to the
+store's folder as Bench sees it, and Bench only reads the folder. Bench talks to the catalog service at
+`CATALOG_URL` as the app `concord-bench`. When the feature is off, Bench keeps its originals in
+`CONCORD_DATA` and hides the Dataset Catalog's pages and panels.
+
+#### Audio in the store
+
+When Bench ingests a dataset, it uploads each original to the store and places a hold on it, which tells
+the store that Bench uses the file. Bench sends only the files that the store doesn't already have, and it
+reads originals back from the store. The derived FLAC files, waveform peaks, and enhanced copies stay in
+`CONCORD_DATA`. Deleting a dataset releases the holds that no other Bench dataset needs.
+
+While the catalog service is down, a new upload fails, and a delete returns 503 and keeps the dataset.
+Datasets that are already in Bench keep working.
+
+#### Importing from the catalog
+
+To import a catalog version, choose Import reference package and then From Dataset Catalog. Bench lists the
+catalog's datasets and their versions that have references, because it can't import a version that has
+audio only. Bench stages the chosen version from its folder in the store and shows the same preview that a
+zip file gets. No audio is copied.
+
+When you accept the version, Bench makes a dataset that holds the version's audio. Bench also records a use
+on the version, so the catalog can show where the version is used. A later version of the same catalog
+dataset becomes `<name> v<N>`.
+
+#### Publishing to the catalog
+
+You publish a dataset from the Dataset Catalog panel on its dataset page. You can publish a dataset made
+from an annotated upload or a zip file, either as version 1 of a new catalog dataset or as the next
+version of an existing one. After a zip import, the import page links to the panel.
+
+Bench writes the version from its own segments and labels, and it uploads any audio that the store lacks.
+It then records a use on the version. If another app published a newer version after the page loaded, Bench
+asks whether you want to publish anyway. Each dataset can be published once. Bench doesn't publish a
+dataset that was made from a catalog version, because the references for such a dataset are corrected in
+Concord Label.
+
+#### Moving old audio to the store
+
+`just move-originals` moves the audio that Bench stored before the Dataset Catalog existed. First, it
+uploads every file in `CONCORD_DATA/originals/` to the store. Second, it places holds on the files that a
+Bench dataset uses. Third, it renames the folder to `originals.moved/`.
+
+The command never deletes audio, so you delete `originals.moved/` yourself once you're satisfied. If the
+store refuses a file, the command lists the file and leaves `originals/` in place. You can run the command
+again to finish the job.
+
+### Models
+
+Bench uses the models in the platform's Model Catalog. The catalog registers each model with a display
+name, tags, and the model it was derived from. It also verifies each build of the model on its check clip,
+and it records the build's capabilities (ASR, VAD, or diarisation) and the timing it returns (word,
+segment, or text).
+
+The Models page lists the catalog's speech models, and you can't change them from Bench. For each model,
+the page shows the state (running, stopped, starting, or queued), capabilities, cold start time, and build
+key. The page links to the catalog's UI at `CATALOG_UI_URL`.
+
+Enhancement models, which the catalog lists under its `enhance` task, have their own tab. The tab shows the
+SI-SDR that the catalog measured on its check clip, which is a score for how close the enhanced audio is to
+clean audio. It also shows a "generative" chip when the catalog flags a model as generative.
+
+Bench makes its own `model` row the first time it uses a model, so runs and pipelines keep pointing at the
+model. It also keeps the last catalog record it saw, so old runs still display correctly while the catalog
+is down. Model pickers rank catalog models by shared tags, and they show unverified models but don't let
+you choose them.
+
+### Runs and jobs
+
+One worker process runs the jobs in the `job` table. A job that needs models takes one lease on them from
+the catalog, named `bench:job-<id>`, and releases it when the job ends. While the job holds the lease,
+neither the catalog nor Concord Label's jobs can stop the models. The `aicore` client renews the lease
+every 30 seconds.
+
+If the catalog can't grant the lease yet, the job is `waiting`, and the Jobs page says what the job waits
+for, e.g., "waiting for compute #2". Meanwhile, the worker runs jobs that need no model. Among the jobs that
+can run, Bench runs the ones whose models are already running first.
+
+A job is `blocked` when the catalog doesn't know one of its models or hasn't verified the model's current
+build. A failed lease also blocks the job. The Jobs page shows the reason and has a Retry button.
+
+You can stop a job from the Jobs page, which calls `POST /api/jobs/{id}/stop`. A queued or waiting job ends
+at once. A running job first finishes the model calls that are in flight and keeps the outputs it stored.
+It then releases its lease, and its state becomes `stopped`. Later stages that need the stopped job are
+blocked, and Retry carries on from the stored outputs.
+
+Every model call goes through an output cache, so Bench doesn't compute an output again when it already has
+one. The cache key is made of the model, the build key, the audio, the time span, and a hash of the
+parameters. The build key is a hash of the catalog's image, config, and weights for the model. The
+parameters hash comes from `aicore.catalog.params_hash`, which Concord Label also uses.
+
+To find an output, Bench first looks in its local `model_output` table. If the output isn't there, Bench
+checks the catalog's output index once per file or stage. When the index says that Concord Label already has
+the output, Bench reads it from Label with `POST <owner>/api/outputs/batch` and copies it in with its
+provenance, which records where the output came from. Bench records each new output in the index. Outputs
+from before the Model Catalog have no build key, so old runs still score with them, but they never match a
+new lookup.
+
+Each run records the builds it used (`run.builds`), the hardware the catalog reports for each model
+(`run.hardware`), and its wall time. The UI shows "-" for hardware fields that the catalog doesn't report
+yet.
+
+### Pipelines
+
+A pipeline runs a segmentation model and then an ASR model, and the result is a transcript that records who
+spoke each segment. The segments come from the segmentation model, or from the dataset's own reference
+segments, which Bench calls "oracle". Bench merges short segments and pads each segment by 0.1 seconds.
+The ASR model then transcribes each segment.
+
+Pipelines run stage by stage, as described in MODEL_CATALOG_REDESIGN.md under "Job planning". When you
+choose Run evaluation, Bench first shows the catalog's plan, which lists the stages, the model loads, the
+outputs already in the index, and the estimated load time. Bench then runs the stages in order:
+
+1. One segmentation job per segmentation model runs over every file in the dataset.
+2. One ASR job per ASR model transcribes the segments from every segmentation source, including oracle,
+   in one stretch.
+3. One assemble job per pipeline builds the result from the stored outputs, without calling a model.
+
+Because of the stage order, each model loads only once. A stage whose outputs are all stored already, in
+Bench or in Concord Label, leases no models.
+
+Bench splits each pipeline's cpWER errors between the stages (PLAN.md §5 M4). cpWER is a word error rate
+that also counts a word as wrong when the transcript gives it to the wrong speaker. Bench computes three
+cpWER values:
+
+- A uses the reference segments and the reference speakers.
+- B uses the model's segments, and it gives each segment the reference speaker it overlaps most.
+- C uses the model's segments and the model's speakers, and it's the reported score.
+
+The ASR model's share of the errors is A, segmentation's share is B minus A, and speaker attribution's
+share is C minus B.
+
+### Speech enhancement
+
+You can add a speech enhancement model to a benchmark to see whether enhanced audio changes the scores
+(EVALUATE_PLAN.md §5). The enhancement model builds an enhanced copy of the dataset once, and every ASR,
+diarisation, and pipeline run that asks for the same enhancer reads the copy.
+
+Files up to 60 seconds long go to the model whole. Longer files go in 30 second chunks, and Bench joins the
+chunks with a crossfade. Each output must be within 10 ms of its input's length, and Bench pads or trims it
+to the exact length. If an output is further off, the file fails. Bench stores enhanced files by their
+sha256 hash like other derived audio, so the output cache works on enhanced files in the same way as on
+originals.
+
+In a pipeline, you can put the enhancer before diarisation, so both stages hear the enhanced audio. Or you
+can put it after diarisation, so only ASR hears the enhanced audio, cut at the segments that were diarised
+on the original audio.
+
+You can list, add, cancel, and delete enhanced copies on the dataset page. Runs that used a deleted copy
+keep their scores.
+
+### Labels and slices
+
+Bench can break every score down by the labels on the reference records (EVALUATE_PLAN.md §7). Any extra
+field on a reference record becomes a label, including nested fields. For example, a NeMo manifest's
+`"attribute": {"gender": ..., "ethnicity": ...}` becomes the labels `attribute.gender` and
+`attribute.ethnicity`. Bench sorts each label as discrete, continuous, or unused, and it splits continuous
+labels into bins.
+
+The error pages show every score for each slice, which is the set of records that share one label value.
+Each slice score comes with a 95% bootstrap interval, which is a range that Bench estimates by resampling
+the records. The pages mark the slices that are reliably worse than the whole dataset, and they can cross
+two labels in a heatmap. You can save a slice on its dataset.
+
+### Metrics
+
+Bench computes the standard metrics for each task:
+
+- ASR: WER and CER with jiwer, after text normalisation. MER, WIL, and WIP come from the same alignment.
+- Diarisation and VAD: DER, JER, and VAD error with pyannote.metrics, with or without overlapping speech.
+  Scoring uses a NIST-style collar, which ignores a set number of seconds on each side of a reference
+  boundary (0.25 s by default).
+- Speaker-attributed transcripts: cpWER and tcpWER with meeteval. tcpWER uses a collar of 2, 5, or 10
+  seconds.
+
+The text normaliser is `basic` by default. You can also choose `whisper_en`, `none`, or any platform
+`text.transform` service that the catalog knows. Bench calls such a service through the catalog's gateway
+and then applies `basic`.
+
+Each score stores a version (`SCORE_VERSION`). When Bench reads a score from an older version, it computes
+the score again.
+
+### Error pages
+
+The error pages show where each model goes wrong. On the ASR, diarisation, pipeline, and enhancement error
+pages, you can sort, filter, expand, and play every utterance or file.
+
+- The diarisation page shows where errors gather, e.g., in overlapping speech, at speaker changes, or in
+  short turns. It also shows speaker counts and which speakers the model confused with each other.
+- The pipeline page traces each wrong word to the stage that caused it, and it shows which stage to
+  upgrade.
+- The enhancement page compares the places where the enhancer can go in a pipeline, and it plays the clips
+  where enhancement changed the transcript.
+
+On the ASR page, you can mark a reference segment with "Flag reference as wrong". The dataset page lists the
+flagged references, and scores keep using them until someone corrects the references.
+
+For a dataset that is a Dataset Catalog version, either imported from the catalog or published to it, the
+error pages link to the file in Label with "Open in Label". The dataset page sends the flags back with "Send
+flags to Label", or you can download the flags file (CONTRACTS.md §3). Both name the catalog dataset id. A
+dataset that came from Label before contract version 3 keeps its flags in Bench, and its dataset page says
+why.
+
+### Sharing outputs with Concord Label
+
+Bench and Concord Label share model outputs, so one app doesn't compute an output again when the other app
+already has it. At startup, Bench registers itself with the catalog as `bench` at `PUBLIC_URL`, and it
+still starts when the catalog is down. Bench serves `POST /api/outputs/batch`, so Label can read the outputs
+that the index says Bench has. Label also reads a catalog dataset's scores from
+`GET /api/datasets/by-catalog/<catalog dataset id>/scores` (CONTRACTS.md §4).
 
 ## Settings
 
@@ -324,11 +475,27 @@ milestones D4 and D6) is built: originals in the store, import from and publish 
 `just move-originals`, and contract version 3, where datasets move between the apps through the catalog.
 That plan's "What was built" section lists where the build differs from it.
 
-Known limits:
-- Enhancement quality scores (DNSMOS, SNR estimates, SI-SDR and PESQ on Bench's datasets) are not built
-  (EVALUATE_PLAN.md §1). The Models page shows only the catalog's SI-SDR on its own check clip.
-- Datasets can't be updated in place. A dataset that needs new labels or references is uploaded again,
-  but it can now be published as the next version of the same Dataset Catalog dataset.
-- KWS is not built (Q6). Only its hooks exist: the enums, the `keyword_event` table, task-keyed
-  registries and a task-driven benchmark tab bar.
-- The fixture set is synthesised speech (kokoro-tts): good for correctness, not realism.
+## Limitations
+
+- Models and audio
+  - Bench sends each file or reference segment to a model in one request, so a very long file works only
+    if the model accepts it. For example, VAD and diarisation models receive the audio as JSON numbers,
+    which come to about 1.25 GB per hour of audio. Bench itself sets no length limit.
+  - Bench doesn't compute enhancement quality scores on its own datasets, e.g., DNSMOS, SNR estimates,
+    SI-SDR, or PESQ (EVALUATE_PLAN.md §1). The Models page shows only the SI-SDR that the catalog measured
+    on its own check clip.
+  - Bench needs the catalog service to run models and to use the Dataset Catalog. While the service is
+    down, uploads to the store fail and deletes return 503, but existing datasets and old runs still
+    display.
+- Datasets
+  - You can't update a dataset in place. To change a dataset's labels or references, you upload the
+    dataset again, and you can publish the new upload as the next version of the same Dataset Catalog
+    dataset.
+  - Datasets, runs, and scores don't move to an air-gapped machine. Only the models and the Bench image do
+    (see Air-gapped machines).
+- Unbuilt features and test data
+  - Keyword spotting (KWS) isn't built (Q6). The code has only the parts that KWS will plug into, e.g.,
+    the enums, the `keyword_event` table, the registries keyed by task, and a benchmark tab bar that
+    changes with the task.
+  - The fixture set is synthesised speech from kokoro-tts. It's good for checking correctness, but it
+    doesn't sound like real recordings.

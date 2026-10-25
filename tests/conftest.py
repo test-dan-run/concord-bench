@@ -4,9 +4,24 @@ Model Catalog (an in-memory `FakeCatalog` stands in, or the replay stand-in buil
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
+from dotenv import dotenv_values
+
+from concord_bench.core.settings import REPO_ROOT, Settings
+
+# Tests don't read .env, which points at the services on this machine (LABEL_URL, REPLAY_DIR, DATASET_STORE).
+# `just` exports it, so its values leave the environment too. Only PLATFORM_DIR stays, for the platform's
+# contract samples.
+_dotenv = dotenv_values(REPO_ROOT / ".env")
+for _key, _value in _dotenv.items():
+    if _key != "PLATFORM_DIR" and os.environ.get(_key) == _value:
+        del os.environ[_key]
+if not os.environ.get("PLATFORM_DIR") and _dotenv.get("PLATFORM_DIR"):
+    os.environ["PLATFORM_DIR"] = _dotenv["PLATFORM_DIR"]
+Settings.model_config["env_file"] = None
 
 ROOT = Path(__file__).resolve().parents[1]
 GEN = ROOT / "fixtures" / "generated"
